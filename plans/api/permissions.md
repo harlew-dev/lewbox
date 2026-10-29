@@ -114,7 +114,7 @@ As today: full access, or a chosen list of the [sandbox permissions](#sandbox-pe
 
 ### Sandbox keys
 
-- **Eligible permissions** are exactly those marked **K** in the registry: `sandboxes.exec`, `sandboxes.ports`, `sandboxes.ports.view`, `sandboxes.agents`, `sandboxes.activity`, `sandboxes.activity.view`. The mint endpoint's validation, the docs, the SDK types and the dashboard all read that one list.
+- **Eligible permissions** are exactly those marked **K** in the registry: `sandboxes.exec`, `sandboxes.ports`, `sandboxes.ports.view`, `sandboxes.agents`, `sandboxes.activity`, `sandboxes.activity.view`, `sandboxes.git`. The mint endpoint's validation, the docs, the SDK types and the dashboard all read that one list.
 - **Asked for by name**: each must be eligible (`422 validation_failed` on `permissions.N` naming the eligible ones) and held by the minter (`403 permission_denied` naming it). A key can never be broader than its maker.
 - **Left out**: the key gets every eligible permission its maker holds. Lewagent's workaround (ask for none) still works, but there's no reason to use it.
 - **Reading is free**: the sandbox itself, its operations, ports, SSH keys, and listing its conversations, with no permission.
@@ -169,7 +169,7 @@ Handlers that decide late (a `PATCH /v0/sandboxes/{sbx}` that may be a start, a 
 
 ## Build plan
 
-`internal/auth`: registry; principal's `Has(perm)`; roles; scope helpers for loaders; generator for OpenAPI, docs and dashboard. M0: registry, sandbox permissions, middleware. M1: management permissions, roles. M3: sections, `git.grants`.
+`internal/auth`: registry; principal's `Has(perm)`; roles; scope helpers for loaders; generator for OpenAPI, docs and dashboard. M0: registry, sandbox permissions, middleware. M1: management permissions, roles. M3: sections, `sandboxes.git`, `git.tokens`, `git.tokens.user`.
 
 ## Open questions
 
@@ -177,3 +177,4 @@ Handlers that decide late (a `PATCH /v0/sandboxes/{sbx}` that may be a start, a 
 2. **Member role and profiles.** Should members be able to create profiles and keys? (Proposed: no; profiles are customers, and admins manage them.)
 3. **Custom roles**: wanted by anyone before Beta?
 4. **Per-profile access for users** (a user who only sees one profile's sandboxes, e.g. a customer's own staff)? (Proposed: Later; a project per customer covers it today.)
+5. **Splitting `sandboxes.exec`** into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both), so a file browser's sandbox key can't run commands? Decided for the alpha: keep `sandboxes.exec` as one permission; the split stays open for after it ([sandboxes/sandbox-keys](../sandboxes/sandbox-keys.md#open-questions)).

@@ -1,6 +1,6 @@
 # Clusters
 
-> Status: Draft · Milestone: Alpha (M0 fork, M1 core, M4 tunnel) · Core, with DNS and storage driver plugins · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M0 fork, M1 core: Docker, Cloudflare DNS, S3/R2 storage, direct connectivity); Beta (gVisor, tunnel and relay, more DNS providers); Later (Firecracker) · Core, with DNS and storage driver plugins · Updated: 2026-10-29
 
 A **cluster** is a set of a project's servers, its **nodes**, that run sandboxes. Usually it's one region, with one architecture (amd64 or arm64), offering one or more **isolation levels** (`container` on Docker, `gvisor`, `microvm` on Firecracker) that each sandbox chooses from ([runtimes](clusters/runtimes.md)). Each node runs [our fork of AerolVM](clusters/aerolvm-fork.md) to run the sandboxes, and `lewbox node` (the [node agent](clusters/node-agent.md)) to keep itself as the control plane wants it. A project creates a cluster, adds nodes by running one command on each, and from then on Lewbox installs, configures, renews, upgrades and watches them.
 
@@ -36,8 +36,9 @@ It works. Single-node clusters run live (EU West on gVisor; an R2 cluster on Doc
 - Keep everything that works: the install flow, Lewbox as the cluster CA, a subdomain per node, the per-node registry on the project's bucket, the firewall, heartbeats, offload.
 - Turn every fix into something that reaches existing nodes on its own, through the node agent's **desired state**.
 - Fix AerolVM in our fork, and send the fixes upstream ([D3](README.md#decisions)).
-- Support Docker, gVisor and Firecracker, as AerolVM does, and let people choose a sandbox's isolation from what its cluster offers and its profile is allowed.
-- Reach nodes behind NAT through a tunnel, as well as directly.
+- **The alpha matches today's infrastructure** ([D16](README.md#decisions)): Docker (`container`), Cloudflare DNS, S3/R2-backed registries, direct connectivity.
+- **No workarounds in Lewbox** ([D15](README.md#decisions)): AerolVM's bugs are fixed in the fork, and Lewbox requires a minimum fork release ([aerolvm-fork](clusters/aerolvm-fork.md#no-workarounds-in-lewbox)).
+- After the alpha: support gVisor (beta) and Firecracker (once upstream ships it), as AerolVM does, and let people choose a sandbox's isolation from what its cluster offers and its profile is allowed; reach nodes behind NAT through a tunnel (beta), as well as directly.
 - Make removing a node, upgrading a cluster, and seeing its health as easy as adding a node.
 
 ## How it fits together
@@ -88,7 +89,7 @@ Tables owned by this area. Columns are shown where they matter; each part plan h
 | `cluster_secrets` | `cluster_id`, encrypted `pat`, `gossip_key`, `ca_certificate`, `ca_key`, `credential_key`, `rotated_at` per secret | [pki-and-dns](clusters/pki-and-dns.md) |
 | `cluster_dns` | `cluster_id`, `provider`, `domain`, encrypted `credentials`, `acme_email`, `tested_at` | [pki-and-dns](clusters/pki-and-dns.md) |
 | `cluster_storage` | `cluster_id`, `provider`, `endpoint`, `region`, `bucket`, `prefix`, encrypted `credentials`, `force_path_style`, `chunk_size`, `tested_at` | [storage-and-registry](clusters/storage-and-registry.md) |
-| `node_installations` | `id` (`ins_`), `cluster_id`, `node_id`, token hash and encrypted token, `name`, `subdomain`, `role`, `status`, `failed_step`, `failure_reason`, `started_at`, `finished_at`, `expires_at`, `created_by` | [installation](clusters/installation.md) |
+| `cluster_installations` | `id` (`cin_`), `cluster_id`, `node_id`, token hash and encrypted token, `name`, `subdomain`, `role`, `status`, `failed_step`, `failure_reason`, `started_at`, `finished_at`, `expires_at`, `created_by` | [installation](clusters/installation.md) |
 | `nodes` | `id` (`node_`, also AerolVM's `--node-id`), `cluster_id`, `name`, `is_seed`, `role`, `status`, `status_reason`, `domain`, `public_ip`, `lan_ip`, host facts (hostname, OS, kernel, CPU model and cores, memory, disk, KVM, GPU), `isolation_levels` (what it runs), `aerolvm_version`, `agent_version`, `spec_version_applied`, `token_hash`, `certificate_serial`, `certificate_expires_at`, `last_seen_at`, `capacity` (jsonb from membership), `drained`, timestamps, `deleted_at` | [node-agent](clusters/node-agent.md), [health-and-metrics](clusters/health-and-metrics.md) |
 | `node_connections` | `node_id`, `replica_id`, `connected_at`, `remote_addr`, `tunnel` | [node-agent](clusters/node-agent.md#connection) |
 | `node_events` | `node_id`, `kind` (status change, action, certificate, spec applied, upgrade), `details`, `actor`, `at` | [health-and-metrics](clusters/health-and-metrics.md) |
@@ -165,14 +166,14 @@ Project webhooks ([activity-and-webhooks/webhooks](activity-and-webhooks/webhook
 
 | Plan | What it covers | Milestone |
 |---|---|---|
-| [aerolvm-fork](clusters/aerolvm-fork.md) | The fork: branches, releases, upstreaming, versions in Lewbox, the **fix backlog** of every known AerolVM bug | M0, then by priority |
-| [runtimes](clusters/runtimes.md) | Isolation levels (`container`, `gvisor`, `microvm`) on Docker, gVisor, Firecracker: what each can do, what a cluster offers, what a profile may use, choosing on create, GPU, architecture | M1 (`microvm` as soon as the fork has Firecracker) |
+| [aerolvm-fork](clusters/aerolvm-fork.md) | The fork: branches, releases, upstreaming, the minimum release Lewbox requires (no workarounds), the **fix backlog** of every known AerolVM bug | M0; P0 fixes M0–M2 |
+| [runtimes](clusters/runtimes.md) | Isolation levels (`container`, `gvisor`, `microvm`) on Docker, gVisor, Firecracker: what each can do, what a cluster offers, what a profile may use, choosing on create, GPU, architecture | M1 (`container`); Beta (`gvisor`); Later (`microvm`) |
 | [installation](clusters/installation.md) | `lewbox node install`: the bootstrap, statuses, steps, seed selection, retries, removing a node | M1 |
-| [node-agent](clusters/node-agent.md) | `lewbox node`: connection, desired state, firewall, certificates, heartbeats, cleanup, actions, upgrades | M1–M3 |
-| [connectivity](clusters/connectivity.md) | Direct and tunnel modes, the relay, nodes behind NAT | M1 direct, M4 tunnel |
-| [pki-and-dns](clusters/pki-and-dns.md) | The cluster CA, node certificates and renewal, rotation, DNS providers, records, public TLS, DNS-01 through the control plane | M1, M4 |
+| [node-agent](clusters/node-agent.md) | `lewbox node`: connection, desired state, firewall, certificates, heartbeats, lifecycle events, actions, upgrades | M1–M3 |
+| [connectivity](clusters/connectivity.md) | Direct and tunnel modes, the relay, nodes behind NAT | M1 direct; Beta tunnel |
+| [pki-and-dns](clusters/pki-and-dns.md) | The cluster CA, node certificates and renewal, rotation, DNS providers (Cloudflare in the alpha), records, public TLS, DNS-01 through the control plane | M1; Beta |
 | [storage-and-registry](clusters/storage-and-registry.md) | The project's bucket, the registry on each node, offload, flattening, GC, usage | M1 |
-| [health-and-metrics](clusters/health-and-metrics.md) | Node statuses, heartbeats, membership, cluster health, sandboxes on lost nodes, metrics storage, sandbox stats, notifications | M1, M2 |
+| [health-and-metrics](clusters/health-and-metrics.md) | Node statuses, heartbeats, membership, cluster health, sandboxes on lost nodes, metrics storage, sandbox stats (beta, F39), notifications | M1, M2; Beta |
 | [placement-and-capacity](clusters/placement-and-capacity.md) | Choosing nodes to call, the capacity queue, impossible sizes, overcommit, roles, cluster status, capacity view | M1 |
 
 Related plans:
@@ -189,7 +190,7 @@ Clusters, nodes, installation, the node agent, PKI, placement and health are cor
 
 | Extension point | Default driver | Plan |
 |---|---|---|
-| DNS provider: creates node records and answers DNS-01 challenges | `dns/libdns`: one plugin with many libdns providers (Cloudflare by default; Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC, RFC 2136) | [pki-and-dns](clusters/pki-and-dns.md#dns-providers), [plugins/dns-providers](plugins/dns-providers.md) |
+| DNS provider: creates node records and answers DNS-01 challenges | `dns/libdns`: one plugin with many libdns providers. **The alpha has Cloudflare only**, as legacy does; Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC and RFC 2136 come after it, with DNS-01 through the control plane (F43) | [pki-and-dns](clusters/pki-and-dns.md#dns-providers), [plugins/dns-providers](plugins/dns-providers.md) |
 | Storage provider: the bucket snapshots and templates live in, and the registry settings nodes get | `storage/s3` (AWS S3, Cloudflare R2, any S3-compatible store) | [storage-and-registry](clusters/storage-and-registry.md#the-bucket), [plugins/storage-providers](plugins/storage-providers.md) |
 
 A cluster records which driver it uses (`cluster_dns.provider`, `cluster_storage.provider`). Turning a driver off doesn't change running clusters' sandboxes; it refuses what would need the driver (enrolling a node, a persistent create, a template build) with `409 plugin_disabled`, and keeps every setting.
@@ -197,41 +198,40 @@ A cluster records which driver it uses (`cluster_dns.provider`, `cluster_storage
 ## Build plan
 
 1. **M0:**
-   - the fork and its release pipeline;
-   - `internal/aerolvm` (client, `Dialer`, versions and `Features`);
-   - the fake AerolVM cluster and toolbox ([foundation/testing](foundation/testing.md)).
-2. **M1:**
-   - clusters (create, lock, status, secrets);
-   - installation and the node API;
+   - the fork and its release pipeline, and its first fixes ([aerolvm-fork](clusters/aerolvm-fork.md#build-plan));
+   - `internal/aerolvm` (client, `Dialer`, versions and the minimum release);
+   - the fake AerolVM cluster and toolbox, playing the minimum release ([foundation/testing](foundation/testing.md)).
+2. **M1 (alpha infrastructure, as today's):**
+   - clusters (create, lock, status, secrets), offering `container` only;
+   - installation and the node API, direct connectivity;
    - `lewbox node install` and `lewbox node run` (spec, firewall, certificates, heartbeats);
-   - DNS through the `dns/libdns` plugin (Cloudflare supported; the other providers compiled in as experimental);
-   - storage and registry, with GC, through the `storage/s3` driver plugin;
+   - DNS through the `dns/libdns` plugin with **Cloudflare only**, with the zone-scoped token on nodes for Caddy, as legacy does ([pki-and-dns](clusters/pki-and-dns.md));
+   - storage and registry on S3/R2, with GC, through the `storage/s3` driver plugin;
    - membership and health;
-   - placement and the capacity queue.
+   - placement and the capacity queue;
+   - the fork's M1 P0 fixes in a release that becomes the minimum.
 
-   `container` and `gvisor` end to end, both on one node.
-3. **M2:** sandbox stats; capacity view; unreachable detection; actions and diagnostics.
+   `container` end to end.
+3. **M2:** capacity view; unreachable detection; actions and diagnostics.
 4. **M3:**
    - AerolVM rolling upgrades and agent self-update;
    - node removal;
    - node roles;
-   - Route 53, Hetzner and RFC 2136 through `dns/libdns`'s live suite to supported;
    - flattening (with F14).
-
-   `microvm` (Firecracker) as soon as the fork supports it, ephemeral until its snapshots land (#785).
-5. **M4:**
-   - the tunnel and relay;
-   - DNS-01 through the control plane;
-   - dashboard pages ([dashboard](dashboard.md)).
+5. **M4:** dashboard pages ([dashboard](dashboard.md)).
 6. **Beta:**
-   - `microvm` persistence, once the fork has Firecracker snapshots;
+   - `gvisor`, once the fork fixes it (F1, F21, F22, F24);
+   - the tunnel and relay ([connectivity](clusters/connectivity.md));
+   - DNS-01 through the control plane (F43), and with it the other `dns/libdns` providers;
+   - sandbox stats (F39);
    - CA and secret rotation;
    - migrating legacy clusters ([migration](migration.md)).
+7. **Later:** `microvm` (Firecracker), once upstream ships it with snapshots (#785).
 
 ## Open questions
 
-1. **`microvm` for Lewagent:** Lewagent promises a microVM per computer. Do its computers default to `microvm` as soon as it persists ([runtimes](clusters/runtimes.md#open-questions))? Firecracker itself isn't gated: it's offered as soon as the fork supports it.
-2. **Tunnel scaling:** one tunnel per relay replica, or forwarding between replicas ([connectivity](clusters/connectivity.md#open-questions))? And can lewbox.com afford relaying desktop streams?
+1. **`microvm` for Lewagent:** Lewagent promises a microVM per computer. Do its computers default to `microvm` once it's offered ([runtimes](clusters/runtimes.md#open-questions))? Until the beta they run at `container`.
+2. **Tunnel scaling (beta):** one tunnel per relay replica, or forwarding between replicas ([connectivity](clusters/connectivity.md#open-questions))? And can lewbox.com afford relaying desktop streams?
 3. **Instance-provided storage and shared clusters on lewbox.com** (README open question 1): may a project use Harlew's bucket, or Harlew's clusters, rather than its own?
 4. **How far ahead of upstream to take the fork:** events (F35) and async builds (F32) are big. Propose them upstream before building ([aerolvm-fork](clusters/aerolvm-fork.md#open-questions))?
 5. **AerolVM's `install.sh`:** keep using the fork's for host dependencies, or port it into the node agent ([installation](clusters/installation.md#aerolvms-own-installer))?

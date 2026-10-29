@@ -1,8 +1,10 @@
 # Runtimes and isolation
 
-> Status: Draft · Milestone: Alpha (M1: `container` and `gvisor`; `microvm` as soon as the fork supports Firecracker) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1: `container` only); `gvisor` in the Beta; `microvm` Later, once upstream ships Firecracker · Updated: 2026-10-29
 
 Lewbox supports every runtime [AerolVM](aerolvm-fork.md) supports, Docker containers, gVisor containers and Firecracker microVMs, and lets people choose how strongly each sandbox is isolated ([D3](../README.md#decisions)). A cluster **offers** one or more **isolation levels**, each backed by a runtime on its nodes. A sandbox is created at one level and keeps it for life. A project decides which levels each profile may use. This plan says what each level is, how they're offered, chosen and enforced, and what Lewbox does differently for each.
+
+**The alpha offers `container` (Docker) only** ([D16](../README.md#decisions)). gVisor comes in the **beta**, once the fork handles it properly (F1, F21, F22, F24), and Firecracker **later**, once upstream ships it with snapshots ([#785](https://github.com/aerol-ai/microvm/discussions/785)) and a fork release includes it. A level is offered only when the fork runs it without Lewbox working around anything ([D15](../README.md#decisions)). The model below (levels, what a cluster offers, what a profile may use) is built in the alpha, so adding `gvisor` and `microvm` later is offering them, not changing the API.
 
 ## Today
 
@@ -15,13 +17,14 @@ Lewbox supports every runtime [AerolVM](aerolvm-fork.md) supports, Docker contai
 - **GPU** is a separate setting (`gpu_vendor`: `nvidia` or `amd`), allowed with Docker only. AMD needs amd64 and Ubuntu (ROCm).
 - `App\Enums\Cluster\Runtime` holds `installFlag()`, `hostRuntimes()`, `runscFlags()`, `supportsGpu()` and `isSelectable()`.
 - Lewagent's site promises "every computer runs in its own microVM, with a dedicated kernel and hardware-level virtualization", which today's gVisor clusters don't deliver. Firecracker is the runtime that would.
+- **Legacy's live clusters run gVisor** (EU West), so the alpha's `container`-only clusters isolate *less* than today's until gVisor returns in the beta. How legacy clusters and Lewagent's computers move is in [migration/data](../migration/data.md).
 
 ## Goals
 
-- Support every runtime AerolVM supports: Docker, gVisor and Firecracker.
+- Support every runtime AerolVM supports, each once the fork runs it properly: Docker in the alpha, gVisor in the beta, Firecracker once upstream ships it.
 - **People choose their isolation:** the project offers levels on its clusters and allows them per profile; a sandbox picks one on create, or gets a default.
 - Model what each level can and can't do in one place, so the API refuses what a level can't do with a clear error, rather than failing late.
-- Firecracker as soon as the fork supports it: no instance flag holding it back. Sandboxes on it persist once its snapshots ship ([#785](https://github.com/aerol-ai/microvm/discussions/785)).
+- No workarounds per runtime: a level whose runtime still needs one isn't offered yet ([D15](../README.md#decisions)).
 - One architecture per cluster.
 
 ### Non-goals
@@ -34,8 +37,8 @@ Lewbox supports every runtime [AerolVM](aerolvm-fork.md) supports, Docker contai
 | | What |
 |---|---|
 | **Keep** | Architecture fixed per cluster once its first node enrolls. GPU as a cluster setting, Docker only. The node-side enforcement (`SB_HOST_RUNTIMES`). The create call to AerolVM never takes a runtime from a consumer as-is |
-| **Change** | One runtime per cluster → **a set of isolation levels per cluster**, with a default. A sandbox's `isolation` on create. A profile's **allowed isolation** and default, set by the project ([profiles](../profiles.md#isolation)). Runtime rules in a PHP enum → a Go `Isolation` with `Capabilities` that the API, the node spec, placement and the dashboard all read. Hand-run node fixes → node spec ([node-agent](node-agent.md#desired-state)). Firecracker: not selectable → offered as soon as a fork release has it |
-| **Drop** | "One runtime per cluster" as a rule. `LEWBOX_EXPERIMENTAL_FIRECRACKER`: Firecracker isn't gated behind a flag |
+| **Change** | One runtime per cluster → **a set of isolation levels per cluster**, with a default. A sandbox's `isolation` on create. A profile's **allowed isolation** and default, set by the project ([profiles](../profiles.md#isolation)). Runtime rules in a PHP enum → a Go `Isolation` with `Capabilities` that the API, the node spec, placement and the dashboard all read. Hand-run node fixes → fixes in the fork and a node spec ([node-agent](node-agent.md#desired-state)). gVisor: offered today → back in the beta, once the fork fixes it (F1, F21, F22, F24). Firecracker: not selectable → offered once upstream ships it with snapshots and a fork release includes it |
+| **Drop** | "One runtime per cluster" as a rule. `LEWBOX_EXPERIMENTAL_FIRECRACKER` and any other flag for a half-supported runtime: a level is offered when the fork supports it, not before. Exit-status traps for gVisor (fixed in the fork, F1) |
 
 ## Design
 
@@ -57,10 +60,10 @@ The API names **levels**, ordered from weakest to strongest. Each maps to one Ae
 |---|---|---|---|
 | **Images** | Any OCI image | Any OCI image, run by Docker with runsc | An ext4 rootfs built from an OCI image (an AerolVM *template*), plus an optional paused-VM memory snapshot |
 | **Node needs** | Docker (installed by AerolVM) | cgroup v2 (`/sys/fs/cgroup` is `cgroup2fs`); runsc | `/dev/kvm` (bare metal, or nested virtualization); Firecracker, jailer and a guest kernel, pinned per cluster |
-| **Snapshots (persist)** | Yes: `docker commit` of the writable layer, pushed to the registry | Yes, with `--overlay2=none` (F21) | **Once the fork has it**: upstream is building snapshots with registry push and pull ([#785](https://github.com/aerol-ai/microvm/discussions/785)) |
+| **Snapshots (persist)** | Yes: `docker commit` of the writable layer, pushed to the registry | Yes, with `--overlay2=none` (F21) | Once upstream ships snapshots with registry push and pull ([#785](https://github.com/aerol-ai/microvm/discussions/785)); `microvm` isn't offered before then |
 | **Memory kept on stop** | No | No | Possible later: Firecracker can snapshot memory, but restores only on the same CPU model, host kernel and Firecracker version |
 | **GPU** | Yes (NVIDIA or AMD) | No | No |
-| **Exit codes** | Reliable | Lost by toolboxd (F1), worked around until the fork fixes it | Reliable (toolboxd in a full guest kernel) |
+| **Exit codes** | Reliable | Lost by toolboxd (F1) in today's AerolVM; fixed in the fork before `gvisor` is offered | Reliable (toolboxd in a full guest kernel) |
 | **Nested sandboxing in the sandbox** (bubblewrap, Docker-in-sandbox) | Possible with privileges we don't give | bubblewrap fails (`RTM_NEWADDR`), so Codex runs in full-access mode only (F28); no Docker inside | Works: a real kernel |
 | **File I/O speed** | Native | Slower, and slower again with `--overlay2=none` | Near native, on a virtio block device |
 | **Start time** | Fast | Fast | Fast from a memory snapshot; slower cold boot |
@@ -81,17 +84,16 @@ func (i Isolation) AtLeast(min Isolation) bool
 type Capabilities struct {
     Persist          bool // snapshots to the registry, so sandboxes can persist and resume elsewhere
     GPU              bool
-    ReliableExitCode bool // false: wrap commands in exit-status traps
     NestedSandbox    bool // bubblewrap, Docker in the sandbox
     MemorySnapshots  bool // later: resume with memory
     ImageKind        ImageKind // oci | firecracker_template
 }
 
-// For one level on one cluster: its nodes' AerolVM features, storage and GPU.
+// For one level on one cluster: its nodes' fork releases, storage and GPU.
 func (c *Cluster) Capabilities(i Isolation) Capabilities
 ```
 
-Capabilities depend on the cluster as well as the level: its AerolVM features ([aerolvm-fork](aerolvm-fork.md#versions-in-lewbox)), whether it has storage, and its GPU. For example, `microvm`'s `Persist` becomes true once every node offering it runs a fork release with Firecracker snapshots, and `gvisor`'s `ReliableExitCode` once F1 is fixed.
+Capabilities depend on the cluster as well as the level: the levels its nodes' fork releases run ([aerolvm-fork](aerolvm-fork.md#versions-in-lewbox)), whether it has storage, and its GPU. They describe what a level *can do*; they never switch on a workaround, because a level that needs one isn't offered ([D15](../README.md#decisions)).
 
 They decide:
 
@@ -99,12 +101,11 @@ They decide:
 |---|---|
 | `Persist` | A create with `persist: true` is refused, `422 persistence_unsupported` with `reason: isolation` and the level, as on a cluster without storage ([sandboxes/persistence](../sandboxes/persistence.md)) |
 | `GPU` | `gpu` on create is refused at that level (`422 validation_failed` on `gpu`) |
-| `ReliableExitCode` | Commands and sessions are wrapped in exit-status traps ([inside-a-sandbox/toolbox](../inside-a-sandbox/toolbox.md)) |
 | `NestedSandbox` | Codex's modes other than full access are refused or mapped, and `GET /v0/sandboxes/{sbx}/agents` says why ([agents/models-and-modes](../agents/models-and-modes.md)) |
 
 ### What a cluster offers
 
-- A cluster has `isolation_levels` (one or more of the three) and a `default_isolation` among them, set by the project. A homelab cluster might offer only `container`; lewbox.com's might offer `gvisor` and `microvm`, defaulting to `gvisor`.
+- A cluster has `isolation_levels` (one or more of the three) and a `default_isolation` among them, set by the project. **In the alpha the only level is `container`**, so every cluster is `["container"]`; asking a cluster to offer another is `422 validation_failed` on `isolation_levels` ("not supported yet"). Later a homelab cluster might offer only `container`, and lewbox.com's `gvisor` and `microvm`, defaulting to `gvisor`.
 - **Each node says which levels it can run.** The node agent's preflight detects what the host supports (Docker always; `gvisor` with cgroup v2; `microvm` with `/dev/kvm`), installs the runtimes for the levels the cluster offers that the host can run, and reports `isolation_levels` on the node ([node-agent](node-agent.md#desired-state)). A node without `/dev/kvm` in a cluster offering `microvm` still joins; it just won't run microVMs.
 - **A level is offered only while some online node runs it.** A cluster whose only KVM node goes offline keeps `microvm` in its settings, but creates at that level wait for capacity as any full cluster does, then fail `cluster_capacity_exceeded` ([placement](placement-and-capacity.md#when-a-cluster-is-full)).
 - **Changing what a cluster offers** is allowed at any time. Adding a level installs its runtime on nodes that can run it (the node spec changes). Removing one is refused while sandboxes at that level exist on the cluster (`409 isolation_in_use`, with a count); stopped persistent ones count, as they'd resume at that level.
@@ -153,27 +154,25 @@ The sandbox records `isolation` (and `runtime`), and keeps them for life: a star
   - The cluster's GPU vendor is passed to AerolVM's `install.sh` (`--with-nvidia-gpu`, `--with-amd-gpu`).
   - Sandboxes ask for GPUs with a `gpu` field on create (count), only at `container` (open question 3).
 
-### gVisor (`gvisor`)
+### gVisor (`gvisor`): Beta
 
-What Lewbox must handle, each linked to its fix:
+Not in the alpha. It's offered once the fork fixes what legacy worked around; each issue and its fix:
 
 | Issue | Handled by |
 |---|---|
 | Writes hidden from `docker commit` unless `--overlay2=none` (F21) | The node spec sets the runsc flag in `/etc/docker/daemon.json` and reloads Docker (SIGHUP, which doesn't touch running containers). Only sandboxes started afterwards get it, so after a spec change the node agent reports how many running sandboxes still lack it, and the dashboard says to restart them |
 | Builds need `docker` listed (F22) | Node spec: `docker` always in `SB_HOST_RUNTIMES`. Only Lewbox holds the PAT, so no caller can ask AerolVM for a Docker sandbox on its own |
-| Exit codes lost (F1) | Traps, until the fork fix is on every node |
+| Exit codes lost (F1) | Fixed in the fork; Lewbox has no traps |
 | bubblewrap can't start (F28) | Codex in full-access mode only; Claude Code's own sandboxing likewise if it uses bubblewrap. Documented to consumers, and shown by `GET …/agents` |
 | Slower file I/O | Documented. Later: snapshots through `runsc tar rootfs-upper` so the faster overlay can stay |
 
 Install-time requirements: cgroup v2, and runsc as AerolVM's `install.sh --with-gvisor` installs it.
 
-### Firecracker (`microvm`)
+### Firecracker (`microvm`): Later
 
-Firecracker gives a dedicated kernel per sandbox: the isolation Lewagent promises. It isn't held back behind a flag: **`microvm` can be offered as soon as the cluster's fork release supports Firecracker** (`Features.Firecracker`), and what it can do grows with the fork:
+Firecracker gives a dedicated kernel per sandbox: the isolation Lewagent promises. It isn't in the alpha, as upstream hasn't released it. **`microvm` is offered once upstream ships Firecracker with snapshots and registry push and pull (#785, F26, F27), and a fork release includes it**: we test upstream's pre-releases on a bare-metal runner meanwhile, but don't carry Firecracker in the fork ahead of upstream.
 
-1. **Firecracker without snapshots** (now, through the fork's `firecracker-artifacts` asset, F27): `microvm` sandboxes run, ephemeral only. `persist: true` at `microvm` is `422 persistence_unsupported` (`reason: isolation`), and the dashboard says why.
-2. **Firecracker snapshots with registry push and pull** (upstream #785, F26): we test pre-releases on our bare-metal runner, rebase the fork, and once every node offering `microvm` on a cluster runs a fork release with them, `Persist` is true there.
-3. **No memory snapshots of sandboxes.** A stop saves the disk only, as on the other levels. A memory snapshot would hold every credential in every process's memory and in `/run/lewbox`, and memory can't be scrubbed, so it's not offered (decided 2026-10-29; [sandboxes/profile-setup](../sandboxes/profile-setup.md#memory-is-never-snapshotted)).
+1. **No memory snapshots of sandboxes.** A stop saves the disk only, as on the other levels. A memory snapshot would hold every credential in every process's memory and in `/run/lewbox`, and memory can't be scrubbed, so it's not offered (decided 2026-10-29; [sandboxes/profile-setup](../sandboxes/profile-setup.md#memory-is-never-snapshotted)).
 
 Firecracker specifics Lewbox handles:
 
@@ -210,7 +209,7 @@ Errors:
 | 409 | `cluster_locked` | Changing architecture or GPU after a node enrolled |
 | 409 | `isolation_in_use` | Removing a level from a cluster while sandboxes there use it (carries `count`) |
 | 422 | `isolation_unavailable` | The level isn't offered on the cluster, or isn't allowed for the profile, or none is both. Carries `isolation`, `cluster`, `reason` (`not_offered`, `not_allowed`, `none_allowed`) and `available` |
-| 422 | `validation_failed` | A GPU with a level other than `container`; AMD on arm64; a level the instance doesn't allow; `microvm` when the fork release doesn't have Firecracker |
+| 422 | `validation_failed` | A GPU with a level other than `container`; AMD on arm64; a level the instance doesn't allow, or this release doesn't support yet (in the alpha, anything but `container`) |
 | 422 | `persistence_unsupported` | `persist: true` at a level whose runtime can't snapshot there (carries `cluster`, `isolation`, `reason: isolation`) |
 
 ## Security
@@ -231,7 +230,7 @@ Errors:
 
 | Setting | Default | What |
 |---|---|---|
-| `LEWBOX_ALLOWED_ISOLATION` | `container,gvisor,microvm` | Which levels projects may offer on their clusters |
+| `LEWBOX_ALLOWED_ISOLATION` | `container` (the alpha supports nothing else) | Which levels projects may offer on their clusters, among those this release supports |
 
 ## Testing
 
@@ -240,28 +239,28 @@ Errors:
   - level resolution on create: every combination of `isolation` given or not, profile default and allowed list, cluster default and offered levels;
   - API refusals for each capability that's off, and each `isolation_unavailable` reason;
   - node spec rendering for each mix of levels (env, runsc flags, install flags, Docker always present).
-- The fork's end-to-end runners (Docker, gVisor, Firecracker) run Lewbox's live suite nightly ([aerolvm-fork](aerolvm-fork.md#testing)).
-- A cluster offering `container` and `gvisor` on one node: a sandbox at each, both persisted, stopped, and resumed at their own level.
+- The fork's Docker end-to-end runner runs Lewbox's live suite nightly ([aerolvm-fork](aerolvm-fork.md#testing)); gVisor and Firecracker runners join with their levels.
+- From the beta: a cluster offering `container` and `gvisor` on one node: a sandbox at each, both persisted, stopped, and resumed at their own level.
 - A persistence test per level: write a file, stop, start on another node, read it back.
 
 ## Build plan
 
-1. **M1:**
+1. **M1 (alpha):**
    - `Isolation`, `Capabilities` and level resolution;
-   - clusters with several levels; nodes reporting theirs; node spec per mix;
+   - clusters with levels (only `container` offered); nodes reporting theirs; node spec;
    - `isolation` on create and on the sandbox; the profile's allowed and default levels;
-   - `container` and `gvisor` end to end, including both on one node;
+   - `container` end to end;
    - the API refusals.
 2. **M1:** GPU at `container` (preflight, install flags, `gpu` on create).
-3. **As soon as the fork has Firecracker** (alpha if it lands in time): `microvm`: artifacts, preflight, template conversion, ephemeral sandboxes.
-4. **When #785's snapshots are in a fork release:** `microvm` persistence.
-5. ~~**Later:** memory snapshots at `microvm`.~~ Not offered ([Firecracker](#firecracker-microvm)).
+3. **Beta:** `gvisor`, once F1, F21, F22 and F24 are in a fork release: runsc install, node spec, both levels on one node, the gVisor end-to-end runner.
+4. **Later, when upstream ships Firecracker (#785):** `microvm`: artifacts, preflight, template conversion, persistence.
+5. ~~**Later:** memory snapshots at `microvm`.~~ Not offered ([Firecracker](#firecracker-microvm-later)).
 
 ## Open questions
 
 1. ~~**Level names or runtime names?**~~ Decided (2026-10-29): levels, `container`, `gvisor` and `microvm`, which describe the guarantee and survive a change of VMM.
-2. **Should Lewagent's hosted computers default to `microvm`** as soon as it persists, to match "every computer runs in its own microVM"? That decides how early Firecracker must be production-ready.
+2. **Should Lewagent's hosted computers default to `microvm`** once it's offered, to match "every computer runs in its own microVM"? Until the beta they run at `container`, weaker than today's gVisor clusters ([migration/data](../migration/data.md)).
 3. **GPUs for consumers:** a `gpu` count on create, and a per-profile GPU limit? Legacy never exposed GPUs to profiles.
-4. ~~**Memory snapshots.**~~ Decided (2026-10-29): not offered; memory can't be scrubbed of credentials ([Firecracker](#firecracker-microvm)).
+4. ~~**Memory snapshots.**~~ Decided (2026-10-29): not offered; memory can't be scrubbed of credentials ([Firecracker](#firecracker-microvm-later)).
 5. **gVisor's `--host-uds=open`:** what does AerolVM need it for, and can we turn it off?
 6. **Per-level limits:** should a profile's limits (e.g. running sandboxes) be settable per level, so `microvm` (reserved memory) can be capped separately? Proposed: Later; one set of limits for now.

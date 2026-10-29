@@ -218,7 +218,7 @@ The project object:
 | Status | Code | When |
 |---|---|---|
 | `403` | `project_suspended` | Any key or write while the project is suspended |
-| `403` | `role_forbidden` | The member's role doesn't allow it. The message names the role needed |
+| `403` | `permission_denied` | The member's role doesn't allow it. Carries the `permission`; the message names the role needed |
 | `403` | `project_creation_disabled` | The instance doesn't let this user create projects |
 | `409` | `project_not_empty` | Deleting a project with sandboxes or online nodes; carries `blocking` |
 | `422` | `validation_failed` | e.g. a slug that's taken or reserved (`new`, `api`, `admin`, `settings`, `instance`, `setup`) |
@@ -239,7 +239,7 @@ The project object:
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_AUDIT_RETENTION_DAYS_MAX` | `730` | The most a project may keep its audit log |
+| `LEWBOX_AUDIT_MAX_RETENTION` | `17520h` (2 years) | The most a project may keep its audit log |
 
 Instance policies are in [projects/instance-administration](projects/instance-administration.md#configuration).
 

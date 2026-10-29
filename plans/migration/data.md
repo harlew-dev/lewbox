@@ -64,7 +64,7 @@ lewbox migrate legacy \
 | `credentials` (`dns`) | `cluster_dns` (or `clusters` columns) | provider, domain, token |
 | `credentials` (`object_storage`) | `cluster_storage` | provider, endpoint, bucket, keys |
 | `credentials` (`github_app`) | `github_apps` | app id, slug, client id and secret, private key, webhook secret, bot user id; `source: manifest`; permissions and events read from `GET /app` on first start |
-| `clusters` | `clusters` | `external_id` → `slug`; `name`, `status`, `architecture`, `runtime`, `gpu_vendor`, `aerolvm_version` (v0.6.4 stays until the [fork rollout](../clusters/aerolvm-fork.md)); connectivity `public` (legacy had no tunnels) |
+| `clusters` | `clusters` | `external_id` → `slug`; `name`, `status`, `architecture`, `gpu_vendor`; `runtime` → `isolation_levels` (`docker` → `["container"]`, `gvisor` → `["gvisor"]`, see [gVisor clusters](#gvisor-clusters)); `aerolvm_version` from the nodes, which are on the fork's minimum release before cutover ([cutover](cutover.md#nodes)); connectivity `public` (legacy had no tunnels) |
 | `cluster_installations` | `cluster_installations` | Only `pending` and `started` ones within their expiry are worth keeping; finished ones are kept for history; `token` re-encrypted; prefix `lbi_` doesn't apply to legacy tokens, which have none |
 | `nodes` | `nodes` | Every column; `token_hash` kept so nodes' existing tokens keep working ([cutover](cutover.md#nodes)) |
 | `node_metrics` | `node_metrics` | Last 14 days only (legacy's retention); optional with `--skip-metrics` |
@@ -83,7 +83,7 @@ lewbox migrate legacy \
 | `templates` | `templates` | `public_id` (slug), `name`, `dockerfile`, `cluster_access`, `ports`, defaults, `env` re-encrypted; `tenant_id` null (global, defined in code) → provided templates, re-synced from code by the new server rather than copied |
 | `template_cluster` | `template_clusters` | |
 | `template_builds` | `template_builds` | `dockerfile`, `status`, `image` (the registry path stays valid; same buckets), `size_mb`, `error`, `finished_at` |
-| `sandboxes` | `sandboxes` | Every column: `aerolvm_id`, `node_id`, `template_build_id`, `image`, size, timers, `env` re-encrypted, `metadata`, `status`, `status_sequence`, `snapshot`, `command` (the resume workaround), `setup`, `repositories`, `git_repositories` (→ `sandbox_git_repositories`, source `setting`; `sandboxes.git_access` set to `"read"`, as legacy's sandboxes were read-only: migrated sandboxes must not gain write access by the new default, `full`), `github_token_expires_at` (dropped), `persist`, `purpose`, idempotency key and fingerprint (only if within 24 h) |
+| `sandboxes` | `sandboxes` | Every column: `aerolvm_id`, `node_id`, `template_build_id`, `image`, size, timers, `env` re-encrypted, `metadata`, `status`, `status_sequence`, `snapshot`, `command` (dropped: the fork resumes legacy snapshots with their image's command, F10), `setup`, `repositories`, `git_repositories` (→ `sandbox_git_repositories`, source `setting`; `sandboxes.git_access` set to `"read"`, as legacy's sandboxes were read-only: migrated sandboxes must not gain write access by the new default, `full`), `github_token_expires_at` (dropped), `persist`, `purpose`, idempotency key and fingerprint (only if within 24 h) |
 | `operations` | `operations` | Finished ones for history (`kind`, `status`, `step`, `steps`, `error`, `error_code`, times); `claimed_by` and `lease_expires_at` dropped. None may be pending or running at freeze ([cutover](cutover.md#the-day)). Template-build operations re-linked to builds |
 | `sandbox_sessions` | `sandbox_sessions` | `aerolvm_id`, `command`, `directory`, `pty`, `watch`, `status`, `exit_code`, `exit_signal`, times; running ones stay running and are reconciled after cutover |
 | `sandbox_ports` | `sandbox_ports` | `port`, `protocol`, `access`, `proxy_port`, `persist`, `public_url`, `host`, `host_port` |
@@ -145,14 +145,18 @@ Tokens are hashed as `sha256(token)`, prefix included, in both legacy and new, s
 | Setup links | Unchanged; unused, unexpired links work |
 | Login codes and sessions | Not migrated; users sign in again |
 
+### gVisor clusters
+
+Legacy's live clusters include gVisor ones (EU West), but the alpha offers `container` only, and `gvisor` returns in the beta ([clusters/runtimes](../clusters/runtimes.md)). **Decided: a gVisor cluster is migrated as a gVisor cluster, once `gvisor` is offered** (the beta, which is also when this migration runs). It isn't re-created as a `container` cluster, as that would quietly weaken its sandboxes' isolation. If the migration has to run before the fork's gVisor fixes are in the minimum release, gVisor clusters stay on legacy until they are, and Docker clusters move first. Lewagent's computers on a gVisor cluster move with it ([lewagent](lewagent.md)).
+
 ### Running sandboxes
 
 What lives *outside* the database, in sandboxes and on nodes, and how the new control plane takes it over:
 
 - **AerolVM sandboxes** are found by their `aerolvm_id` and node, as legacy recorded them, and by AerolVM tags `lewbox_profile` and `lewbox_sandbox`, which the new reconciler reads too ([sandboxes/reconciler](../sandboxes/reconciler.md)). The new reconciler's first pass after cutover compares every running sandbox with AerolVM, as legacy's did every 60 s.
 - **The cluster PATs** are migrated, so the new server reaches AerolVM exactly as the gateway did.
-- **Snapshots** of stopped sandboxes stay in the registries and buckets; `sandboxes.snapshot` names them, and `command` keeps the nested-toolbox fix working on resume.
-- **Sessions:** toolboxd sessions keep running; the new server reads them by name (`ses_…`), and reads the gVisor exit-status files under `/root/.lewbox/sessions/<ses_id>` the same way the gateway did.
+- **Snapshots** of stopped sandboxes stay in the registries and buckets; `sandboxes.snapshot` names them. Legacy snapshots whose entrypoint nested `toolboxd` resume correctly because the fork drops the leading `toolboxd` on create (F10); no recorded command is needed.
+- **Sessions:** toolboxd sessions keep running; the new server reads them by name (`ses_…`). It doesn't read legacy's gVisor exit-status files: a session on a gVisor sandbox that ends before that sandbox next starts (and gets the fork's fixed `toolboxd`) may report `-1`, as documented in the runbook.
 - **Private ports:** legacy `lewbox-portd` binaries run in sandboxes as sessions `lewbox-portd-<port>`, verifying links with the legacy Ed25519 public key. With the key imported, new links verify. On a sandbox's next start, the new `lewbox portd` replaces them.
 - **Agents:** legacy `lewbox-agentd` daemons in sandboxes hold conversation state in `/root/.lewbox/agents/<cnv>/` (`conversation.json`, `events.jsonl`). The new agentd must read that layout ([agents/agentd](../agents/agentd.md)); the build-version handshake makes an idle legacy daemon answer `upgrade` and stop, and the new one starts. A busy legacy daemon finishes its turn first.
   - **Uploads:** legacy daemons post to `<GATEWAY_PUBLIC_URL>/v1/agent-uploads` with tokens signed by the imported key. The new server serves that exact path (as a compatibility route) for 30 days, and `api.lewbox.com` (or whatever host `GATEWAY_PUBLIC_URL` was) points at it after cutover ([cutover](cutover.md#dns)).

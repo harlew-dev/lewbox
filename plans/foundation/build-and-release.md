@@ -134,9 +134,9 @@ Details in [clusters/aerolvm-fork](../clusters/aerolvm-fork.md); the coupling wi
 
 - The fork is tagged `vX.Y.Z-lewbox.N`: upstream's version, and our patch level on top. E.g. `v0.6.8-lewbox.2`.
 - **We always build our own release assets** in the fork's CI (`sandboxd`, `toolboxd`, installers, for amd64 and arm64), so an upstream release without assets (as v0.6.5 was) never blocks us.
-- Lewbox embeds `aerolvm.json`, listing fork versions it supports (tested in the nightly real-cluster job), the default for new clusters, and each version's asset URLs and checksums.
-- A Lewbox release may *add* support for a newer fork version; it drops support for an old one only after a release that warns about clusters still on it.
-- When the fork gains a fix that lets Lewbox delete a workaround (e.g. exit codes under gVisor), the workaround stays until every supported fork version has the fix, then is deleted, and [lessons](../lessons.md) records both.
+- Lewbox embeds `aerolvm.json`, listing the fork versions it supports (tested in the nightly real-cluster job), **the minimum** it runs on, the default for new clusters, and each version's asset URLs and checksums ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)).
+- **No workarounds** ([D15](../README.md#decisions)): when Lewbox starts relying on a fork fix, its release raises the minimum to a fork release with the fix, which is published first. Nodes below the minimum aren't used (`outdated`) until the node agent upgrades them. There's no code in Lewbox for older fork releases.
+- A Lewbox release may *add* support for a newer fork version; raising the minimum is announced in the release before, with dashboard warnings on clusters below it, and [lessons](../lessons.md) records each fix.
 
 ### Custom builds
 

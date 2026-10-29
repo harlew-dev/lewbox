@@ -165,7 +165,7 @@ POST /v0/projects/{prj}/profiles/{prf}/keys  { name: "Lewagent", cluster_access:
 
 ### Isolation
 
-How strongly a profile's sandboxes are isolated is the project's choice, per profile. Lewbox offers three [isolation levels](clusters/runtimes.md#isolation-levels), weakest to strongest: `container` (Docker), `gvisor` and `microvm` (Firecracker). A cluster offers some of them; a profile is allowed some of them; a sandbox is created at one that's both ([clusters/runtimes § Choosing a sandbox's level](clusters/runtimes.md#choosing-a-sandboxs-level)).
+How strongly a profile's sandboxes are isolated is the project's choice, per profile. Lewbox offers three [isolation levels](clusters/runtimes.md#isolation-levels), weakest to strongest: `container` (Docker), `gvisor` and `microvm` (Firecracker). A cluster offers some of them; a profile is allowed some of them; a sandbox is created at one that's both ([clusters/runtimes § Choosing a sandbox's level](clusters/runtimes.md#choosing-a-sandboxs-level)). **In the alpha only `container` exists** ([D16](README.md#decisions)): the settings are built and stored, so a project can already say "at least `gvisor`" for a profile, but such a profile can't create sandboxes until `gvisor` is offered in the beta, and the dashboard says so.
 
 | Setting | Values | Means |
 |---|---|---|

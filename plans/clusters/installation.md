@@ -62,7 +62,7 @@ A project adds a server to a cluster by running one command on it. The command i
 |---|---|
 | **Keep** | The installation token and its rules (single use, expiry, cancel); the status machine; the node API order; seed selection; Lewbox signing join CSRs; the preflight checks; secrets kept out of output and argv; node name and subdomain chosen up front |
 | **Change** | Bash → `lewbox node install` (Go). The served `install.sh` becomes a ~60-line bootstrap that downloads and verifies `lewbox`, then hands over. Timers → the node agent daemon. Failure → retry in place (new `lewbox node install --retry`, same token while the installation hasn't failed for good). "Online" → confirmed by AerolVM membership ([health-and-metrics](health-and-metrics.md#membership)). The registry config, firewall rules and timer settings move from install-time responses into the **node spec**, which can change later ([node-agent](node-agent.md#desired-state)) |
-| **Add** | `lewbox node uninstall`, and Remove node in the dashboard. Installing behind NAT via the tunnel ([connectivity](connectivity.md)). A clock check (certificates and tokens need a sane clock). A dry-run preflight (`lewbox node check`) |
+| **Add** | `lewbox node uninstall`, and Remove node in the dashboard. Installing behind NAT via the tunnel ([connectivity](connectivity.md), beta). A clock check (certificates and tokens need a sane clock). A dry-run preflight (`lewbox node check`) |
 | **Drop** | The bash script's own firewall, metrics, certificate and cleanup scripts (`/usr/local/bin/lewbox-*`) and their timers |
 
 ## Design
@@ -126,11 +126,12 @@ Name, subdomain and connectivity are chosen in the dashboard, on the installatio
      - at least 4 GB RAM and 40 GB free under `/var/lib` (configurable).
    - **Clock:** within 30 seconds of the control plane's `Date` header (certificates and tokens).
    - **Isolation levels and GPU:** the host must run at least one of the levels the cluster offers. Each level it can't run is reported as a warning, not a failure, and the node joins without it ([runtimes](runtimes.md#what-a-cluster-offers)):
-     - `container`: Docker (always installable);
-     - `gvisor`: cgroup v2;
-     - `microvm`: a readable `/dev/kvm`;
+     - `container`: Docker (always installable). The only level in the alpha;
+     - `gvisor` (beta): cgroup v2;
+     - `microvm` (later): a readable `/dev/kvm`;
      - NVIDIA: `nvidia-smi -L` lists a GPU;
      - AMD: `/dev/kfd` and Ubuntu.
+   - **AerolVM release:** the cluster's version is at or above Lewbox's minimum fork release; otherwise `aerolvm_version_unsupported`, naming the minimum ([aerolvm-fork](aerolvm-fork.md#versions-in-lewbox)).
    - **A clean machine:** no AerolVM cluster state (`/etc/sandboxd/tls/node.crt`, Raft data), unless this is a `--retry` of this very node.
    - **Ports free** (skipped on retry once AerolVM is installed):
      - TCP 7000–7002, 21212, 2019;
@@ -165,7 +166,7 @@ Name, subdomain and connectivity are chosen in the dashboard, on the installatio
    Everything after this step is "apply the spec", the same code the agent runs later.
 6. **Install AerolVM.**
    - Download the fork's assets for the cluster's version and verify `checksums.txt` and its signature ([aerolvm-fork](aerolvm-fork.md#release-assets)).
-   - Run the fork's `install.sh` (see [AerolVM's own installer](#aerolvms-own-installer)) with stdin from `/dev/null`, output redacted, and flags from the spec: `--version`, `--pat-token-file` (a file, not an argument; a fork change), `--node-name`, `--public-host`, `--with-gvisor`, `--with-*-gpu`, and `--domain` with the DNS provider (F43).
+   - Run the fork's `install.sh` (see [AerolVM's own installer](#aerolvms-own-installer)) with stdin from `/dev/null`, output redacted, and flags from the spec: `--version`, `--pat-token-file` (a file, not an argument; a fork change), `--node-name`, `--public-host`, `--with-*-gpu`, and `--domain` with Cloudflare's zone-scoped token for Caddy's DNS-01, as legacy does (the alpha; DNS-01 through the control plane, F43, comes after it). `--with-gvisor` from the beta. The node agent doesn't install `file` first or patch anything around the script: the fork's `install.sh` is fixed instead (F23).
    - Then write the spec's `sandboxd.env` values and runsc flags.
 7. **Registry** (clusters with storage). Report `provisioning_storage`; install CNCF Distribution and its config from the spec ([storage-and-registry](storage-and-registry.md#the-registry-on-each-node)); wait for `http://127.0.0.1:5000/v2/` (30 s).
 8. **Firewall** (unless `--no-firewall`). Apply the spec's rules ([node-agent](node-agent.md#firewall)) before the node opens any cluster port: SSH allowed first, then default-deny.
@@ -274,8 +275,8 @@ Errors keep the [API's shape](../api/errors.md):
 |---|---|---|
 | 401 | `invalid_token` | Unknown, cancelled, or a removed node's |
 | 403 | `node_failed` | A node token whose installation failed (until `--retry`) |
-| 409 | `installation_started`, `already_enrolled`, `seed_not_ready`, `cluster_has_no_bundles` | |
-| 410 | `installation_finished`, `installation_expired` | |
+| 409 | `installation_started`, `installation_finished`, `already_enrolled`, `seed_not_ready`, `cluster_has_no_bundles` | |
+| 410 | `installation_expired` | |
 | 422 | `architecture_mismatch`, `ip_in_use`, `ip_not_public`, `validation_failed` | |
 
 ## Security
@@ -300,7 +301,7 @@ Errors keep the [API's shape](../api/errors.md):
 
 | Setting | Default | What |
 |---|---|---|
-| `LEWBOX_INSTALLATION_TOKEN_TTL` | `60m` | Time to start an installation |
+| `LEWBOX_INSTALL_TOKEN_TTL` | `60m` | Time to start an installation |
 | `LEWBOX_NODE_MIN_MEMORY_MB`, `LEWBOX_NODE_MIN_DISK_GB` | `4096`, `40` | Preflight minimums |
 | `LEWBOX_NODE_SEED_WAIT` | `30m` | How long joiners wait for the seed |
 
@@ -315,7 +316,7 @@ Errors keep the [API's shape](../api/errors.md):
   - seed selection under concurrent enrollments (two goroutines enrolling at once);
   - a failed seed handing over.
 - **End to end (nightly):**
-  - install a 3-node cluster on fresh VMs (Ubuntu 24.04 amd64, Debian 12 arm64) for Docker and gVisor;
+  - install a 3-node cluster on fresh VMs (Ubuntu 24.04 amd64, Debian 12 arm64) for Docker (gVisor from the beta);
   - remove one node and see its sandboxes move;
   - break a step (block port 7001) and retry after unblocking.
 

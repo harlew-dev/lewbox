@@ -1,6 +1,6 @@
 # Files
 
-> Status: Draft · Milestone: Alpha (M2); watching and range reads Beta · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M2); conditional writes and `Range` with fork F51 and F7 (P1); watching Beta (F9) · Updated: 2026-10-29
 
 Read and write files in a running sandbox, move and remove them, check what's at a path, list and make directories. Bodies are the files themselves, not JSON, streamed both ways. Everything in a sandbox runs as root, so any path can be reached and written files belong to root.
 
@@ -61,8 +61,7 @@ As documented: `name`, `path`, `type` (`file` or `dir`), `size`, `mode`, `permis
 | `etag` | **New.** An opaque version of a file's contents, for conditional writes. `null` for directories |
 
 **How the ETag is made.**
-- **With the fork** (`conditional_writes`): the toolbox computes it, as `"<size>-<mtime ns>-<inode>"`, cheap, from `stat`. A content hash would mean reading the whole file on every stat.
-- **Without it:** Lewbox makes the same from the `Stat` fields it already gets (`size`, `modifiedTime`), without the inode.
+- **The fork computes it** (F51), as `"<size>-<mtime ns>-<inode>"`, cheap, from `stat`. A content hash would mean reading the whole file on every stat. Lewbox doesn't make its own: until F51 is in the minimum fork release, entries have no `etag` and conditional writes aren't offered ([D15](../README.md#decisions)).
 
 The docs say an ETag changes whenever the file is written; it may also change when the file is touched without being changed.
 
@@ -71,8 +70,8 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 - **Streamed** from the toolbox to the client, never held in Lewbox: `io.Copy` with a 32 KB buffer, counting bytes as [activity](toolbox.md#activity).
 - **Headers:** `Content-Type: application/octet-stream`, `Content-Length` when the toolbox gives it, `Content-Disposition: attachment; filename="<name>"` (RFC 6266 encoded), `ETag`, `Last-Modified`.
 - **Conditional reads:** `If-None-Match` answers `304` when unchanged, so an editor can recheck a file cheaply.
-- **Large files.** Without the fork's `streamed_downloads`, the toolbox reads the file into memory, so Lewbox refuses a download over `LEWBOX_FILE_MAX_UNSTREAMED_DOWNLOAD` (default 512 MiB, from a `Stat` first) with `422 sandbox_refused`. The message says to compress, split, or wait for the node's upgrade. With the fork, there's no limit.
-- **`Range`** (fork `streamed_downloads`): `Range: bytes=…` answers `206`, so large downloads can resume and editors can read the head of a file. Without it, `Range` is ignored and the whole file is sent (`200`), as HTTP allows.
+- **Large files.** The fork streams downloads (F7, P1). Until F7 is in the minimum fork release, a download has a **documented size limit**, `LEWBOX_FILE_MAX_DOWNLOAD` (512 MiB), refused with `422 sandbox_refused` saying to compress or split, because today's toolbox reads the whole file into memory. It's a stated limit, not a second code path: the limit and its setting go when F7 is the minimum.
+- **`Range`** (with F7): `Range: bytes=…` answers `206`, so large downloads can resume and editors can read the head of a file.
 - **A directory** is `422 sandbox_refused` ("is a directory"). `404` when nothing is there.
 
 ### Uploads
@@ -82,9 +81,8 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 - **Conditional writes** (`If-Match`, `If-None-Match`):
   - `If-Match: "<etag>"` writes only if the file's current ETag matches, else `412 precondition_failed` with the current entry in the body, so the client can show a diff.
   - `If-None-Match: *` writes only if nothing is at the path, else `412`.
-  - **With the fork** (`conditional_writes`): the toolbox checks and writes atomically. It writes to a temporary file beside the target, then checks the precondition, then `rename(2)`.
-  - **Without it:** Lewbox stats, compares, then writes. That leaves a small race window, which the docs state; it's still better than the client doing the same over two round trips.
-- **Atomic replace.** Every upload writes beside the target and renames, so a reader never sees half a file, and a failed upload leaves the old file. Without the fork, envd writes in place; the docs say so.
+  - **The fork checks and writes atomically** (F51, P1): it writes to a temporary file beside the target, then checks the precondition, then `rename(2)`. Lewbox has no compare-then-write of its own; until F51 is in the minimum release, `If-Match` and `If-None-Match` on a write are `422 validation_failed` ("conditional writes aren't available on this instance yet"), so a client never believes it has a guarantee it doesn't.
+- **Atomic replace** comes with F51 too: every upload writes beside the target and renames, so a reader never sees half a file. Until then envd writes in place, and the docs say so.
 - **Size limits:** none from Lewbox beyond the sandbox's disk. A full disk is `507`-like: `422 sandbox_refused` with the toolbox's "no space left on device".
 - **Activity:** `file.written` with `path`, `size`, and `conditional: true` when it was.
 
@@ -96,7 +94,7 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 
 ### Watching
 
-`GET /v0/sandboxes/{sbx}/files/watch?path=/root/workspace&recursive=true`: an SSE stream of changes under a directory. Needs the fork's `watch` capability; without it, `422 sandbox_refused` ("this node can't watch files yet").
+`GET /v0/sandboxes/{sbx}/files/watch?path=/root/workspace&recursive=true`: an SSE stream of changes under a directory. Beta: it ships when the fork's watching (F9) is in the minimum release, not before.
 
 | Event | Data |
 |---|---|
@@ -155,7 +153,7 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 
 | Setting | Default | |
 |---|---|---|
-| `LEWBOX_FILE_MAX_UNSTREAMED_DOWNLOAD` | `512MiB` | Refuse larger downloads from nodes that read whole files |
+| `LEWBOX_FILE_MAX_DOWNLOAD` | `512MiB` | The documented download limit until the fork streams downloads (F7); removed then |
 | `LEWBOX_FILE_LIST_MAX_ENTRIES` | `50000` | Cap on a `depth=10` listing; past it, `422` saying to list less deep |
 | `LEWBOX_FILE_WATCHES_PER_SANDBOX` | `8` | |
 
@@ -163,8 +161,8 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 
 - **Fake toolbox files with modes:** upload and download round trips of 0 B, 1 B and 100 MB (streamed, memory-checked); directories made on upload and move; replace; remove a tree.
 - **Entries:** for files, directories and symlinks.
-- **Conditional writes:** a match writes, a mismatch is `412` with the entry, `If-None-Match: *` both ways, and the fallback race documented by a test that interleaves.
-- **Downloads:** `If-None-Match` answers `304`; `Range` with and without the capability; the unstreamed size refusal.
+- **Conditional writes** (with F51 in the fake): a match writes, a mismatch is `412` with the entry, `If-None-Match: *` both ways; before F51, the headers refused.
+- **Downloads:** `If-None-Match` answers `304`; the size limit before F7; `Range` with it.
 - **Watch:** event mapping, coalescing, ignores, `overflow`, unsupported nodes.
 - **Paths:** `~`, relative refused, encoded characters, forbidden paths.
 - **Upload waits for the toolbox** before sending the body, and isn't retried after.
@@ -172,10 +170,9 @@ The docs say an ETag changes whenever the file is written; it may also change wh
 ## Build plan
 
 1. Port `files.go`; add path rules and entry `etag`.
-2. Download headers, `If-None-Match`, the unstreamed size guard.
-3. Conditional uploads, Lewbox-side.
-4. Fork: `streamed_downloads` (+`Range`), `conditional_writes` (atomic rename, precondition), `watch` (WatchDir over SSE).
-5. Watch endpoint; SDK `files.watch()`.
+2. Download headers, `If-None-Match`, the documented size limit.
+3. Fork: F7 streamed downloads (+`Range`) and F51 conditional writes (atomic rename, precondition), both P1; then conditional uploads and `Range` in Lewbox.
+4. Beta: fork F9 watching; the watch endpoint; SDK `files.watch()`.
 
 ## Open questions
 

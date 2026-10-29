@@ -25,7 +25,7 @@ Any port can be **public**, reached by anyone with its address. An `http` port c
 **What's wrong:**
 1. **Order of writes.** A public port is exposed in AerolVM first, then recorded; if the app refuses (say, a port in the proxy range), the gateway has to close it again. Validation that could have come first came last.
 2. **Exposing again was fragile.** Exposing a port that was already private, after a start had restored its proxy, started a second proxy, which failed, and the failed expose then stopped the working proxy and forgot the port (`5f3d19e`). Lewagent stopped exposing a port twice because of it (`lewagent-legacy/docs/todo.md`).
-3. **No readiness.** A link to a port nothing listens on opens the node's error page, so Lewagent runs `curl` inside the sandbox before every link (`lewagent-legacy/app/Actions/Computers/CheckPort.php`), reading the status from stdout because gVisor loses exit codes.
+3. **No readiness.** A link to a port nothing listens on opens the node's error page, so Lewagent runs `curl` inside the sandbox before every link (`lewagent-legacy/app/Actions/Computers/CheckPort.php`), reading the status from stdout because gVisor loses exit codes. That was Lewagent's workaround for a gap; the fork closes the gap (F53).
 4. **URLs change on every start**, so every client must re-read them and never store them.
 
 ## Goals
@@ -125,10 +125,7 @@ What Lewagent does with `curl` today, done once in Lewbox:
 - **Check:** `GET /v0/sandboxes/{sbx}/ports/{port}?check=true` checks whether something listens on the port inside the sandbox, records `listening` and `checked_at`, and answers the port.
 - **Wait:** `POST /v0/sandboxes/{sbx}/ports/{port}/wait` with `{"timeout": 30, "http": true}` answers once something listens, or after the timeout with the port and `listening: false`. With `http`, "listening" means an HTTP request to `127.0.0.1:<port>/` gets any response; otherwise a TCP connection is enough.
 - **Links wait too.** `POST …/ports/{port}/links` takes `wait` (seconds, default 0), so making a desktop link can wait for the desktop in one call ([private ports](private-ports.md#links)).
-- **How it checks.**
-  - **With the fork:** a toolbox endpoint, `GET toolbox/ports/{port}/status`, dials `127.0.0.1:<port>` (and optionally sends `HEAD /`) from inside the sandbox.
-  - **Without it:** a small command, `bash -c 'exec 3<>/dev/tcp/127.0.0.1/<port>'`, with an HTTP probe through `curl` when the image has it. The result is read from stdout, not the exit code, until `exit_status` is everywhere.
-  - Checks don't count as activity, so polling readiness doesn't keep a sandbox awake.
+- **How it checks:** a toolbox endpoint in the fork, `GET toolbox/ports/{port}/status` ([F53](../clusters/aerolvm-fork.md#process-and-exec-toolboxd), P1), dials `127.0.0.1:<port>` (and optionally sends `HEAD /`) from inside the sandbox, and doesn't count as activity, so polling readiness doesn't keep a sandbox awake. Lewbox doesn't probe with a command of its own: until F53 is in the minimum fork release, `check`, `wait` and a link's `wait` aren't offered (`422 validation_failed`, "port readiness isn't available on this instance yet"), and the docs say so ([D15](../README.md#decisions)).
 - **portd shows a waiting page.** A private port whose service doesn't answer yet answers its browser with a small "Starting…" page that retries, and posts `lewbox:port-unavailable` to the embedding page, rather than an error ([private ports](private-ports.md#when-the-service-isnt-up)).
 
 ### URLs
@@ -190,13 +187,13 @@ TCP pool ranges are the node's, set by the [node agent](../clusters/node-agent.m
 - **Close:** on running and stopped sandboxes; idempotent.
 - **Stop and start:** persisted ports re-exposed with new URLs; unpersisted forgotten; a failed re-expose marks `failed` without failing the start.
 - **Template ports:** recorded and exposed at create.
-- **Readiness:** listening and not, `http` probe, wait timing out, a link with `wait`; the command fallback reading stdout under lost exit codes.
+- **Readiness** (with F53 in the fake): listening and not, `http` probe, wait timing out, a link with `wait`; refused before F53.
 
 ## Build plan
 
 1. Migration, `internal/ports` (store, row lock, validation).
 2. Public expose, list and close handlers; the `ports_exposed` step shared with [operations](../sandboxes/operations.md).
-3. Readiness: the command fallback, then the fork's endpoint.
+3. Readiness, once the fork's endpoint (F53) is in the minimum release.
 4. Private ports ([private ports](private-ports.md)).
 5. Later: stable URLs in the fork's edge.
 

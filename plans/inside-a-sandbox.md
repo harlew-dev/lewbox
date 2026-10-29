@@ -27,9 +27,9 @@ What's wrong with it:
 
 - Keep the API that works: the shapes, protocols and error codes in the public docs, which Lewagent and the PHP SDK are built on.
 - One hop: the control plane checks the key and the sandbox in its own database, then calls the node.
-- Fix toolbox problems in our [AerolVM fork](clusters/aerolvm-fork.md), and keep the Lewbox-side workaround only until every node runs a fork version that has the fix ([toolbox](inside-a-sandbox/toolbox.md#capabilities)).
+- Fix toolbox problems in our [AerolVM fork](clusters/aerolvm-fork.md), and carry **no workaround** in Lewbox: it requires the fork release with the fixes ([D15](README.md#decisions), [toolbox](inside-a-sandbox/toolbox.md#the-minimum-fork-release)).
 - Push instead of poll: session ends, port readiness and (later) file changes come to Lewbox as events.
-- Close the gaps Lewagent is waiting on: conditional file writes, file watching, port readiness, stable private-port proxies, exit codes on streams.
+- Close the gaps Lewagent is waiting on: conditional file writes, file watching, port readiness, stable private-port proxies, exit codes on streams (right on Docker; gVisor's, in the beta, fixed in the fork).
 
 ### Non-goals
 
@@ -42,7 +42,7 @@ What's wrong with it:
 | | What |
 |---|---|
 | **Keep** | `bash -lc` login shells as root; `~` directories; command results with `exit_code`, `stdout`, `stderr`, `duration_ms`; SSE streaming with `stdout`, `stderr`, `exit`, `error`; the WebSocket protocol (`0x01`/`0x02` framing, `resize`, `signal`, `close`, `exit`, close codes `1000`, `1001`, `1008`, `1011`); `lewbox.bearer` subprotocol auth; sessions with `watch`, log `tail`, attach replay; streamed file uploads and downloads; the entry object; public `http`/`tcp` ports, `persist`, template ports; private ports behind signed links; SSH keys written between `# lewbox begin` and `# lewbox end` |
-| **Change** | Key and sandbox checks are database reads, not HTTP calls. Session ends come from the toolbox as events, not a 5 s poll. Toolbox fixes live in the fork, gated by capability. Exit codes are right on every path, streams included. Downloads stream and take `Range`. Writes can be conditional (`If-Match`). Ports can be waited on until something listens. Private-port proxies are started once, by name, and never twice. Proxy ports are chosen in the same transaction that records the port |
+| **Change** | Key and sandbox checks are database reads, not HTTP calls. Session ends come from the toolbox as events, not a 5 s poll. Toolbox fixes live in the fork, and Lewbox requires the release that has them; no per-node workarounds. Exit codes are right on every path, streams included (Docker in the alpha). Downloads stream and take `Range`. Writes can be conditional (`If-Match`). Ports can be waited on until something listens. Private-port proxies are started once, by name, and never twice. Proxy ports are chosen in the same transaction that records the port |
 | **Drop** | The gateway→app internal API (`/api/gateway/v1`) and its 60 s key cache. Lewagent's `curl` port checks (replaced by [readiness](inside-a-sandbox/ports.md#readiness)). Uploading the private-port proxy into each sandbox, once the fork mounts Lewbox's helpers ([toolbox](inside-a-sandbox/toolbox.md#lewboxs-helpers-in-the-sandbox)) |
 | **Add** | File watching ([files](inside-a-sandbox/files.md#watching)); conditional writes; readiness on ports; a `listening` field on ports; single-use port links; `frame_ancestors` on private ports; stable port URLs as a later goal |
 
@@ -90,7 +90,7 @@ Reads (downloads, listings, stats, logs) aren't logged, as legacy doesn't log th
 
 ### Activity for the idle timeout
 
-A sandbox's [idle timeout](sandboxes/timers-and-activity.md) counts from its last activity. Every request inside it counts when it starts, and data moving on a stream counts about once a minute while it moves; a quiet stream doesn't count, so an abandoned terminal doesn't keep a sandbox running. Today the gateway "touches" the sandbox through `toolbox/health` while data moves, because AerolVM only counts a request when it starts. The fork counts bytes on its own streams instead ([toolbox](inside-a-sandbox/toolbox.md#activity)).
+A sandbox's [idle timeout](sandboxes/timers-and-activity.md) counts from its last activity. Every request inside it counts when it starts, and data moving on a stream counts about once a minute while it moves; a quiet stream doesn't count, so an abandoned terminal doesn't keep a sandbox running. Today the gateway "touches" the sandbox through `toolbox/health` while data moves, because AerolVM only counts a request when it starts. The fork counts bytes on its own streams instead (F5), and Lewbox doesn't touch ([toolbox](inside-a-sandbox/toolbox.md#activity)).
 
 ### Errors
 
@@ -113,7 +113,7 @@ Common to every endpoint here. Each part lists its own.
 
 | Plan | Covers |
 |---|---|
-| [toolbox](inside-a-sandbox/toolbox.md) | The client for `toolboxd` through AerolVM: routes, retries, login shells, `~`, exit codes under gVisor, activity, errors, capabilities by fork version, which fixes move into the fork, Lewbox's helpers in the sandbox |
+| [toolbox](inside-a-sandbox/toolbox.md) | The client for `toolboxd` through AerolVM: routes, readiness, login shells, `~`, exit codes, activity, errors, the minimum fork release (no workarounds), which fixes go into the fork, Lewbox's helpers in the sandbox |
 | [commands](inside-a-sandbox/commands.md) | Running to completion, streaming as SSE, interactive over WebSocket, timeouts, env, labels, stderr redaction |
 | [sessions](inside-a-sandbox/sessions.md) | Long-running processes: create, list, get, log and tail, attach, resize, signal, kill, `watch`, statuses, what a stop does |
 | [files](inside-a-sandbox/files.md) | Download, upload, move, remove, entries, directories, paths, large files, conditional writes, watching |
@@ -129,7 +129,7 @@ Go packages:
 
 | Package | What |
 |---|---|
-| `internal/aerolvm` | The AerolVM client, including the toolbox: execute, exec stream, sessions, files, filesystem, ports, health, capabilities |
+| `internal/aerolvm` | The AerolVM client, including the toolbox: execute, exec stream, sessions, files, filesystem, ports, health, the minimum-release check |
 | `internal/httpapi` | Handlers: `inside_commands.go`, `inside_sessions.go`, `inside_files.go`, `inside_ports.go`, `inside_ssh.go`; the shared `runningSandbox` and `withToolbox` steps; the SSE writer and WebSocket relay |
 | `internal/sessions` | Session records, the end-of-session watcher, exit-status recovery |
 | `internal/ports` | Port records, proxy port allocation, re-exposing after a start, readiness |
@@ -145,7 +145,7 @@ Order of work, each with tests against the [fake toolbox](foundation/testing.md)
 4. Sessions, attach, then the watcher.
 5. Public ports, then private ports with portd and links.
 6. SSH keys.
-7. Fork fixes, each with its capability, removing Lewbox's workaround behind it.
+7. Fork fixes by the backlog's priorities; Lewbox's minimum release raised with each it relies on.
 
 ## Open questions
 

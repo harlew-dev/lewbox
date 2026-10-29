@@ -43,7 +43,7 @@ What's wrong:
 ### Where it runs
 
 - The project's **sign-in cluster** ([projects/settings](../projects/settings.md#sign-in-settings)), with the provided `agents` template ready on it ([templates/provided-templates](../templates/provided-templates.md)): Ubuntu with `claude`, `codex`, `script`, `curl`, kept current by rebuilding on a schedule (weekly) and whenever its pinned CLI versions change.
-- Without a sign-in cluster: the project's only cluster, if it has one; otherwise `409 sign_ins_unavailable`, saying a sign-in cluster needs choosing. If `agents` isn't ready there: `409 sign_ins_unavailable` with `reason: template_building | template_failed`, and the settings page shows the build.
+- Without a sign-in cluster: the project's only cluster, if it has one; otherwise `409 sign_ins_unavailable` with `reason: no_cluster`, saying a sign-in cluster needs choosing. If `agents` isn't ready there: `409 sign_ins_unavailable` with `reason: template_building | template_failed`, and the settings page shows the build.
 - **Helpers** are sandboxes with `purpose = sign_in`: created and deleted by ordinary operations (so placement, capacity and failures work as for any sandbox), never listed by the consumer API or counted in limits or credits, listed in the dashboard and management API with a *Sign-in* badge and filterable by purpose. No profile setup. `persist: false`, `lifetime` 20 minutes as a backstop. One per sign-in, deleted when it ends.
 
 ### Data model
@@ -157,7 +157,7 @@ Legacy flagged that storing a person's Claude subscription token, and using it i
 **Settled for now (2026-10-29): sign-ins ship in the alpha, as designed.** Lewbox is self-hosted: the logins are stored in the instance's own database and written into sandboxes on the same people's own machines. The person runs the sign-in themselves, and the tokens never leave infrastructure they or their project run. That's the case the alpha is for.
 
 - **Revisit for the hosted instance** (lewbox.com), where Harlew would hold other people's subscription tokens. Confirm with Anthropic and OpenAI before sign-ins are offered there (open question 1).
-- **The switch stays:** an instance can turn either provider off (`LEWBOX_SIGN_IN_PROVIDERS`), refusing new sign-ins with `403 provider_disabled`; API keys always remain. So if an answer changes, nothing needs building.
+- **The switch stays:** an instance can turn either provider off (`LEWBOX_SIGN_IN_PROVIDERS`), refusing new sign-ins with `409 sign_ins_unavailable` and `reason: provider_disabled`; API keys always remain. So if an answer changes, nothing needs building.
 
 ## API
 
@@ -180,11 +180,10 @@ The sign-in object:
 
 | Status | Code | When |
 |---|---|---|
-| `409` | `sign_ins_unavailable` | No sign-in cluster, or `agents` not ready there; carries `reason` |
+| `409` | `sign_ins_unavailable` | No sign-in cluster, `agents` not ready there, or the instance turned the provider off; carries `reason`: `no_cluster`, `template_building`, `template_failed` or `provider_disabled` ([Legal](#legal)) |
 | `409` | `sign_in_not_awaiting_code` | A code for a sign-in not in `awaiting_code` |
 | `409` | `sign_in_finished` | Cancelling or coding a finished one |
 | `422` | `validation_failed` | A provider that isn't a subscription for the agent; an empty code |
-| `403` | `provider_disabled` | The instance disabled the provider ([Legal](#legal)) |
 
 ## Security
 
@@ -209,7 +208,7 @@ The sign-in object:
 | `LEWBOX_SIGN_IN_TTL` | `15m` | From start to expiry |
 | `LEWBOX_SIGN_IN_QUEUE_TTL` | `10m` | Queued expiry |
 | `LEWBOX_SIGN_IN_LINK_WAIT` | `60s` | CLI must print a link within |
-| `LEWBOX_CHATGPT_REFRESH_AFTER` | `72h` | |
+| `LEWBOX_SIGN_IN_CHATGPT_REFRESH_AFTER` | `72h` | |
 | `LEWBOX_SIGN_IN_PROVIDERS` | `anthropic_subscription,chatgpt_subscription` | Instance-wide enable list |
 
 ## Testing

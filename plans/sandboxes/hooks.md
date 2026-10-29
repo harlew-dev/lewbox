@@ -25,7 +25,7 @@ The user's first sketch called this `execute: {onStart, onStop}`. We use `hooks`
 
 Nothing like it exists in legacy Lewbox:
 
-- **Start-up commands** are the image's own `CMD`/`ENTRYPOINT`, re-run on every start (after the nested-toolbox fix, [persistence](persistence.md#container-command)). There's no per-sandbox command and no way to run something after setup.
+- **Start-up commands** are the image's own `CMD`/`ENTRYPOINT`, re-run on every start (after the nested-toolbox fix, [persistence](persistence.md#the-images-command)). There's no per-sandbox command and no way to run something after setup.
 - **Nothing runs before a stop.** The gateway's stop runs Lewbox's own setup cleanup, only for stops it was asked for; AerolVM's timer stops run nothing ([timers-and-activity](timers-and-activity.md#today)).
 - **Nothing is removed before a snapshot** but Lewbox's own credentials, and those only for stops that were asked for (fixed in the rebuild by [profile-setup](profile-setup.md#credentials-never-enter-a-snapshot)).
 - **Lewagent builds it all itself.** Its Build panel runs each repository's setup as commands and watched sessions after the create, through the gateway (`lewagent-legacy/app/Actions/Setup/RunSetupStep.php`), with "commands run once (`create`), on every start (`start`), or by hand (`manual`)" (`lewagent-legacy/docs/todo.md` l.348). It asked Lewbox for **setup steps on create**, `setup: [{name, command, timeout}]`, run once after the clones and reported per step as `repositories` is, so installs "survive anything going wrong in Lewagent, and other apps get the same" (`lewagent-legacy/docs/services.md` § *What Lewbox needs*; `docs/todo.md` l.529). Its `small-todo.md` also wants a computer to clean up after itself.
@@ -85,7 +85,7 @@ Beside `hooks`, two more fields:
 | `on_start` | **Every start:** create (after `on_create`), start (in place or a resume on another node), restart | `create`, `start`, `restart`: step `hooks_ran` |
 | `on_stop` | **Every stop of a running sandbox**, whatever asked for it: a person or key, an idle timeout, a lifetime, credits, a budget, a suspension, a node drain moving it, a restart, and the stop of a sandbox that doesn't persist (which is a delete). And a `DELETE` of a running sandbox, unless `?hooks=false` | `stop`, `restart`, `delete`: step `stop_hooks_ran`, **first**, before Lewbox's harvest and cleanup |
 
-They don't run on `apply_setup`, on operations Lewbox runs for itself (a scrub by restart, [profile-setup](profile-setup.md#older-fork-releases)), or on a sandbox that isn't running when its stop begins (stopped by its node crashing, already stopped by AerolVM's backstop: then they ran there, [below](#when-lewbox-cant-act)).
+They don't run on `apply_setup`, on operations Lewbox runs for itself, or on a sandbox that isn't running when its stop begins (stopped by its node crashing, already stopped by AerolVM's backstop: then they ran there, [below](#when-lewbox-cant-act)).
 
 **In order:** a list runs top to bottom, the template's hooks before the sandbox's ([templates](#templates)). Foreground hooks run one at a time; a `background` hook starts its session and the next begins at once.
 
@@ -131,7 +131,7 @@ On the sandbox object, `hooks` holds the definitions (without `env`) and the las
 }
 ```
 
-- `status`: `succeeded`, `failed` (non-zero exit), `timed_out`, `killed`, `skipped` (with `error` saying why: `stop_grace_exhausted`, `required_failed`, `sandbox_not_running`, `fork_unsupported`), `running` (a background hook's session), or `started` (a background hook whose session is still up).
+- `status`: `succeeded`, `failed` (non-zero exit), `timed_out`, `killed`, `skipped` (with `error` saying why: `stop_grace_exhausted`, `required_failed`, `sandbox_not_running`), `running` (a background hook's session), or `started` (a background hook whose session is still up).
 - `stderr`: the last 2 KB of a hook that didn't succeed, redacted as command stderr is ([activity-and-webhooks/activity-log](../activity-and-webhooks/activity-log.md#whats-never-kept)): secrets Lewbox knows (the profile's credentials, the hook's own `env`) are removed by value, and token-shaped strings by pattern. Never stdout.
 - `runs` keeps the latest run of each hook; history is in the activity log.
 
@@ -198,7 +198,7 @@ Hooks are run by the stop operation, through the toolbox, when Lewbox decides to
 2. **Lewbox registers it** with AerolVM when the sandbox is created or started (`pre_stop: {command: "sh /run/lewbox/hooks/on-stop.sh", timeout: stop_grace + 15}`).
 3. **When the backstop fires**, AerolVM runs it, then stops the sandbox and emits `stopped` with `backstop: true`. When Lewbox next hears from the node, it offloads the sandbox as for any timer stop; the scrub reads `backstop.jsonl` (`read`) and then removes it (`remove`), and Lewbox turns it into the hooks report and `hook.ran` events, redacting stderr then. Harvest happens in the same scrub ([profile-setup](profile-setup.md#harvest-first)).
 
-On a fork release without F49, the backstop stops without running anything: `on_stop` hooks are reported `skipped` with `fork_unsupported`, and the scrub paths are still removed (F46). On one without F50 (no notify mode, so AerolVM stops on its timers as legacy does), timer stops take the same path as a backstop stop.
+F49 and F50 are in Lewbox's minimum fork release (P0), so every node has them; there's no path for a release without them ([D15](../README.md#decisions)).
 
 ## API
 
@@ -246,7 +246,7 @@ Run a hook again by hand? Not an endpoint: it's a [command](../inside-a-sandbox/
 
 - **Unit:** field validation (labels, timeouts, refused paths, `~` expansion), merging template and sandbox lists, the budget arithmetic for `stop_grace` and forced stops, the backstop script's rendering (golden files, `shellcheck` in CI).
 - **Fake toolbox:** hooks run in order with their env; a `required` failure skips the rest and fails the operation with the sandbox still running; a background hook becomes a session; `on_stop` killed at the grace, the rest `skipped`; stderr redacted by value.
-- **Fake AerolVM:** a notify-mode idle event leads to a stop operation whose first step runs `on_stop`; a backstop stop (no Lewbox) leads to the offload reading `backstop.jsonl` into the report; a fork without F49 reports `fork_unsupported`; user scrub paths appear in the scrub request and a missing one in the report fails the snapshot.
+- **Fake AerolVM:** a notify-mode idle event leads to a stop operation whose first step runs `on_stop`; a backstop stop (no Lewbox) leads to the offload reading `backstop.jsonl` into the report; user scrub paths appear in the scrub request and a missing one in the report fails the snapshot.
 - **Live, each isolation level:** a sandbox with `on_start` writing a file, `on_stop` committing in a repository and `scrub: ["~/secret.txt"]`; stop by request, by idle timeout and by the backstop (control plane stopped); start again: the commit is there, `~/secret.txt` isn't, and the snapshot's layers don't contain it.
 
 ## Build plan

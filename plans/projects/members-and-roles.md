@@ -61,7 +61,7 @@ A project's **members** are the users who manage it in the dashboard. Each has o
 | Credits and rates ([credits](../credits.md), Beta) | W | W | R | R |
 | Notifications | R | R | R | R |
 
-This table is the spec. It lives in code as one map from `(role, action)` to allowed, `internal/auth.Can(role, action)`, and every handler calls it with a named action (`profiles.keys.create`), never a role directly. The role-matrix test walks every route with every role ([Testing](#testing)).
+This table is the spec. It lives in code as one map from `(role, action)` to allowed, `internal/auth.Can(role, action)`, and every handler calls it with a named action, never a role directly. The actions are the [permission names](../api/permissions.md) (e.g. `profiles.keys`), plus the human-only ones (managing members, invitations and admin keys, deleting or transferring the project); the two plans must agree, and a test checks this table against the roles in the registry. The role-matrix test walks every route with every role ([Testing](#testing)).
 
 **A member can work inside sandboxes, which means they can read the profile's credentials there** (anything in a sandbox can). That's why members see credentials as write-only in the API but are trusted with sandboxes. A viewer can't open terminals or files for that reason.
 
@@ -145,7 +145,7 @@ Admin keys can't manage members: membership is about people, and is done by peop
 
 | Status | Code | When |
 |---|---|---|
-| `403` | `role_forbidden` | The caller's role can't do it, e.g. an admin inviting an owner |
+| `403` | `permission_denied` | The caller's role can't do it, e.g. an admin inviting an owner; the message names the role needed |
 | `403` | `invitation_email_mismatch` | Accepting an invitation for another address |
 | `409` | `already_member` | Inviting a member |
 | `409` | `last_owner` | Removing or demoting the last owner, or the last owner leaving |

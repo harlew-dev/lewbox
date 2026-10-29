@@ -1,6 +1,6 @@
 # Health and metrics
 
-> Status: Draft · Milestone: Alpha (M1; sandbox stats M2) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1); sandbox stats Beta (with F39) · Updated: 2026-10-29
 
 Lewbox knows each node's health from three sources:
 
@@ -180,19 +180,11 @@ When a node becomes `offline` or `unreachable`:
 - **Raw samples** (every 30 s, ~2,880 a day per node) are kept for 2 days; dropping a day's partition is instant.
 - **`node_metrics_5m`** (avg, max) is kept for 14 days; **`node_metrics_1h`** for 400 days. Each is computed by a leader job as each period closes.
 - **Uptime** is derived from samples: a node is up in a bucket when it was usable for most of its samples. Gaps count as down.
-- **Charts pick a table by range:** raw for ≤ 6 h, 5-minute for ≤ 14 days, hourly beyond. They answer at most ~500 points (`LEWBOX_METRICS_CHART_MAX_POINTS`).
+- **Charts pick a table by range:** raw for ≤ 6 h, 5-minute for ≤ 14 days, hourly beyond. They answer at most ~500 points (a constant in the API, not a setting).
 
 ### Sandbox stats
 
-Per sandbox, read from **outside** it, so reading never counts as activity ([F5](aerolvm-fork.md#process-and-exec-toolboxd)). The node agent reads each running sandbox once a heartbeat:
-
-| Runtime | Source |
-|---|---|
-| Docker, gVisor | The container's cgroup v2 files (`cpu.stat`, `memory.current`, …) found by container id. For gVisor, the sandbox's cgroup holds the Sentry and gofer, which is what the sandbox costs the host. Writable-layer size via `docker system df -v`, or `du` of the upper dir, every few minutes, as it's slow |
-| Firecracker | The VM's cgroup (jailer) for CPU and memory; the rootfs file's allocated size for disk |
-| Network, all runtimes | AerolVM `GET /v1/sandboxes/{id}/network/usage`, not a toolbox route (to confirm it doesn't count as activity), or the veth counters |
-
-Until the fork adds `GET /v1/sandboxes/{id}/stats` ([F39](aerolvm-fork.md#api-clustering-and-lifecycle)), this is the agent's job; after it, the agent calls that.
+**Beta, with the fork's F39.** Per sandbox, read from **outside** it, so reading never counts as activity ([F5](aerolvm-fork.md#process-and-exec-toolboxd)): the node agent calls the fork's `GET /v1/sandboxes/{id}/stats` (CPU, memory, writable-layer size, network) once a heartbeat ([F39](aerolvm-fork.md#api-clustering-and-lifecycle)). The agent doesn't read cgroups or `docker system df` itself: that was legacy's planned workaround for a gap in AerolVM, and the fork fills the gap instead ([D15](../README.md#decisions)). Until F39 is in the minimum release, sandboxes have no stats.
 
 - **Mapping:** the agent reports by AerolVM id; the control plane maps it to `sbx_` ids.
 - **Stored:**
@@ -270,10 +262,9 @@ This plan is the observability for nodes. Its own health:
 | `LEWBOX_NODE_OFFLINE_AFTER` | `90s` | |
 | `LEWBOX_NODE_LOST_AFTER` | `24h` | When *Mark lost* is offered |
 | `LEWBOX_MEMBERSHIP_SYNC_INTERVAL` | `30s` | |
-| `LEWBOX_METRICS_RAW_RETENTION` | `48h` | |
-| `LEWBOX_METRICS_5M_RETENTION` | `336h` | |
-| `LEWBOX_METRICS_1H_RETENTION` | `9600h` | |
-| `LEWBOX_METRICS_CHART_MAX_POINTS` | `500` | |
+| `LEWBOX_NODE_METRICS_RAW_RETENTION` | `48h` | |
+| `LEWBOX_NODE_METRICS_5M_RETENTION` | `336h` | |
+| `LEWBOX_NODE_METRICS_1H_RETENTION` | `9600h` | |
 
 ## Testing
 
@@ -286,7 +277,7 @@ This plan is the observability for nodes. Its own health:
   - `reachable: false`, and calls refused;
   - when the node is back: the reconciler run, then `apply_setup`.
 - **Rollups and partitions:** dropping a day; charts choosing the right table.
-- **Sandbox stats:** cgroup parsing (fixtures from Docker, gVisor and Firecracker hosts); mapping AerolVM ids.
+- **Sandbox stats (beta):** the F39 response mapped to `sandbox_stats`; mapping AerolVM ids.
 - **End to end:**
   - stop the agent → offline within 90 s, then back;
   - block 443 from the control plane → unreachable;
@@ -302,13 +293,13 @@ This plan is the observability for nodes. Its own health:
    - membership sync;
    - node events and notifications.
 2. **M1:** `node_metrics` partitions, rollups, charts API; uptime.
-3. **M2:** sandbox stats (agent, `sandbox_stats`, `GET /v0/sandboxes/{sbx}/stats`); `unreachable` from call failures.
+3. **M2:** `unreachable` from call failures.
 4. **M3:** *Mark lost*; Prometheus metrics.
-5. **Beta:** metering pauses on offline nodes ([credits/metering](../credits/metering.md)).
+5. **Beta:** metering pauses on offline nodes ([credits/metering](../credits/metering.md)); sandbox stats from the fork (F39: `sandbox_stats`, `GET /v0/sandboxes/{sbx}/stats`).
 
 ## Open questions
 
 1. **Thresholds:** 30 s heartbeats and 90 s offline. Tighter means faster detection but more noise for nodes on flaky links (homelabs). Should these be per cluster?
 2. **Refusing creates on `no_quorum`:** right for consumers, or should a create wait (up to the 60 s create wait) in case quorum returns?
 3. **Sandbox stats retention:** is 7 days of 5-minute history per sandbox enough? It's the largest table here with many sandboxes.
-4. **gVisor stats:** does the sandbox's cgroup (Sentry plus gofer) give consumers sensible numbers, or should it be scaled?
+4. **gVisor stats (beta):** does the fork's F39 report the sandbox's cgroup (Sentry plus gofer) as is, or scale it?

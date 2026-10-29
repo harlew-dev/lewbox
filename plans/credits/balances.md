@@ -147,7 +147,7 @@ Usage per sandbox isn't on the ledger (one usage transaction covers all of a pro
 | `description` | |
 | `reference` | Unique per profile; a repeat answers `409 reference_used` with the original transaction |
 
-Taking more than a bucket has is `422 insufficient_credits` (no overdraft for adjustments). Each is a checkpoint first.
+Taking more than a bucket has is `422 validation_failed` on `amount` (no overdraft for adjustments). Each is a checkpoint first.
 
 ### Verification
 
@@ -184,7 +184,6 @@ Amounts are decimal strings in responses (`"1250.50"`) to avoid float rounding; 
 | 402 | `credits_exhausted` | Create or start with balance ≤ 0 |
 | 409 | `subscription_exists` | A second subscription when not allowed |
 | 409 | `reference_used` | A reference already used on this profile; carries the `transaction` |
-| 422 | `insufficient_credits` | An adjustment taking more than there is |
 | 422 | `credits_disabled` | Buckets or transactions on a profile without credits |
 
 ## Security

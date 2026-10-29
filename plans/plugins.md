@@ -81,7 +81,7 @@ The rule for where something goes: **core is what every installation needs and w
 |---|---|---|---|---|
 | `limits` | feature | `profile_limits`; limit kinds; the admission check on create, start and settings changes; template limits; `…/limits` routes | Instance: on. Projects: on | M1 |
 | `credits` | feature | Credit buckets, the ledger, rates, budgets, usage roll-ups; admission (`402 credits_exhausted`); exhaustion and checkpoint jobs; `…/credit-*` and `…/usage` routes. **Requires `limits`**. `sandbox_runs` (when each sandbox ran, at what size) stays core, so usage history exists whether or not credits are on | Instance: on. Projects: **off** until a project turns it on | Beta |
-| `dns/libdns` | driver | DNS providers for clusters and the relay domain, through [libdns](https://github.com/libdns): Cloudflare (default, supported), Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC, RFC 2136; which are compiled in is set in `config.json` ([plugins/dns-providers](plugins/dns-providers.md)) | Instance: on | M1 |
+| `dns/libdns` | driver | DNS providers for clusters and the relay domain, through [libdns](https://github.com/libdns): **Cloudflare only in the alpha**; after it, Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC, RFC 2136; which are compiled in is set in `config.json` ([plugins/dns-providers](plugins/dns-providers.md)) | Instance: on | M1 (Cloudflare); Beta (the rest) |
 | `storage/s3` | driver | A storage provider (AWS S3, Cloudflare R2, MinIO, any S3-compatible store), and the node registry's `s3` driver | Instance: on | M1 |
 | `agents/claude-code` | agent | Claude Code's spec, its credentials (API key, subscription), sign-in flow, setup step, agentd driver, its lines in the provided `agents` template | Instance and projects: on | M3 |
 | `agents/codex` | agent | Codex's spec, credentials (API key, ChatGPT login), device sign-in, ChatGPT login refresh and harvest, setup step, the Codex stand-in driver | Instance and projects: on | M3 |
@@ -101,7 +101,7 @@ Three layers, each narrower than the last ([building-and-enabling](plugins/build
 
 **Disabling never deletes data.** A disabled plugin:
 
-- answers its routes with **`409 plugin_disabled`**, carrying `plugin: {name, scope: "instance" | "project"}` ([api/errors](api/errors.md#405-406-409)). `409` because the request is valid and the plugin exists, but the instance's or project's state refuses it, as `cluster_suspended` does;
+- answers its routes with **`409 plugin_disabled`**, carrying `plugin: {name, scope: "instance" | "project"}` ([api/errors](api/errors.md#405-406-409-410)). `409` because the request is valid and the plugin exists, but the instance's or project's state refuses it, as `cluster_suspended` does;
 - refuses new use elsewhere the same way: a conversation with a disabled agent, a token from a disabled Git host, a cluster saved with a disabled DNS provider;
 - stops contributing to admission (with `limits` off, nothing is limited; with `credits` off, nothing spends credits), lifecycle handlers and periodic jobs; its pending jobs for that scope are cancelled, and re-created by its `Reconcile` when it's turned back on;
 - **is removed from running sandboxes at once.** Turning it off enqueues an `apply_setup` on every running sandbox in scope, which runs the plugin's **cleanup** for what its last apply wrote (Git tokens, agent logins, telemetry keys) and doesn't apply it again; its **scrub paths still run** at the next snapshot for anything a sandbox that was stopped at the time still holds, so turning a plugin off can never leave its credentials in a sandbox or a snapshot ([extension-points](plugins/extension-points.md#setup-contributors), [projects/settings](projects/settings.md#plugins)). The sandboxes' own records (e.g. a `git` setting) are kept, so turning it back on and re-applying restores them;
@@ -175,7 +175,7 @@ plugins/
 ## Build plan
 
 1. **M0:** `plugin/` API skeleton, registry, dependency resolution, `plugins/config.json` and the generator, enablement (instance and project), route gating and `plugin_disabled`, plugin migrations, `/v0/meta` and the plugins routes, the core-only CI build ([registry-and-lifecycle](plugins/registry-and-lifecycle.md), [building-and-enabling](plugins/building-and-enabling.md)). About a week on top of M0's other work; it pays for itself in cleaner boundaries.
-2. **M1:** `limits`, `dns/libdns` (Cloudflare supported), `storage/s3` built as plugins with their contract suites.
+2. **M1:** `limits`, `dns/libdns` (Cloudflare only), `storage/s3` built as plugins with their contract suites.
 3. **M3:** `agents/claude-code`, `agents/codex`, `git/github`, `telemetry`.
 4. **M4:** dashboard slots and schema-driven settings forms; `lewbox plugins` CLI commands.
 5. **Beta:** `credits`; `lewbox build --with` documented for third parties.

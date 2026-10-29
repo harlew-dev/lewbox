@@ -47,7 +47,7 @@ What went wrong with this approach:
 |---|---|
 | **Keep** | Every timer's job, and its care: certificates checked against the CA and key before replacing; firewall rules added before old ones go, tagged and never touching others; SSH always allowed first; metrics from `/proc` with nulls for what can't be read; cleanup grace periods |
 | **Change** | Four bash scripts and timers → one Go daemon. Poll every minute → a persistent connection with pushes, and long-polling as a fallback. Settings fixed at enroll → a versioned node spec. "Reinstall to get the fix" → apply the new spec |
-| **Add** | Upgrades of AerolVM and the agent; drain handling; per-sandbox stats; delegated DNS-01; the tunnel; buffered metrics; a local status command |
+| **Add** | Upgrades of AerolVM and the agent; drain handling; buffered metrics; a local status command; lifecycle events. After the alpha: per-sandbox stats from the fork (F39), delegated DNS-01 (F43) and the tunnel |
 | **Drop** | `/usr/local/bin/lewbox-{cert-renewal,firewall,metrics,snapshot-cleanup}` and their units. On upgrade from a legacy node, the agent removes them ([migration](../migration.md)) |
 
 ## Design
@@ -104,34 +104,33 @@ The control plane computes each node's **spec** from its cluster, its project an
   "aerolvm": {
     "version": "v0.6.8-lewbox.2",
     "assets": { "base_url": "…", "checksums_sig": "…" },
-    "install_flags": ["--with-gvisor"],
+    "install_flags": [],                                  // "--with-gvisor" from the beta
     "env": {
-      "SB_CONTAINER_RUNTIME": "gvisor",
-      "SB_HOST_RUNTIMES": "docker,gvisor",
+      "SB_CONTAINER_RUNTIME": "docker",                   // the alpha runs `container` only
+      "SB_HOST_RUNTIMES": "docker",
       "SB_L4_PORT_RANGE_START": "22000", "SB_L4_PORT_RANGE_END": "23000",
       "SB_IMAGE_BUILD_TIMEOUT": "20m",
       "SB_SNAPSHOT_PUSH_ENABLED": "true",
       "SB_MIRROR_PUSH_HOST": "127.0.0.1:5000",
       "SB_IMAGE_DISTRIBUTION_AOCR_HOST": "127.0.0.1:5000",
-      "SB_AUTO_IMPORT_CLUSTER_ID": "clu_abc…",            // lowercased (F11)
+      "SB_AUTO_IMPORT_CLUSTER_ID": "clu_abc…",            // as it is; the fork lowercases paths (F11)
       "SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL": "30s",
       "SB_SNAPSHOT_PUSH_MAX_IN_FLIGHT": "2",
       "SB_HOST_DISK_GB": "900", "SB_DISK_RESERVATION_RATIO": "1.0"
     },
-    "runsc_flags": ["--host-uds=open", "--overlay2=none"],
-    "firecracker": null
+    "runsc_flags": null,                                  // gVisor nodes, from the beta
+    "firecracker": null                                   // Firecracker nodes, later
   },
   "registry": { "version": "3.1.2", "sha256": { "amd64": "…", "arm64": "…" }, "config": { /* storage, see storage-and-registry */ } },
   "firewall": { "enabled": true, "public": [ … ], "public_ranges": [ … ], "cluster": [ … ], "nodes": ["203.0.113.10", …] },
   "certificates": { "renew_within": "720h" },
-  "cleanup": { "snapshot_images": { "interval": "60s", "grace": "300s" } },
-  "heartbeat": { "interval": "30s", "sandbox_stats": true },
+  "heartbeat": { "interval": "30s" },
   "agent": { "version": "1.0.3", "sha256": { … } },
   "upgrade_window": null
 }
 ```
 
-- **Isolation levels are per node.** The cluster offers levels ([runtimes](runtimes.md#what-a-cluster-offers)); each node runs the ones its host can. The agent reports what the host supports in its preflight and heartbeats (`host_isolation`: Docker always; `gvisor` with cgroup v2; `microvm` with a readable `/dev/kvm`), and the control plane renders each node's spec from the cluster's levels intersected with the host's. So `SB_HOST_RUNTIMES` is per node (`docker,gvisor` on a node offering `container` and `gvisor`; `docker,gvisor,firecracker` on a KVM node offering all three; Docker is always listed, for builds, F22), `SB_CONTAINER_RUNTIME` is the cluster's default where the node runs it, `install_flags` add `--with-gvisor` only where needed, and `firecracker` (artifacts and pinned versions) is set only on nodes running `microvm`. The node records the levels it ended up running as `isolation_levels`; adding a level to a cluster installs its runtime on the nodes that can run it, at the next spec.
+- **Isolation levels are per node.** In the alpha every node runs `container` only, as above; the rest of this paragraph is how it works once `gvisor` (beta) and `microvm` (later) are offered. The cluster offers levels ([runtimes](runtimes.md#what-a-cluster-offers)); each node runs the ones its host can. The agent reports what the host supports in its preflight and heartbeats (`host_isolation`: Docker always; `gvisor` with cgroup v2; `microvm` with a readable `/dev/kvm`), and the control plane renders each node's spec from the cluster's levels intersected with the host's. So `SB_HOST_RUNTIMES` is per node (`docker,gvisor` on a node offering `container` and `gvisor`; `docker,gvisor,firecracker` on a KVM node offering all three; Docker is always listed, for builds, F22), `SB_CONTAINER_RUNTIME` is the cluster's default where the node runs it, `install_flags` add `--with-gvisor` only where needed, and `firecracker` (artifacts and pinned versions) is set only on nodes running `microvm`. The node records the levels it ended up running as `isolation_levels`; adding a level to a cluster installs its runtime on the nodes that can run it, at the next spec.
 - **Secrets aren't in the spec:** the PAT, gossip key, bucket keys and DNS token. They're sent once at install, or by an action when they change, and written to `0600` files. The spec only names their files and versions, so a spec in a log reveals nothing.
 - **Applying** goes in a fixed order, each step idempotent, each comparing what's there with what's wanted, and changing only what differs:
   1. agent version (self-update first, so the rest runs with the code that understands the spec);
@@ -141,17 +140,16 @@ The control plane computes each node's **spec** from its cluster, its project an
   5. registry;
   6. firewall;
   7. certificate settings;
-  8. cleanup;
-  9. heartbeat settings.
+  8. heartbeat settings.
 - **What needs a restart:**
 
 | Change | Takes effect by |
 |---|---|
 | A `sandboxd.env` change | `systemctl restart sandboxd`. Docker and gVisor containers keep running across a sandboxd restart; we confirm this in the fork's upgrade test, and for Firecracker VMs too (open question 2). Restarts are spread out within a cluster, at most one node at a time (a lock in the control plane) |
-| runsc flags | `systemctl reload docker` (SIGHUP), which doesn't touch running containers. Only sandboxes started afterwards get them, and the agent reports how many running sandboxes don't have them yet |
+| runsc flags (gVisor nodes, beta) | `systemctl reload docker` (SIGHUP), which doesn't touch running containers. Only sandboxes started afterwards get them, and the agent reports how many running sandboxes don't have them yet |
 
 - **The result is reported:** `spec_applied {version, ok, steps: [{name, changed, error}]}`. The dashboard shows each node's spec version and the last result; a node more than one version behind for 10 minutes raises a `node.spec_failed` notification.
-- **The spec replaces every hand-run fix** from legacy: gVisor host runtimes, the overlay flag, the TCP pool rule, build timeouts, push intervals, the cleanup timer.
+- **There are no hand-run fixes.** Legacy's (gVisor host runtimes, the overlay flag, the snapshot-image cleanup timer) are fixed in the fork ([D15](../README.md#decisions)); the spec holds configuration only: the TCP pool, the build timeout, the push interval, and from the beta the runsc flags.
 
 ### Firewall
 
@@ -186,8 +184,8 @@ Every 30 s (`heartbeat.interval`, was 60 s), [health-and-metrics](health-and-met
 - **AerolVM health:** `GET http://127.0.0.1:21212/health`, within 5 s.
 - **Host metrics:** CPU % since the last heartbeat; load averages; memory used (`MemTotal − MemAvailable`) and total; disk used and total under `/var/lib`; uptime.
 - **Versions:** AerolVM, the agent, runsc and Firecracker; kernel; CPU model.
-- **Per-sandbox stats** ([health-and-metrics](health-and-metrics.md#sandbox-stats)), read from cgroups and Docker. Never from the toolbox, as every toolbox request counts as activity ([F5](aerolvm-fork.md#process-and-exec-toolboxd)).
-- **Spec version**, and how many running sandboxes predate the current runsc flags.
+- **Per-sandbox stats** ([health-and-metrics](health-and-metrics.md#sandbox-stats)), from the fork's `GET /v1/sandboxes/{id}/stats` once it has it (F39, beta). The agent doesn't read cgroups itself.
+- **Spec version** (and, on gVisor nodes from the beta, how many running sandboxes predate the current runsc flags).
 
 While disconnected, heartbeats are buffered on disk, up to 24 h at one sample a minute, and sent when the connection is back, so the charts don't have gaps.
 
@@ -195,23 +193,15 @@ While disconnected, heartbeats are buffered on disk, up to 24 h at one sample a 
 
 AerolVM's events (fork changes F35 and F50, [aerolvm-fork](aerolvm-fork.md#api-clustering-and-lifecycle)) reach the control plane through the agent, so a sandbox's timers, stops and session ends are known in seconds without the control plane holding a stream open to every node:
 
-- The agent subscribes to AerolVM's local event socket (the Unix socket F50 adds; `GET /v1/events` on `127.0.0.1` otherwise), resuming from the last sequence number it acknowledged.
+- The agent subscribes to AerolVM's local event socket (the Unix socket F50 adds), resuming from the last sequence number it acknowledged.
 - It forwards each event as an `event` message on its connection: `idle_warning`, `idle`, `lifetime_reached`, `started`, `stopped` (with `reason`, `at`, `backstop`, and the pre-stop script's result), `destroyed`, `error`, `session_ended`, `snapshot_pushed`. The control plane answers `event_ack` once it has recorded it ([sandboxes/reconciler](../sandboxes/reconciler.md#events), [sandboxes/timers-and-activity](../sandboxes/timers-and-activity.md#lewbox-decides-when-to-stop)).
 - **While it can't reach the control plane** it keeps unacknowledged events in an append-only file under `/var/lib/lewbox/events/` (up to 10,000 events or 7 days, oldest dropped first, with a counter of dropped ones), and sends them in order on reconnect. Meanwhile AerolVM's backstop still stops sandboxes whose timers ran out, so nothing runs forever.
 - Without the WebSocket, it posts batches to `POST /node/v0/events`.
 - Events are at-least-once; the control plane deduplicates by `(node, seq)` and applies them with the reconciler's preconditions.
 
-### Snapshot image cleanup
+### Docker disk use
 
-Until the fork removes resume-pulled snapshot images itself ([F16](aerolvm-fork.md#snapshots-resume-and-the-registry)):
-
-- every `cleanup.snapshot_images.interval` (60 s), the agent lists images under `127.0.0.1:5000/cluster/<id>/snapshots/`;
-- it removes those no container uses, running or stopped, that were tagged more than `grace` (5 minutes) ago, so a resume or an upload in progress isn't caught;
-- AerolVM's own snapshots, base images and template images are never touched.
-
-It's turned off by the spec once every node in the cluster runs a fork release with F16.
-
-The agent also reports the node's Docker disk use (images, containers, build cache), so a full disk can be seen before it fails a create.
+Legacy's snapshot-image cleanup timer is gone: the fork removes resume-pulled snapshot images itself ([F16](aerolvm-fork.md#snapshots-resume-and-the-registry)), so the agent doesn't. It reports the node's Docker disk use (images, containers, build cache), so a full disk can be seen before it fails a create.
 
 ### Actions
 
@@ -224,7 +214,6 @@ The control plane can ask for one of a fixed set of actions. Anything else is re
 | `upgrade_agent` | Upgrade the agent now |
 | `renew_certificate` | Renew now (`--force`) |
 | `rotate_secret` | Write a new PAT, gossip key, bucket keys or DNS token, then restart what uses it |
-| `cleanup_images` | Run snapshot cleanup now |
 | `collect_diagnostics` | Bundle: the last 500 lines of the sandboxd, docker, caddy, registry and agent journals, `sandboxd.env` with secrets redacted, versions, `docker info`, `ufw status`. Sent to the control plane for the project (and support) to read |
 | `uninstall` | Remove the node ([installation](installation.md#removing-a-node)) |
 
@@ -248,7 +237,7 @@ A cluster has a target AerolVM version ([aerolvm-fork](aerolvm-fork.md#versions-
 
    Running sandboxes keep their old toolboxd until they restart, as it's bind-mounted at start. The node reports both versions.
 3. **On failure** (health doesn't come back within 2 minutes), the agent puts the previous binaries back, restarts, and reports. The roll stops, and the project is notified.
-4. **The cluster's `Features`** move to the new release once every node runs it.
+4. **The cluster's levels** follow its nodes' releases: a level is offered once every node meant to run it runs a release that supports it ([aerolvm-fork](aerolvm-fork.md#versions-in-lewbox)). Nodes never run below Lewbox's minimum release.
 
 ### Upgrading the agent
 
@@ -324,10 +313,9 @@ Settings flow to nodes through the spec, so they can change after install:
 | `LEWBOX_NODE_OFFLINE_AFTER` | `90s` | No heartbeat for this long marks a node offline |
 | `LEWBOX_CERTIFICATE_LIFETIME` | `2160h` (90 days) | See [pki-and-dns](pki-and-dns.md) |
 | `LEWBOX_CERTIFICATE_RENEW_WITHIN` | `720h` | |
-| `LEWBOX_SNAPSHOT_CLEANUP_INTERVAL`, `…_GRACE` | `60s`, `300s` | |
-| `LEWBOX_AEROLVM_BUILD_TIMEOUT` | `20m` | `SB_IMAGE_BUILD_TIMEOUT` |
-| `LEWBOX_SNAPSHOT_PUSH_RETRY` | `30s` | `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL` |
-| `LEWBOX_SANDBOX_TCP_PORTS` | `22000-23000` | |
+| `LEWBOX_TEMPLATE_BUILD_TIMEOUT` | `20m` | `SB_IMAGE_BUILD_TIMEOUT` |
+| `LEWBOX_NODE_SNAPSHOT_PUSH_RETRY` | `30s` | `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL` |
+| `LEWBOX_NODE_TCP_PORTS` | `22000-23000` | |
 
 Per cluster:
 
@@ -350,16 +338,15 @@ Per cluster:
    - `lewbox node run` with the WebSocket connection, hello and heartbeats (host metrics);
    - the spec, with appliers for AerolVM env, runsc flags, firewall and certificates;
    - `node_connections` and pushes across replicas.
-2. **M1:** snapshot cleanup; long-poll fallback; `lewbox node status`.
-3. **M2:** per-sandbox stats; diagnostics; actions.
+2. **M1:** lifecycle events; long-poll fallback; `lewbox node status`.
+3. **M2:** diagnostics; actions.
 4. **M3:** AerolVM rolling upgrades; agent self-update; upgrade windows.
-5. **M4:** delegated DNS-01 ([pki-and-dns](pki-and-dns.md)); tunnel mode ([connectivity](connectivity.md)).
-6. **Beta:** migration of legacy nodes ([migration](../migration.md)).
+5. **Beta:** migration of legacy nodes ([migration](../migration.md)); per-sandbox stats (F39); delegated DNS-01 ([pki-and-dns](pki-and-dns.md)); tunnel mode ([connectivity](connectivity.md)); gVisor nodes.
 
 ## Open questions
 
 1. **WebSocket or gRPC** for the agent's connection? WebSocket goes through more proxies and matches the rest of Lewbox; gRPC gives typed streams.
-2. **Restarting sandboxd for env changes:** confirm on each runtime that running sandboxes survive it, especially Firecracker VMs.
+2. **Restarting sandboxd for env changes:** confirm on Docker that running sandboxes survive it, and on gVisor and Firecracker when they come.
 3. **Upgrade windows:** per cluster only, or also a "do it now" for security releases that skips windows?
 4. **Who may trigger `collect_diagnostics`:** project admins only? It can include hostnames and IPs, but no secrets.
 5. **Should the agent also run on non-AerolVM hosts** (e.g. a relay host for the tunnel)? See [connectivity](connectivity.md#open-questions).

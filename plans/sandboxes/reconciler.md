@@ -42,7 +42,7 @@ The **session watcher** (same package) is described in [inside-a-sandbox/session
 
 | | |
 |---|---|
-| **Keep** | The 60 s pass. The checks above. Preconditions on every report. Inferring the reason as a fallback. Leaving unreachable nodes' sandboxes alone. Finishing AerolVM's own stops as operations |
+| **Keep** | The 60 s pass. The checks above. Preconditions on every report. Leaving unreachable nodes' sandboxes alone. Finishing AerolVM's own stops as operations |
 | **Change** | Runs on the **leader** only ([foundation/jobs-and-scheduling](../foundation/jobs-and-scheduling.md#leadership)). Driven first by **lifecycle events** from the node agent (fork change T4), with the pass as a backstop. Also checks sandboxes in transitional statuses with no live operation, and running sandboxes on offline nodes. Finds **orphans**. Reports through `sandboxes.Transition` with preconditions, in-process |
 | **Drop** | The internal `GET sandboxes` and `PATCH sandboxes/{sbx}` HTTP calls. Per-replica duplication |
 
@@ -55,7 +55,7 @@ With the fork's lifecycle events ([timers-and-activity](timers-and-activity.md#f
 - **`idle_warning`, `idle` and `lifetime_reached`** (notify-mode timers) go to the timers' handler, which warns, re-checks and enqueues the stop ([timers-and-activity](timers-and-activity.md#lewbox-decides-when-to-stop)). They're not the reconciler's: nothing has stopped yet.
 - **`stopped`, `destroyed`, `error`, `started`** get the same rules as the pass (below), for that one sandbox, at once. A `stopped` with `backstop: true` is an [AerolVM stop](#aerolvms-own-stops) like any timer stop, and its offload reads the pre-stop script's results ([hooks](hooks.md#when-lewbox-cant-act)).
 
-Events are at-least-once and may arrive out of order; they're deduplicated by `(node, seq)`, and the preconditions make stale ones harmless. **The pass stays** as the safety net for events lost before the node agent stored them and for fork releases without events; with events it runs every 5 minutes instead of every minute (`LEWBOX_RECONCILE_INTERVAL`).
+Events are at-least-once and may arrive out of order; they're deduplicated by `(node, seq)`, and the preconditions make stale ones harmless. **The pass stays** as the safety net for events lost before the node agent stored them (every node has events: they're in Lewbox's minimum fork release, F35); with events it runs every 5 minutes instead of every minute (`LEWBOX_RECONCILE_INTERVAL`).
 
 ### The pass
 
@@ -73,9 +73,9 @@ A periodic job, `reconcile.sandboxes`, every `LEWBOX_RECONCILE_INTERVAL` (60 s),
    |---|---|---|
    | `started`, on the recorded node | | Nothing. Refresh `last_active_at` |
    | `started`, on another node, or none recorded | | Correct `node_id` |
-   | `stopped` | Yes | `Transition` → `stopped` (reason from the event, else inferred), then a `stop` operation to offload it, reason the same ([AerolVM's own stops](#aerolvms-own-stops)) |
+   | `stopped` | Yes | `Transition` → `stopped` (reason from the event, or, when the pass finds it, from the fork's `stop_reason` on the sandbox, F35), then a `stop` operation to offload it, reason the same ([AerolVM's own stops](#aerolvms-own-stops)) |
    | `stopped` | No | Its destroy timer should have destroyed it, so this is a stop without one: `Transition` → `deleting`, and a `delete` operation |
-   | `destroyed`, or missing and `GET` says `404`/`410` | No | `Transition` → `deleted` (the destroy timer did it), reason inferred |
+   | `destroyed`, or missing and `GET` says `404`/`410` | No | `Transition` → `deleted` (the destroy timer did it), reason from the event or the fork's record; never inferred from timers |
    | `destroyed`, or missing and `GET` says `404`/`410` | Yes | `Transition` → `failed` with `node_lost`, or with `vanished` when its node is fine. See [open questions](#open-questions) |
    | `error` | | `Transition` → `failed`, with AerolVM's message in `status_reason.message` |
    | Missing, and its node is unreachable | | Nothing; the node's health decides ([nodes offline](#nodes-offline)) |

@@ -123,7 +123,7 @@ A `bigint`, incremented on every status change, starting at 1 on create. It's on
 | `image` | string | A public image reference (e.g. `ubuntu:24.04`, `ghcr.io/acme/tool:1.2`). Exactly one of `image` and `template` | |
 | `template` | string | A template id the profile can use ([templates](../templates.md#which-templates-a-profile-can-use)) | |
 | `cluster` | string | Name (`eu-west`) or `clu_` id. The key must reach it | [Cluster choice](#choosing-the-cluster) |
-| `isolation` | string | **New.** `container`, `gvisor` or `microvm`: offered by the cluster and allowed for the profile. Fixed for the sandbox's life | [Isolation choice](#choosing-the-isolation-level) |
+| `isolation` | string | **New.** `container`, `gvisor` or `microvm`: offered by the cluster and allowed for the profile (only `container` in the alpha). Fixed for the sandbox's life | [Isolation choice](#choosing-the-isolation-level) |
 | `cpu` | number | `0.1` to `256`, at most 3 decimal places (stored as millicores) | The template's, else `lewbox.sandboxes.defaults.cpu` (2), capped at the profile's `sandbox_vcpus` |
 | `memory_mb` | integer | ≥ 128 | Template's, else 4096, capped at `sandbox_memory_mb` |
 | `disk_gb` | integer | ≥ 1 | Template's, else 20, capped at `sandbox_disk_gb` |
@@ -159,7 +159,7 @@ Otherwise: `422 cluster_required`. A suspended cluster that was chosen is refuse
 
 #### Choosing the isolation level
 
-After the cluster, the sandbox's [isolation level](../clusters/runtimes.md#isolation-levels) (`container` on Docker, `gvisor`, `microvm` on Firecracker), the first of:
+After the cluster, the sandbox's [isolation level](../clusters/runtimes.md#isolation-levels) (`container` on Docker; `gvisor` from the beta; `microvm` on Firecracker later). **In the alpha every cluster offers only `container`**, so a create asking for another level is `422 isolation_unavailable` (`reason: not_offered`). The level is the first of:
 
 1. The request's `isolation`. It must be offered by the cluster and allowed for the profile ([profiles § Isolation](../profiles.md#isolation)), or it's `422 isolation_unavailable` (`reason: not_offered` or `not_allowed`).
 2. The profile's `default_isolation`, if the cluster offers it.
@@ -184,7 +184,7 @@ All in one transaction (`sandboxes.Create`):
 2. **Lock the profile row** (`FOR UPDATE`), so two creates can't both take the last slot.
 3. Refuse a suspended profile (`403 profile_suspended`, though auth catches it first).
 4. Choose the cluster, the isolation level and the build (a build for the level's image kind: an OCI image, or a Firecracker template at `microvm`; [templates/builds](../templates/builds.md#firecracker-clusters)).
-5. Refuse `persist` on a cluster without cloud storage, or at a level that can't snapshot there, such as `microvm` until Firecracker snapshots are in the fork (`422 persistence_unsupported`, [persistence](persistence.md#firecracker)). Refuse `gpu` at a level other than `container`.
+5. Refuse `persist` on a cluster without cloud storage, or at a level that can't snapshot there (`422 persistence_unsupported`, [persistence](persistence.md#firecracker)). In the alpha the only level is `container`, which can; anything else is refused earlier as `isolation_unavailable`. Refuse `gpu` at a level other than `container`.
 6. Resolve the size and timers.
 7. Check limits ([limits](../limits.md)): `running_sandboxes`, `vcpus`, `memory_mb`; `storage_gb` when it persists; budgets and credits when [credits](../credits.md) is on (`402 credits_exhausted`, `429 limit_exceeded` with `limit`).
 8. Insert the sandbox (`creating`, `status_sequence = 1`) with `env` encrypted ([foundation/secrets-and-encryption](../foundation/secrets-and-encryption.md)).
@@ -194,7 +194,7 @@ All in one transaction (`sandboxes.Create`):
 
 #### Waiting
 
-- `wait: true` (the default): the handler waits for the operation to finish, up to `LEWBOX_SANDBOX_CREATE_WAIT` (60 s). It listens on `operation_finished` and re-reads the row, so it doesn't matter which replica runs the job.
+- `wait: true` (the default): the handler waits for the operation to finish, up to `LEWBOX_CREATE_WAIT` (60 s). It listens on `operation_finished` and re-reads the row, so it doesn't matter which replica runs the job.
   - Succeeded: `201` with the sandbox, `running`.
   - Failed: `502 create_failed` or `503 cluster_capacity_exceeded`, naming the sandbox, which is left `failed`.
   - Still going: `202` with the sandbox, `creating`, and its `operation`.
@@ -326,7 +326,6 @@ CREATE TABLE sandboxes (
   status_reason      jsonb,
   status_changed_at  timestamptz NOT NULL,
   runtime_id         text,                                  -- AerolVM's sandbox id; changes on each resume
-  container_command  text[],                                -- see persistence
   latest_snapshot_id bigint,                                -- REFERENCES sandbox_snapshots
   setup              jsonb,                                 -- the setup report
   repositories       jsonb,                                 -- the clone report
@@ -353,7 +352,7 @@ CREATE UNIQUE INDEX ON sandboxes (profile_id, idempotency_key) WHERE idempotency
 Changes from legacy:
 - `aerolvm_id` becomes `runtime_id`.
 - `isolation` is new: legacy had one runtime per cluster, so a sandbox had none of its own.
-- `command` becomes `container_command text[]`.
+- `command` is dropped: the fork keeps a resumed sandbox's command right (F10), so Lewbox records none ([persistence](persistence.md#the-images-command)).
 - `snapshot` becomes a reference to `sandbox_snapshots`.
 - `tenant_id` becomes `project_id`.
 - `env` is encrypted with the keyring rather than `APP_KEY`.
@@ -422,7 +421,7 @@ Admin keys use the same endpoints, reaching every sandbox in their project. Ther
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_SANDBOX_CREATE_WAIT` | `60s` | How long a waiting create waits |
+| `LEWBOX_CREATE_WAIT` | `60s` | How long a waiting create waits |
 | `LEWBOX_SANDBOX_DEFAULT_CPU` | `2` | |
 | `LEWBOX_SANDBOX_DEFAULT_MEMORY_MB` | `4096` | |
 | `LEWBOX_SANDBOX_DEFAULT_DISK_GB` | `20` | |

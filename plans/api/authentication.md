@@ -225,12 +225,12 @@ The rule: `404` when the principal may not know the resource exists; `403` when 
 | Variable | Default | |
 |---|---|---|
 | `LEWBOX_SANDBOX_KEY_TTL` | `15m` | Sandbox key lifetime |
-| `LEWBOX_SESSION_TTL` | `720h` | Session lifetime (sliding) |
-| `LEWBOX_SESSION_IDLE_TTL` | `168h` | Session idle timeout |
+| `LEWBOX_USER_SESSION_IDLE` | `720h` | A dashboard session ends after this long unused (sliding) ([projects/users-and-login](../projects/users-and-login.md)) |
+| `LEWBOX_USER_SESSION_MAX` | `2160h` | A dashboard session ends this long after its sign-in code, however active |
 | `LEWBOX_SETUP_LINK_TTL` | `168h` | Setup link lifetime |
-| `LEWBOX_SETUP_SESSION_TTL` | `1h` | Setup session lifetime |
-| `LEWBOX_AGENTD_TOKEN_TTL` | `24h` | agentd token lifetime |
-| `LEWBOX_AUTH_CACHE_TTL` | `10s` | Principal cache |
+| `LEWBOX_SETUP_LINK_SESSION_TTL` | `1h` | Setup session lifetime |
+| `LEWBOX_AGENT_TOKEN_TTL` | `24h` | agentd token lifetime |
+| `LEWBOX_AUTH_CACHE_TTL` | `5s` | Principal cache, per replica; revocations also invalidate it through `NOTIFY` |
 
 ## Testing
 

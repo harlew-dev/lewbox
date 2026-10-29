@@ -70,7 +70,7 @@ Lewbox keeps the bucket tidy itself, as nothing in AerolVM or the registry does.
 | **Keep** | The per-node Distribution registry, its config and limits, the bucket layout, presigned downloads, no registry auth on localhost, the connection test, GC on the bucket in three passes with a grace period |
 | **Change** | Installed by the install script → part of the node spec, so registry upgrades and config changes reach existing nodes ([node-agent](node-agent.md#desired-state)). `r2`/`s3` → also `s3_compatible` with an endpoint (MinIO, Backblaze B2, Wasabi, Ceph, Hetzner Object Storage). GC from a PHP command → a Go job on the leader. GC race → closed with a mark phase recorded in Postgres ([below](#garbage-collection)) |
 | **Add** | Flattening snapshots (F14), compression settings (F15), usage per profile and template, a storage overview on the cluster page, a bucket-wide size check before deleting |
-| **Drop** | The node-side cleanup timer as a separate script: it becomes part of the node agent, and goes once F16 is fixed in the fork |
+| **Drop** | The node-side snapshot-image cleanup timer: the fork removes those images itself (F16, P0), so neither a script nor the node agent does it |
 
 ## Design
 
@@ -136,7 +136,7 @@ Part of the node spec ([node-agent](node-agent.md#desired-state)):
 | Firecracker template (rootfs + memory snapshot) | `cluster/<clu>/templates/<tid>` (AerolVM's layout) | AerolVM `POST /v1/templates` | Peers, lazily; placement prefers nodes that have it cached |
 | Sandbox snapshot | `cluster/<clu>/snapshots/<sbx>-<op>` (lowercased) | AerolVM's snapshot push, after `POST /v1/sandboxes/{id}/snapshot` | The node resuming it |
 
-All names are lowercased (the cluster id too, F11): Docker refuses repository names with capitals.
+All names are lowercase, as Docker refuses repository names with capitals. The fork lowercases the whole path, cluster id included (F11), so Lewbox passes ids as they are.
 
 ### Offload and resume
 
@@ -161,9 +161,9 @@ What this plan owns is how long that takes, and how big it grows:
 Each stop adds a layer on top of the last. Overlay caps an image at ~125 layers, files deleted in the sandbox still take space in older layers, and every resume downloads them all.
 
 - **The sandbox records `snapshot_layers`:** the count after each stop, read from the snapshot's manifest.
-- **Past `LEWBOX_SNAPSHOT_FLATTEN_AFTER` layers** (default 20), the next stop asks for `flatten: true` (F14). The fork exports the container's filesystem and imports it as one layer.
+- **Past `LEWBOX_SNAPSHOT_MAX_LAYERS` layers** (default 32, [sandboxes/persistence](../sandboxes/persistence.md)), the next stop asks for `flatten: true` (F14). The fork exports the container's filesystem and imports it as one layer.
 - **That stop is slower,** as it uploads everything, but every later resume is faster and the old snapshots become collectable.
-- **Before F14:** past 100 layers, Lewbox warns the project that the sandbox will soon stop being able to persist, and offers *Flatten* (a stop that exports via the toolbox and re-imports through a build), which is slow but safe (open question 3).
+- **If F14 misses the alpha** (it's P1), there's no Lewbox-side flatten: past 100 layers the dashboard and the sandbox's `warnings` say it will soon stop being able to persist, and to stop it on a release with F14. No workaround ([D15](../README.md#decisions)).
 
 ### Garbage collection
 
@@ -238,7 +238,7 @@ Consumers see the effects only through `persistence_unsupported`, `template_unav
   - written to nodes in `0640` files readable only by the registry's user;
   - never shown again after saving;
   - never in the spec or in logs.
-- **The registry listens only on localhost.** Sandboxes must not reach it: verify on each runtime that a sandbox can't connect to the host's `127.0.0.1:5000` (Docker's default bridge doesn't route to host loopback; gVisor and Firecracker likewise). Add a firewall rule anyway.
+- **The registry listens only on localhost.** Sandboxes must not reach it: verify that a sandbox can't connect to the host's `127.0.0.1:5000` (Docker's default bridge doesn't route to host loopback; check gVisor and Firecracker likewise when they come). Add a firewall rule anyway.
 - **Presigned URLs** are short-lived (the registry's default, 20 minutes), and only for blobs.
 - **GC deletes only within `cluster/<id>/` prefixes** of clusters the bucket belongs to, and blobs nothing links to. It never touches other keys in the bucket.
 
@@ -262,8 +262,8 @@ Consumers see the effects only through `persistence_unsupported`, `template_unav
 | `LEWBOX_REGISTRY_VERSION` | `3.1.2` | Distribution version in the spec |
 | `LEWBOX_REGISTRY_GC_INTERVAL` | `1h` | |
 | `LEWBOX_REGISTRY_GC_GRACE` | `6h` | |
-| `LEWBOX_SNAPSHOT_PUSH_MAX_IN_FLIGHT` | `2` | |
-| `LEWBOX_SNAPSHOT_FLATTEN_AFTER` | `20` | Layers before a stop flattens |
+| `LEWBOX_NODE_SNAPSHOT_PUSH_MAX_IN_FLIGHT` | `2` | |
+| `LEWBOX_SNAPSHOT_MAX_LAYERS` | `32` | Layers above the base image before a stop flattens ([sandboxes/persistence](../sandboxes/persistence.md)) |
 
 ## Testing
 
@@ -296,6 +296,6 @@ Consumers see the effects only through `persistence_unsupported`, `template_unav
 
 1. **Instance-provided storage on lewbox.com:** may a project use Harlew's bucket (billed by usage) instead of bringing its own?
 2. **Moving a cluster to another bucket:** support a copy-and-switch, or require a new cluster?
-3. **Flattening before F14:** worth building a slow Lewbox-side flatten, or wait for the fork?
+3. ~~**Flattening before F14.**~~ Decided (2026-10-29): no Lewbox-side flatten; wait for the fork ([D15](../README.md#decisions)).
 4. **`storage_gb`:** keep counting declared `disk_gb` of persisted sandboxes (predictable), or switch to real snapshot bytes (accurate, but it changes after every stop)?
 5. **Warm images:** which template builds to keep pre-pulled on each node, and how much node disk to give them?

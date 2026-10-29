@@ -35,7 +35,7 @@ Two timers stop a sandbox on their own, so a forgotten one doesn't keep running:
 |---|---|
 | **Keep** | Fields, ranges, limits and defaults. AerolVM keeps time on the node (it sees every toolbox request), and still stops a sandbox itself as a backstop if Lewbox doesn't. `stop_*` vs `destroy_*` by `persist`. Lifetime counts from each start and from a change. Touches during streams. Agent heartbeats |
 | **Change** | **Lewbox decides when to stop.** The fork's timers run in *notify* mode: they emit `idle_warning`, `idle` and `lifetime_reached`, the node agent forwards them, and Lewbox re-checks and runs a normal `stop` operation, hooks first ([Lewbox decides when to stop](#lewbox-decides-when-to-stop)). The fork stops the sandbox itself only after a grace period, running a script Lewbox registered. Port traffic counts as activity (in the fork's proxy). The fork exposes `last_active_at`, shown on the sandbox. Touches go through a dedicated `POST …/activity` on the fork rather than `toolbox/health`, and the API gets `POST /v0/sandboxes/{sbx}/touch` |
-| **Drop** | Inferring the reason from timers (kept only as a fallback for older fork versions). Watched-session polling as a side-effect keep-awake (sessions get an explicit `keep_awake`; [inside-a-sandbox/sessions](../inside-a-sandbox/sessions.md)) |
+| **Drop** | Inferring the reason from timers: the fork's events carry it (F35, F50). Touching the toolbox while streams move: the fork counts stream bytes (F5). No fallback for fork releases without notify mode ([D15](../README.md#decisions)). Watched-session polling as a side-effect keep-awake (sessions get an explicit `keep_awake`; [inside-a-sandbox/sessions](../inside-a-sandbox/sessions.md)) |
 
 ## Design
 
@@ -74,9 +74,9 @@ The lifecycle is set:
 | Counts | How AerolVM learns of it |
 |---|---|
 | Any request inside the sandbox: a command, a session start or read, a file read or write, a directory listing | It's a toolbox request; AerolVM counts it when it starts |
-| Data moving on a stream: streamed command output, an interactive command, an attached session, a file transfer | Lewbox touches the sandbox at most once per `LEWBOX_ACTIVITY_INTERVAL` (60 s) while bytes move |
+| Data moving on a stream: streamed command output, an interactive command, an attached session, a file transfer | The fork counts bytes moving on its streams, at most once a minute (F5) |
 | An agent turn running, waiting on an approval or question, or with background work | agentd's heartbeat upload, at least once a minute while not idle; each upload touches the sandbox |
-| A session started with `keep_awake: true` (new; was a side-effect of `watch`) | Lewbox touches it every interval while the session runs |
+| A session started with `keep_awake: true` (new; was a side-effect of `watch`) | The fork counts it as activity while it runs (part of F36) |
 | **Traffic through an exposed port** (new) | Fork change T2: AerolVM's proxy (Caddy route or TCP proxy) counts a request or a connection with bytes moving, at most once per interval |
 | SSH sessions | AerolVM already counts SSH activity |
 
@@ -87,7 +87,7 @@ The lifecycle is set:
 | Lewbox's own maintenance: the reconciler, setup refreshes, token refreshes | Fork change T3: Lewbox's maintenance calls carry `X-Lewbox-Maintenance: 1`, which AerolVM doesn't count. Today they count, so a token refresh every 5 minutes could keep a sandbox awake for good; legacy avoided it only because refreshes were rare |
 | A command running silently for longer than the idle timeout | Nothing moves. The docs advise a longer timeout, or streaming output |
 
-`Touch` is `POST /v1/sandboxes/{id}/activity` on the fork (T3; falls back to `GET …/toolbox/health` on older versions). It's rate-limited per sandbox per replica in memory; with several replicas, at most one touch per replica per interval, which is fine.
+`Touch` is `POST /v1/sandboxes/{id}/activity` on the fork (T3, in the minimum release), for activity only Lewbox can see: agent turns, and the consumer's own `POST /v0/sandboxes/{sbx}/touch`. It's rate-limited per sandbox per replica in memory; with several replicas, at most one touch per replica per interval, which is fine.
 
 ### Lewbox decides when to stop
 
@@ -108,7 +108,7 @@ idle + backstop_after, no stop ─▶ (fork runs pre_stop script, stops) ─▶ 
 2. **Expiry.** At `idle_timeout` without activity AerolVM emits `idle`; at the lifetime, `lifetime_reached`. Each carries `at`, `last_active_at` and the AerolVM id; the node agent forwards it at once ([clusters/node-agent](../clusters/node-agent.md#lifecycle-events)).
 3. **Re-check** (idle only; a lifetime stops a sandbox busy or not). Lewbox knows of activity AerolVM can't see, so before stopping it checks, in this order, and if any is true it **touches** the sandbox (re-arming the idle timer) and records `idle_deferred` in the activity log with the reason:
    - an agent turn running, waiting on an approval or question, or with background tasks ([agents](../agents.md));
-   - a stream through Lewbox with bytes moving in the last `LEWBOX_ACTIVITY_INTERVAL`: an attached terminal, a streamed command, a file transfer;
+   - a stream through Lewbox with bytes moving in the last `LEWBOX_ACTIVITY_TOUCH_INTERVAL`: an attached terminal, a streamed command, a file transfer;
    - a session with `keep_awake`;
    - a touch received through the API since AerolVM's `last_active_at` (a race between a touch and the event).
 
@@ -126,13 +126,9 @@ If Lewbox doesn't stop the sandbox, AerolVM does, so a sandbox never runs foreve
 - The node agent buffers events while it can't reach the control plane (on disk, up to 10,000 or 7 days) and sends them when it can. Lewbox then records the stop, ends metering at `at`, and offloads the sandbox as for any timer stop ([reconciler](reconciler.md#aerolvms-own-stops)): the node scrub removes credentials and the user's scrub paths, reads the hooks' results and the harvest, and checks before upload.
 - `lewbox_timer_backstop_stops_total` counts these; any at all while the control plane is healthy is a bug, and alerts.
 
-#### Without notify mode
+#### No fallback without notify mode
 
-On a fork release without F50, AerolVM stops sandboxes on its timers itself, as legacy did:
-
-- **With F49** (a pre-stop script but no notify mode): the registered script runs before the timer stop, so hooks and cleanup still run, without Lewbox's re-check; then the offload as above.
-- **Without F49:** nothing runs in the sandbox; `on_stop` hooks are reported `skipped` (`fork_unsupported`). Lewbox's credentials and the user's scrub paths are still removed by the node scrub (F46) before any upload ([profile-setup](profile-setup.md#credentials-never-enter-a-snapshot)).
-- **Noticing it:** with lifecycle events (F35) at once; otherwise the reconciler's pass within a minute, inferring the reason from the timers as legacy does.
+Notify-mode timers (F50), the pre-stop script (F49) and lifecycle events (F35) are P0 and in Lewbox's minimum fork release, so every node has them. There's no second way to handle a timer stop: no reconciler inferring a reason from timers, and no timer stop that skips hooks ([D15](../README.md#decisions)).
 
 ### Stop reasons
 
@@ -211,7 +207,7 @@ Not security-sensitive, except that timers bound cost when credentials leak. A l
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_ACTIVITY_INTERVAL` | `60s` | Most frequent touch per sandbox per replica |
+| `LEWBOX_ACTIVITY_TOUCH_INTERVAL` | `60s` | Most frequent touch per sandbox per replica |
 | `LEWBOX_SANDBOX_MAX_TIMER` | `720h` | Upper bound on both timers (AerolVM's `MaxLifecycle`) |
 | `LEWBOX_IDLE_WARN_BEFORE` | `5m` | Default `warn_before` for new sandboxes |
 | `LEWBOX_TIMER_BACKSTOP_GRACE` | `10m` | How long after a timer expires the fork waits for Lewbox before stopping the sandbox itself; at least `stop_grace` + 5 minutes per sandbox |
@@ -219,7 +215,7 @@ Not security-sensitive, except that timers bound cost when credentials leak. A l
 ## Testing
 
 - **Unit:** the lifecycle mapping for persist and non-persist, in-place starts (age arithmetic) and T1.
-- **Fake AerolVM:** timers fire on a fake clock; touches reset idle; maintenance calls don't (T3); lifecycle events (T4) arrive and are recorded; without events, the reconciler infers.
+- **Fake AerolVM:** timers fire on a fake clock; touches reset idle; maintenance calls don't (T3); lifecycle events (T4) arrive and are recorded.
 - **Notify mode:** `idle_warning` becomes a webhook; `idle` with a running agent turn is deferred (touch, `idle_deferred`); `idle` on a quiet sandbox enqueues one stop even when the event arrives twice; the stop disarms the timers before its hooks; with the control plane stopped, the backstop fires after the grace, runs the script, and the later offload reads its results; `lifetime_reached` stops a busy sandbox.
 - **Streams:** a long download with data moving keeps the sandbox; a silent one doesn't.
 - **Live:** a sandbox with `idle_timeout: 120` and a desktop open through a private port stays up while the desktop is used (needs T2), and stops after it's closed.
@@ -227,11 +223,11 @@ Not security-sensitive, except that timers bound cost when credentials leak. A l
 ## Build plan
 
 1. `internal/sandboxes/timers.go`: lifecycle mapping; settings changes applying it.
-2. Touch helper (`internal/aerolvm.Touch` with rate limiting) used by streams, agent uploads and keep-awake sessions.
+2. Touch helper (`internal/aerolvm.Touch` with rate limiting) used by agent uploads and the touch endpoint.
 3. `last_active_at` refresh; derived fields.
 4. Event intake from the node agent (with [reconciler](reconciler.md)): `idle_warning`, `idle`, `lifetime_reached`, `stopped`.
 5. The re-check, the stop enqueue and the timer disarm step; `POST /v0/sandboxes/{sbx}/touch`.
-6. Fork work: T3, T5 and **T7 (notify mode, F50) for the alpha**; T6 (F49) with it, as the backstop's hooks need it; T2 and T4 as soon after as possible (T2 matters to Lewagent's desktops); T1 when convenient.
+6. Fork work, all P0 for the alpha (in the minimum release): T3 (touch and maintenance), T4 (events, F35), T5, T6 (pre-stop, F49), T7 (notify mode, F50), and T2 (port traffic as activity, which Lewagent's desktops need); T1 with them.
 
 ## Open questions
 

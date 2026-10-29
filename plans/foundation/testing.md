@@ -18,7 +18,7 @@ How Lewbox is tested: the layers of tests, a real Postgres in every database tes
 
 - **Real Postgres in every test that touches data.** No SQLite, no mocks of the database.
 - **Fast**: the whole Go suite under 2 minutes on CI, parallel by default.
-- **Fakes that behave like the real thing,** including its bugs (gVisor's lost exit codes, toolbox warm-up, non-unique session names), kept honest by running the same tests against the real thing nightly.
+- **Fakes that behave like the real thing:** the AerolVM fake plays Lewbox's **minimum fork release** as its contract says, not legacy's bugs, since Lewbox has no workarounds for them ([D15](../README.md#decisions)). Kept honest by a contract suite run against a real node nightly.
 - **Deterministic time.**
 - **The API tested as clients see it**, and checked against the OpenAPI document.
 
@@ -33,7 +33,7 @@ How Lewbox is tested: the layers of tests, a real Postgres in every database tes
 | API | The real router, auth, services and workers in-process, against a real database and fakes; requests as a client sends them | `internal/httpapi/*_test.go`, `internal/e2e` | Every push |
 | Dashboard | Vitest for components and hooks; Playwright against `lewbox serve` with fakes | `web/` | Every push |
 | SDK contract | The TypeScript and PHP SDKs' own suites against a test `lewbox serve` with fakes | `sdks/*` | Every push touching the API or an SDK |
-| Real cluster | End-to-end scenarios against real nodes running the AerolVM fork on Docker, gVisor and Firecracker | `test/realcluster` | Nightly, and before each release |
+| Real cluster | End-to-end scenarios against real nodes running the AerolVM fork on Docker (gVisor from the beta, Firecracker later) | `test/realcluster` | Nightly, and before each release |
 | Load | Throughput and latency under load; big tables | `test/load` | Weekly, and before releases |
 
 ### Postgres
@@ -55,8 +55,8 @@ All under `internal/testing/`, each an `httptest.Server` (or an in-process imple
 
 | Fake | Stands in for | Notes |
 |---|---|---|
-| `aerolvmtest` | An AerolVM cluster: several nodes, sandboxes, snapshots, registry push, images and builds, lifecycle timers, sandbox index, Daytona snapshot routes | Ported from the gateway. Grows to cover what the fork adds (session-ended callbacks, stop callbacks, build logs, Firecracker snapshots) as the fork does ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)) |
-| `aerolvmtest` toolbox | `toolboxd` in each sandbox: execute, exec stream, sessions, attach, logs, signal, resize, envd files and filesystem, ports, health | Ported. Keeps the bug simulations (lost exit codes, warm-up, non-unique session names), each tied to a [lessons](../lessons.md) entry, and removed when the fork's fix ships and Lewbox's workaround is deleted |
+| `aerolvmtest` | An AerolVM cluster on the minimum fork release: several nodes, sandboxes, snapshots on `/v1` with scrub and `reset_config`, registry push, images and builds, notify-mode timers and the backstop, lifecycle and session events, owner nodes, coded errors | Ported from the gateway, minus legacy's bugs and the Daytona routes. Grows with the fork ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)) |
+| `aerolvmtest` toolbox | `toolboxd` in each sandbox: execute, exec stream, sessions (`if_absent`), attach, logs, signal, resize, envd files and filesystem, ports, readiness | Ported, without legacy's bug simulations (lost exit codes, warm-up guessing, non-unique session names): the fork fixes those, and [lessons](../lessons.md) records each |
 | `githubtest` | GitHub REST: App JWT auth, `GET /app`, manifest conversion, installation tokens (repositories and permissions checked as GitHub checks them), user OAuth and refresh, repositories and branches, webhooks signed with `X-Hub-Signature-256`; Git smart HTTP over a real bare repository (`git http-backend`) for the [push recipe](../git/integrating.md#testing). No pull request or `git-receive-pack` server of our own: Lewbox no longer does those | Grown from legacy `lewboxtest/github.go` and the PHP tests |
 | `smtptest` | An SMTP server | In-process; captures messages so tests can read sign-in codes |
 | `acptest` | `claude-agent-acp` and `codex-acp` | The test binary re-executed as a scripted adapter (`AGENTD_FAKE_ADAPTER=1`), kept from the gateway. Scripts: text, reasoning, tool calls, approvals, questions, plans, usage, background tasks, errors, crashes |
@@ -116,10 +116,10 @@ Go native fuzzing (`go test -fuzz`) for anything that parses untrusted input: Do
 
 Nightly, and before every release:
 
-- Three small test clusters, kept running: Docker, gVisor, Firecracker (when the fork supports its snapshots), amd64 and one arm64. Nodes on cheap cloud VMs, installed with `lewbox node install` from the build under test.
+- Small test clusters, kept running: Docker for the alpha, on amd64 and one arm64; a gVisor cluster from the beta and a Firecracker one when upstream ships it. Nodes on cheap cloud VMs, installed with `lewbox node install` from the build under test.
 - A test control plane (`lewbox serve` from the build) with its own Postgres.
 - Scenarios, as a Go test suite using the generated Go client:
-  - Create from an image and a template; run commands; streaming and interactive; sessions with exit codes (the gVisor recovery path); files up and down (large ones); ports public, TCP and private (opened with a real browser via Playwright, including in an iframe with partitioned cookies).
+  - Create from an image and a template; run commands; streaming and interactive; sessions with exit codes; files up and down (large ones); ports public, TCP and private (opened with a real browser via Playwright, including in an iframe with partitioned cookies).
   - Persist: stop, start on another node, files kept, persisted ports re-exposed, the image's command running again (the nested-toolbox lesson).
   - Idle timeout and lifetime stop a sandbox; the reconciler records it within 2 minutes.
   - Template build, then a sandbox from it.

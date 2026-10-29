@@ -27,8 +27,8 @@ A private port is an `http` port that only a browser holding a link Lewbox signe
 - Links last a minute, so Lewagent's shareable "Copy link" is its own route that mints a fresh one.
 
 **What's wrong:**
-1. **The double-proxy bug.** The toolbox's session names aren't unique, so a second start of a port's proxy made a second session. It couldn't bind, and the failed expose then stopped the first (`5f3d19e`, seen live). The fix lists sessions before starting, which is racy without the fork.
-2. **Uploading into every sandbox** costs a files call per start and needs the gVisor `chmod` workaround.
+1. **The double-proxy bug.** The toolbox's session names aren't unique, so a second start of a port's proxy made a second session. It couldn't bind, and the failed expose then stopped the first (`5f3d19e`, seen live). The fix lists sessions before starting, which is racy. The fork fixes it at the source (F2).
+2. **Uploading into every sandbox** costs a files call per start and, under gVisor, needed a `chmod` workaround.
 3. **Links can be replayed** within their minute by anyone who sees them; the docs say "by anyone who has it".
 4. **Nothing to show while the service starts**: the browser gets an error.
 5. **One key** signs port links and agent tokens, and there's no rotation story.
@@ -51,7 +51,7 @@ browser ──https──▶ node edge (Caddy, TLS) ──http──▶ sandbox:
                     <aerolvm id>-61000.node-…        checks link/cookie                    (e.g. Selkies)
 ```
 
-- **`lewbox portd`** is a subcommand of the slim helper binary ([toolbox § helpers](toolbox.md#lewboxs-helpers-in-the-sandbox)). It's mounted read-only by the fork (`helpers_mount`), or uploaded as legacy does on older nodes.
+- **`lewbox portd`** is a subcommand of the slim helper binary ([toolbox § helpers](toolbox.md#lewboxs-helpers-in-the-sandbox)). In the alpha it's uploaded, as legacy does ([toolbox § helpers](toolbox.md#lewboxs-helpers-in-the-sandbox)); later the fork mounts it read-only (F52), and uploads go.
 - **One proxy per private port**, run as a toolbox session named `lewbox.portd.<port>` ([sessions](sessions.md#start)), internal and hidden from consumers.
 - **AerolVM exposes the proxy's port**, never the private port itself.
 
@@ -65,10 +65,8 @@ browser ──https──▶ node edge (Caddy, TLS) ──http──▶ sandbox:
 
 `internal/ports.StartProxy`, used by expose and by every start's `ports_exposed` step:
 
-1. **Install** the helper, if the node doesn't mount it: written to a part file, then `chmod`, checked by `Stat`, then moved to `/usr/local/lib/lewbox/helper-<version>`.
-2. **Start** session `lewbox.portd.<port>` with `if_absent` semantics:
-   - **With `unique_session_names`** (fork): the toolbox answers the running session of that name instead of starting another. Two racing starts get one proxy.
-   - **Without it:** list the toolbox's sessions by name. If one is running, use it. Otherwise start one, wait the ready time, and check it's running. If it exited because the port was taken, another start won, so use that one. This is legacy's `5f3d19e` logic.
+1. **Install** the helper, if it isn't there: written to a part file, `chmod`, then moved to `/usr/local/lib/lewbox/helper-<version>`.
+2. **Start** session `lewbox.portd.<port>` with `if_absent: true` (fork F2, in the minimum release): the toolbox answers the running session of that name instead of starting another, so two racing starts get one proxy. Lewbox doesn't list sessions first or check which proxy won; legacy's `5f3d19e` logic goes.
 3. **Environment** for the proxy:
 
    | Variable | |

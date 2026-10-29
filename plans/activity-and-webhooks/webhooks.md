@@ -199,7 +199,7 @@ All under `/v0/projects/{prj}` (admin key or dashboard):
 | `POST /webhook-deliveries/{whd}/redeliveries` | Redeliver |
 | `GET /webhook-event-types` | ★ The catalogue, for pickers |
 
-Errors: `422 validation_failed` (`url` not https, resolving to a refused address, unknown event types or prefixes, unknown profiles), `409 limit_reached` (too many endpoints), `404 not_found`.
+Errors: `422 validation_failed` (`url` not https, resolving to a refused address, unknown event types or prefixes, unknown profiles), `429 quota_exceeded` (too many endpoints: the project's `webhook_endpoints` quota, [projects/instance-administration](../projects/instance-administration.md#quotas)), `404 not_found`.
 
 The SDKs ship a verifier (`Webhook.verify(secret(s), headers, body, tolerance = 5 min)`) and typed event classes ([sdks-and-cli](../sdks-and-cli.md)).
 

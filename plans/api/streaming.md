@@ -99,7 +99,7 @@ Kept as documented for interactive commands and attach:
 
 ### Activity and streams
 
-Data moving on a stream counts as sandbox activity for idle timeouts, checked at most once a minute (`LEWBOX_ACTIVITY_INTERVAL`), touching the toolbox so AerolVM sees it too; keepalives and pings don't, so an abandoned terminal doesn't keep a sandbox running ([sandboxes](../sandboxes.md)). A turn following doesn't need this: agentd keeps the sandbox awake while a turn runs, whether or not anyone follows it.
+Data moving on a stream counts as sandbox activity for idle timeouts, checked at most once a minute (`LEWBOX_ACTIVITY_TOUCH_INTERVAL`), touching the toolbox so AerolVM sees it too; keepalives and pings don't, so an abandoned terminal doesn't keep a sandbox running ([sandboxes](../sandboxes.md)). A turn following doesn't need this: agentd keeps the sandbox awake while a turn runs, whether or not anyone follows it.
 
 ### One upstream per replica
 
@@ -187,7 +187,7 @@ Documented for self-hosters ([foundation](../foundation.md)):
 |---|---|---|
 | `LEWBOX_SSE_KEEPALIVE` | `15s` | |
 | `LEWBOX_WEBSOCKET_PING_INTERVAL` | `30s` | |
-| `LEWBOX_ACTIVITY_INTERVAL` | `60s` | How often moving data touches the sandbox |
+| `LEWBOX_ACTIVITY_TOUCH_INTERVAL` | `60s` | How often moving data touches the sandbox |
 | `LEWBOX_EVENTS_RETENTION` | `24h` | Live changes resume window |
 | `LEWBOX_SHUTDOWN_DRAIN` | `20s` | Grace for command streams |
 | `LEWBOX_SHUTDOWN_TIMEOUT` | `30s` | |

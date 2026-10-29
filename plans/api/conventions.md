@@ -35,7 +35,7 @@ The rules every `/v0` endpoint follows, so a client that has used one endpoint c
 
 - The API is at `https://<instance>/v0`, e.g. `https://api.lewbox.com/v0`. The dashboard is on the same origin, at `/` ([api](../api.md#surfaces)).
 - Links in responses (`links.next`, `url`s Lewbox makes) use the scheme and host the request came in on, honouring `X-Forwarded-Proto` and `X-Forwarded-Host` only from trusted proxies (`LEWBOX_TRUSTED_PROXIES`, CIDRs). So a provider serving Lewbox from its own domain never leaks the canonical one.
-- `LEWBOX_PUBLIC_URL` is the canonical URL, used where there's no request: emails, webhooks' links, agentd's upload URL, the install command.
+- `LEWBOX_URL` is the canonical URL, used where there's no request: emails, webhooks' links, agentd's upload URL, the install command.
 
 ### Requests
 

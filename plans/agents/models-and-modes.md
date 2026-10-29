@@ -97,9 +97,9 @@ While `loading` or `failed`, lists are empty and defaults `null`.
 
 ### Codex runs with full access
 
-Codex's ask-first presets (`read-only`, `workspace-write`, `agent` with auto review) rely on its own Linux sandbox, bubblewrap, which can't start under gVisor (`bwrap: loopback: Failed RTM_NEWADDR: No child process`). In those modes each command fails and Codex sometimes asks to run it outside the sandbox, sometimes just reports the failure. `codex-acp`'s modes are fixed presets (`_AgentMode`), and none is "no sandbox, but ask first" (`dangerFullAccess` with `on-request`). So Codex runs in `bypass` (and `plan`), with full access to its sandbox; the sandbox itself is still isolated from everything else.
+Codex's ask-first presets (`read-only`, `workspace-write`, `agent` with auto review) rely on its own Linux sandbox, bubblewrap. Legacy found it can't start under gVisor (`bwrap: loopback: Failed RTM_NEWADDR: No child process`). The alpha runs Docker (`container`) only, where bubblewrap needs user namespaces that Docker's default seccomp profile normally refuses to unprivileged processes; whether it starts in our sandboxes is an M3 spike, and we won't loosen the sandbox's own isolation (seccomp, capabilities) to make it. In those modes each command fails and Codex sometimes asks to run it outside the sandbox, sometimes just reports the failure. `codex-acp`'s modes are fixed presets (`_AgentMode`), and none is "no sandbox, but ask first" (`dangerFullAccess` with `on-request`). So Codex runs in `bypass` (and `plan`), with full access to its sandbox; the sandbox itself is still isolated from everything else.
 
-**Upstream:** propose that preset to `codex-acp`, as we contribute AerolVM fixes upstream ([D3](../README.md#decisions)). Once it lands, Codex gets `default` (ask first) with its approvals, which were checked to round-trip in legacy's spike. At isolation `container` or `microvm` ([clusters/runtimes](../clusters/runtimes.md#isolation-levels)), where bubblewrap may work, Codex's own presets could be offered too; that's a spike, not the alpha. The sandbox's level, not its cluster, decides, since one cluster can offer several.
+**Upstream:** propose that preset to `codex-acp`, as we contribute AerolVM fixes upstream ([D3](../README.md#decisions)). Once it lands, Codex gets `default` (ask first) with its approvals, which were checked to round-trip in legacy's spike. If the M3 spike finds bubblewrap works at `container`, or later at `microvm` ([clusters/runtimes](../clusters/runtimes.md#isolation-levels)), Codex's own presets could be offered there; until then, and in the alpha unless the spike says otherwise, Codex runs as below. The sandbox's level, not its cluster, decides, since one cluster can offer several.
 
 ### Fast mode
 
@@ -148,4 +148,4 @@ A project may limit, per profile, which modes conversations may use (`agents.mod
 
 1. **Validate models strictly?** The cache can be stale for a moment after an upgrade; a false `422` is worse than a failed turn. Proposed: validate only when the cache is `ready` and its versions match what agentd last reported.
 2. **Per-profile mode policy:** wanted for the alpha, or later?
-3. **Codex's own presets outside gVisor** (`container`, `microvm` sandboxes): worth offering where bubblewrap works, or keep one behaviour everywhere until upstream adds the preset?
+3. **Codex's own presets on Docker** (the alpha's `container` sandboxes): if the M3 spike finds bubblewrap works there, offer them, or keep one behaviour everywhere until upstream adds the preset?

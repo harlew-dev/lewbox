@@ -47,6 +47,8 @@ All paths are under `lewagent-legacy/`.
 | `Http/Controllers/Computer/Repository/RepositoryController.php`, `BranchController.php` | `GET /profile/repositories`, `…/{owner}/{repo}/branches` | `GET /v0/profile/git/repositories…` | |
 | `Http/Controllers/Computer/AgentKeyController.php` | `POST …/keys` (`['sandboxes.agents', 'sandboxes.exec']`, ~15 min), retrying with no scopes on a validation error | `POST /v0/sandboxes/{sbx}/keys` | The scope bug is fixed in the new server, so the no-scope fallback (which handed browsers an all-permission key) is removed |
 
+**Isolation.** Lewagent's computers ask for no `isolation`, so they get their cluster's default. Against the alpha that's `container` (Docker), weaker than legacy's gVisor clusters; gVisor returns in the beta, and Lewagent's computers on gVisor clusters move with them then ([data § gVisor clusters](data.md#gvisor-clusters)). Lewagent should set `isolation: "gvisor"` explicitly once it's offered, so a computer never lands on a weaker level by default.
+
 ### Server calls: Admin API (tenant key → admin key)
 
 | Lewagent file (`app/…`) | Legacy call | New API | Milestone |
@@ -98,7 +100,7 @@ The aim is that Lewagent's `HandleLewboxWebhook` needs no change. The endpoint i
 | `SyncLewboxSdkCommand` and `packages/lewbox-php` | The SDK is on Packagist ([sdks-and-cli/php](../sdks-and-cli/php.md)) |
 | The no-scope sandbox key fallback in `AgentKeyController` | Scopes work |
 | `CheckPort` curling a port before making a desktop link | A link to a port that isn't answering yet waits for it, or the port reports `reachable` ([inside-a-sandbox/private-ports](../inside-a-sandbox/private-ports.md)) |
-| Exit-code sentinels in `RunSetupStep` | Exit codes are right under gVisor (fork fix, [lessons](../lessons.md)) |
+| Exit-code sentinels in `RunSetupStep` | Exit codes are right on Docker, and under gVisor once the fork fixes it (F1) before `gvisor` is offered ([lessons](../lessons.md)) |
 | Most of `RunSetupStep` and its watched sessions for create-time and every-start commands | The computer's setup commands are sent as `hooks.on_create` and `hooks.on_start` on create, so they run (and survive Lewagent being down) in Lewbox; the Build panel shows the sandbox's `hooks` report. Lewagent keeps running *manual* commands and adding services to a running computer through commands |
 | Avoiding re-exposing a port with the same access | Fixed |
 | `check-builds` every 5 s and `settle-checkout-tasks` every 15 s | Webhooks are reliable; keep a 5-minute backstop |
@@ -112,7 +114,7 @@ From `docs/todo.md` § "Waiting on Lewbox" and `small-todo.md`, and where each l
 | Need | Plan | When |
 |---|---|---|
 | Private ports checked live; Safari cookies in iframes | [inside-a-sandbox/private-ports](../inside-a-sandbox/private-ports.md) | Alpha |
-| Exit status lost under gVisor | [clusters/aerolvm-fork](../clusters/aerolvm-fork.md), [lessons](../lessons.md) | Alpha |
+| Exit status lost under gVisor | [clusters/aerolvm-fork](../clusters/aerolvm-fork.md) F1, [lessons](../lessons.md) | Beta, with gVisor (Docker, the alpha's only runtime, doesn't lose them) |
 | Requests cut at ~20 s (Laravel Cloud edge) | Gone: `lewbox serve` has no 20 s edge ([foundation](../foundation.md)) | Alpha |
 | Standalone worktrees API (`POST /v0/sandboxes/{sbx}/worktrees`, `worktree: {id}`, `worktree.*` webhooks) | [agents/worktrees](../agents/worktrees.md) | Later (or Beta) |
 | Per-conversation `env`, skills, MCP servers, allowed tools | [agents/conversations](../agents/conversations.md) | Beta |

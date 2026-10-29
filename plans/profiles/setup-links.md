@@ -148,7 +148,7 @@ Every section shows that something is set and how (a key's last four characters,
 | Variable | Default | |
 |---|---|---|
 | `LEWBOX_SETUP_LINK_TTL` | `168h` | Unused link |
-| `LEWBOX_SETUP_SESSION_TTL` | `1h` | After use; a link may ask for up to 4h |
+| `LEWBOX_SETUP_LINK_SESSION_TTL` | `1h` | After use; a link may ask for up to 4h |
 
 ## Testing
 

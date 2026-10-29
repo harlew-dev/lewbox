@@ -17,7 +17,7 @@ Placement is where a sandbox runs; capacity is whether it fits. AerolVM's schedu
 - **Resources per sandbox** (`cpu`, `memory_mb`, `disk_gb`) are set at create, and enforced by the node.
 - **Disk placement is off** (`SB_DISK_RESERVATION_RATIO=0`), so placement counts CPU and memory only, and disk only by declared sizes when on (`docs/clusters.md` § *Install script settings*).
 - **Image builds are placed like a default-sized sandbox,** only on nodes listing `docker` (F22).
-- **Firecracker templates:** placement prefers nodes that have them cached.
+- **Firecracker templates** (later, with `microvm`): placement prefers nodes that have them cached.
 - **Node roles:** `mixed` (the default) is supported up to 10 live nodes; larger clusters need dedicated `server`, `worker` and `ingress` nodes. Voters should be odd (3, 5, 7).
 - **Cluster status:** `active` or `suspended`. A suspended cluster refuses creates and starts (`409 cluster_suspended`), and is never skipped for another.
 - **Lewagent's asks** (`lewagent-legacy/docs/todo.md`): "Memory overprovision factor 1 per cluster", "limits per cluster", and later "moving a persistent sandbox to another cluster".
@@ -41,9 +41,9 @@ Placement is where a sandbox runs; capacity is whether it fits. AerolVM's schedu
 | | What |
 |---|---|
 | **Keep** | AerolVM places, by runtime among the nodes that run it; capacity retried for 2 minutes, then `cluster_capacity_exceeded`; `cluster_suspended` refusing creates and starts, never skipped |
-| **Change** | Retrying each create on its own every few seconds → a **per-cluster capacity queue**, woken by stops and deletes, retried in order. Capacity recognised by words → by the fork's `code` (F34), words as a fallback. Disk placement → on, from each node's disk |
+| **Change** | Retrying each create on its own every few seconds → a **per-cluster capacity queue**, woken by stops and deletes, retried in order. Capacity recognised by words → by the fork's `code` (F34, P0); no phrase matching. Disk placement → on, from each node's disk |
 | **Add** | Overcommit settings per cluster. An "impossible size" check. Capacity on the cluster page and API. Node roles at install. Entry-node choice that avoids unusable nodes |
-| **Drop** | `sandbox-index` lookups once the fork names a sandbox's node (F37) |
+| **Drop** | `sandbox-index` lookups: the fork names a sandbox's node (F37, P0). Phrase matching on capacity errors (F34) |
 
 ## Design
 
@@ -51,7 +51,7 @@ Placement is where a sandbox runs; capacity is whether it fits. AerolVM's schedu
 
 - **Cluster-wide calls** (create, build, list, members): any *usable* node ([health-and-metrics](health-and-metrics.md#node-statuses)), chosen round-robin. For a create or start, only nodes that run the sandbox's [isolation level](runtimes.md#what-a-cluster-offers) are candidates, and builds go to nodes with Docker. A node that fails is skipped for 30 s, and the next one tried, so one bad node can't stall creates.
 - **Calls about one sandbox:** the node recorded on the sandbox (`sandboxes.node_id`, from create and resume). If that node isn't usable, the call fails with `503 cluster_unavailable` rather than being forwarded through another node. AerolVM would forward it to the owner anyway, and the owner is the one that's down. When the fork names a sandbox's node (F37), the recorded node is checked against AerolVM's answer on each create and resume.
-- **Tunnel nodes** are reached through their tunnel ([connectivity](connectivity.md)); this is the client's `Dialer`, invisible here.
+- **Tunnel nodes** (beta) are reached through their tunnel ([connectivity](connectivity.md)); this is the client's `Dialer`, invisible here.
 
 ### When a cluster is full
 
@@ -72,8 +72,7 @@ A create or start that AerolVM refuses for capacity:
 
 **Recognising capacity:**
 
-- the fork's `code: capacity_exceeded` with its `reason` (`memory`, `cpu`, `disk`, `gpu`, `no_placement_target`);
-- until the fork has it, the three known phrases, matched anywhere in the message.
+- the fork's `code: capacity_exceeded` with its `reason` (`memory`, `cpu`, `disk`, `gpu`, `no_placement_target`) (F34, in the minimum fork release). Lewbox never reads an error's wording ([D15](../README.md#decisions)).
 
 `no_placement_target` with no node usable isn't capacity: it's `cluster_unavailable`.
 
@@ -99,7 +98,7 @@ Per cluster, applied to every node through the spec ([node-agent](node-agent.md#
 | `disk_ratio` | `1.0` | `SB_DISK_RESERVATION_RATIO`, with `SB_HOST_DISK_GB` from the node's `/var/lib` | Declared disk placed per host GB |
 | `reserved_memory_mb` | `2048` | AerolVM's memory floor | Kept back for the host, Docker, the registry and the agent |
 
-- **`microvm` (Firecracker)** needs `memory_overcommit` ≤ 1.0, as a VM's memory isn't shared back. On a cluster offering several levels, the cap applies to the nodes that run `microvm` ([runtimes](runtimes.md#firecracker-microvm)); the node spec sets it per node.
+- **`microvm` (Firecracker, later)** needs `memory_overcommit` ≤ 1.0, as a VM's memory isn't shared back. On a cluster offering several levels, the cap applies to the nodes that run `microvm` ([runtimes](runtimes.md#firecracker-microvm-later)); the node spec sets it per node.
 - **Changing a setting** applies to new placements only; running sandboxes are unaffected.
 
 ### Disk
@@ -217,7 +216,7 @@ The consumer's `GET /v0/profile` may show each cluster's largest allowed sandbox
   - a smaller request behind a larger one;
   - concurrency per cluster;
   - many replicas sharing the queue (`SKIP LOCKED`).
-- **Recognition:** codes and each legacy phrase; `no_placement_target` with no usable node as `cluster_unavailable`.
+- **Recognition:** each code and reason; `no_placement_target` with no usable node as `cluster_unavailable`.
 - **Impossible sizes:** against fixture membership.
 - **The fake AerolVM** with capacity limits per node, filled and drained by tests.
 

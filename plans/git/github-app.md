@@ -246,9 +246,9 @@ Each person's user token is what lets the project's servers act **as that person
 `GET /v0/profile/git/repositories` (and `/v0/projects/{prj}/profiles/{prf}/git/repositories`): for the repository pickers in the dashboard and in projects' products, and for choosing what a sandbox clones.
 
 - `GET /installation/repositories` for each of the profile's linked accounts (an installation token minted for listing, `metadata: read`, kept in memory until 10 minutes before it expires), fetched concurrently (at most 8 at once), merged, de-duplicated and sorted by `full_name`. With the limit at 25, that's at most 25 listings per refresh of the cache.
-- Filters: `search` (substring of `owner/name`), `visibility` (`public`, `private`), `account`. Page-numbered over the merged list (`page`, `per_page` ≤ 100), capped at `LEWBOX_GITHUB_LISTED_REPOSITORIES_MAX` (1000), `meta.truncated` when capped.
+- Filters: `search` (substring of `owner/name`), `visibility` (`public`, `private`), `account`. Page-numbered over the merged list (`page`, `per_page` ≤ 100), capped at `LEWBOX_GIT_LIST_MAX` (1000), `meta.truncated` when capped.
 - Each repository: `{name: "owner/repo", owner, private, default_branch, description, pushed_at, html_url, installation: {id, account}}`.
-- Cached per profile for `LEWBOX_GITHUB_LISTED_REPOSITORIES_CACHE` (60 s), in memory per replica; the cache key includes the linked installation ids and is dropped on `installation_repositories` webhooks.
+- Cached per profile for `LEWBOX_GIT_LIST_CACHE_TTL` (60 s), in memory per replica; the cache key includes the linked installation ids and is dropped on `installation_repositories` webhooks.
 
 `GET …/git/repositories/{owner}/{repo}`: one repository, `404 repository_not_found` when no linked installation reaches it.
 
@@ -366,9 +366,8 @@ The connection object:
 |---|---|---|
 | `LEWBOX_GITHUB_API_URL` | `https://api.github.com` | For a fake, or GitHub Enterprise later |
 | `LEWBOX_GITHUB_URL` | `https://github.com` | |
-| `LEWBOX_GITHUB_LISTED_REPOSITORIES_MAX` | `1000` | |
-| `LEWBOX_GITHUB_LISTED_REPOSITORIES_CACHE` | `60s` | |
-| `LEWBOX_GITHUB_LISTED_BRANCHES_MAX` | `1000` | |
+| `LEWBOX_GIT_LIST_MAX` | `1000` | Repositories, or branches, listed at most |
+| `LEWBOX_GIT_LIST_CACHE_TTL` | `60s` | |
 | `LEWBOX_GIT_MAX_CONNECTIONS_PER_PROFILE` | `25` | People and accounts together, per profile ([the limit](#the-limit)) |
 
 The manifest's permissions and events are in code; changing them affects only Apps registered afterwards, and the App page shows what older Apps lack.

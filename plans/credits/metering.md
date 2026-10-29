@@ -102,7 +102,7 @@ Per project, versioned so a run can say which rates it used:
 
 `rate_cards`: `id`, `project_id`, `vcpu_hour`, `memory_gib_hour`, `disk_gb_hour`, `free_disk_gb`, `minimum_charge_seconds`, `effective_from`, `created_by`. The project's current card is its latest. A change inserts a new card and restarts open runs.
 
-Defaults for new projects come from configuration (`LEWBOX_RATES_*`). The dashboard shows what a 2 vCPU, 4 GiB, 20 GB sandbox costs an hour at the rates being entered, as legacy's did.
+Defaults for new projects come from configuration (`LEWBOX_CREDITS_DEFAULT_*`). The dashboard shows what a 2 vCPU, 4 GiB, 20 GB sandbox costs an hour at the rates being entered, as legacy's did.
 
 ### Minimum charge
 
@@ -133,10 +133,10 @@ Runs aren't an API resource of their own; they surface as usage ([budgets-and-us
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_RATES_VCPU_HOUR` | `0` | Micro-units; new projects' default |
-| `LEWBOX_RATES_MEMORY_GIB_HOUR` | `0` | |
-| `LEWBOX_RATES_DISK_GB_HOUR` | `0` | |
-| `LEWBOX_RATES_FREE_DISK_GB` | `20` | |
+| `LEWBOX_CREDITS_DEFAULT_VCPU_HOUR` | `0` | Credits per vCPU-hour, as a decimal (stored as micro-units); new projects' default |
+| `LEWBOX_CREDITS_DEFAULT_MEMORY_GIB_HOUR` | `0` | |
+| `LEWBOX_CREDITS_DEFAULT_DISK_GB_HOUR` | `0` | |
+| `LEWBOX_CREDITS_DEFAULT_FREE_DISK` | `20` | |
 
 ## Testing
 

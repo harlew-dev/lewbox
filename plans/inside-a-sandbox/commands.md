@@ -115,13 +115,7 @@ Error codes: `command_timeout`, `command_failed` (couldn't start), `stream_inter
 
 ### Exit codes on every path
 
-| Path | Fork without `exit_status` | Fork with it |
-|---|---|---|
-| Whole | Stderr marker trap (legacy's) | The toolbox's own |
-| Streamed | Trap writes the status to `/root/.lewbox/exec/<request id>`; read once the stream ends with `-1`, then removed | The toolbox's own |
-| Interactive | As streamed | The toolbox's own |
-
-A command that `exec`s another program loses its trap, and a status of `-1` stands; the docs say so.
+Whole, streamed and interactive commands all take the exit code the toolbox reports. On Docker, the alpha's only runtime, it's right on every path, so there are no traps, markers or status files. Legacy's traps were for gVisor's lost statuses (T1); the fork fixes those (F1) before `gvisor` is offered in the beta, so Lewbox never needs them ([toolbox](toolbox.md#exit-codes)).
 
 ### Timeouts
 
@@ -192,7 +186,7 @@ A project may turn stderr recording off (legacy's `record_command_stderr`, [proj
 Against the [fake toolbox](toolbox.md#testing):
 
 - Whole: exit codes 0 and non-zero; `timed_out`; truncation; a missing directory; `~`; env reaching the command; a label from the field and the header.
-- Whole and streams under "gVisor loses statuses": the right exit code from the trap, on every path.
+- Exit codes on every path as the toolbox reports them, including `-1` passed through unchanged (a fork bug to report, not to repair).
 - Streamed: UTF-8 split across chunks; invalid bytes; keepalives on a quiet command; exactly one terminal event; client disconnect kills the command; timeout kills it; shutdown sends `server_restarting`.
 - Interactive: start-message timeout and validation (`1008`); stdin round trip with `cat`; resize; each signal; `close`; pings; client drop kills; shutdown `1001`; `1011` when the toolbox's stream dies.
 - Activity: one `command.ran` per command with the right outcome, and redaction on a stderr full of every kind of token.
@@ -201,7 +195,7 @@ Against the [fake toolbox](toolbox.md#testing):
 ## Build plan
 
 1. Port `commands.go`, `sse.go`, `websocket.go` into `internal/httpapi`, renamed and using the shared request path.
-2. Add `timed_out`, output caps, and stream exit-status traps behind the `exit_status` capability.
+2. Add `timed_out` and output caps.
 3. Redaction in `internal/activity`, with a table of patterns and tests.
 4. OpenAPI: the whole and streamed request on one path (two responses by `Accept`), and the WebSocket documented as a protocol ([api/openapi-and-codegen](../api/openapi-and-codegen.md)).
 

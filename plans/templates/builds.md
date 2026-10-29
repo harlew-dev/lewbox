@@ -1,6 +1,6 @@
 # Builds
 
-> Status: Draft · Milestone: Alpha (M1) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1, Dockerfile builds as legacy); build contexts and BuildKit after the alpha (fork F30, F29); Firecracker templates later · Updated: 2026-10-29
 
 A build is one template built on one cluster: its Dockerfile, with its build context, built by AerolVM on one of the cluster's nodes and pushed to the cluster's registry. Each template has a build per cluster it's for, and a new one there each time it's rebuilt. This plan covers when builds happen, the `build_template` operation, build contexts, the registry path, sizes, logs, failures, which build a sandbox uses, and the Firecracker conversion for clusters offering `microvm`.
 
@@ -40,7 +40,7 @@ A build is one template built on one cluster: its Dockerfile, with its build con
 | | |
 |---|---|
 | **Keep** | A build per template per cluster. One registry repository per build. Latest ready wins. Failed builds aren't retried on their own. New clusters get builds. The operation's failure codes |
-| **Change** | Build contexts. BuildKit where the fork supports it. Logs streamed from the fork and kept. Size returned by the fork (bucket read as fallback). Steps recorded. `no_cache` option. Builds record exactly what they built (Dockerfile, context digest, build args) |
+| **Change** | Build contexts. BuildKit where the fork supports it. Logs streamed from the fork and kept. Size returned by the fork's build result (F33; until that's in the minimum release, measured from the bucket as legacy does, and that code goes when it is). Steps recorded. `no_cache` option. Builds record exactly what they built (Dockerfile, context digest, build args) |
 | **Drop** | Inferring `build_failed` from message text (the fork returns a code) |
 
 ## Design
@@ -94,10 +94,10 @@ The CLI tars a directory for you: `lewbox templates push ./templates/lewagent-co
    ```
 
 4. Log lines are appended to the build's log as they come (see [Logs](#logs)). The job heartbeats while the stream is open.
-5. On success, record `image`, `digest` and `size_bytes` → `built`. If the fork didn't give a size, measure from the bucket as legacy does → `measured`. Then mark the build `ready`, with `finished_at`.
+5. On success, record `image`, `digest` and `size_bytes` → `built`. Until F33 is in the minimum fork release, the size is measured from the bucket as legacy does → `measured`; one way at a time, switched when F33 is the minimum. Then mark the build `ready`, with `finished_at`.
 6. Timeouts: `LEWBOX_TEMPLATE_BUILD_TIMEOUT` (45 min, up from 25, since Lewagent's take 20) within the operation's deadline (raised to 60 min for builds).
 7. Failures:
-   - `error_code: build_failed` from the fork (or legacy phrase-matching): fail at once with the failing step's output (the last 4 KiB of the log) in `error`;
+   - `error_code: build_failed` from the fork (coded errors, F6): fail at once with the failing step's output (the last 4 KiB of the log) in `error`;
    - capacity (no docker node with room): retried for the capacity wait, then `cluster_capacity_exceeded`;
    - an unreachable node or a failed push: transient, retried.
 
@@ -147,7 +147,7 @@ Builds superseded by a newer ready one, failed builds, and all of a deleted temp
 
 ### Firecracker clusters
 
-A build is per cluster, not per isolation level: `container` and `gvisor` sandboxes run the same OCI image, so one build serves both. Only `microvm` needs more.
+**Later.** A build is per cluster, not per isolation level: `container` and (from the beta) `gvisor` sandboxes run the same OCI image, so one build serves both. Only `microvm` needs more, once it's offered.
 
 AerolVM's Firecracker sandboxes run from AerolVM *templates* (`rootfs.ext4` plus a memory snapshot), built from a container image (`POST /v1/templates`, operator only). On a cluster that offers `microvm` ([clusters/runtimes](../clusters/runtimes.md#what-a-cluster-offers)), a Lewbox build has a third step, `converted`: after pushing the image, call the fork's template create from it, which pushes to `cluster/<clu>/templates/<tid>` and lets peers pull lazily. Creates use that template id. Memory snapshots restore only on the same CPU model, kernel and Firecracker version, so the fork pins them per cluster ([clusters/runtimes](../clusters/runtimes.md)). The build records both artifacts (`image` and `firecracker_template`), and is `ready` for a level once its artifact for that level is. Adding `microvm` to a cluster later converts each template's latest ready build there (an operation per build, no rebuild). A `microvm` create from a template whose conversion isn't ready is `422 template_unavailable` with `reason: building` (or `failed`), while `container` and `gvisor` creates use the image already. Built as soon as the fork supports Firecracker templates; until then a cluster can't offer `microvm`.
 
@@ -254,7 +254,7 @@ Rebuilding a built-in template is for instance admins only (`403` otherwise).
 | B4 | Builds isolated from the host: rootless BuildKit, or builds inside a gVisor sandbox | Profile templates on shared nodes |
 | B5 | Firecracker template from a pushed image, per cluster | Templates on Firecracker clusters |
 
-Until B1 and B3 land in the fork, contexts and BuildKit are refused (`validation_failed`: "This cluster can't build with a context yet."), and builds work as legacy's do. The fork's capabilities are read per cluster ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)).
+These map to the fork backlog: B1 is F30 and B3 is F29 (both P2), B2 is F32/F33 (P1), B5 is F26/F27 (Firecracker, later). **Contexts and BuildKit come after the alpha:** until B1 and B3 are in Lewbox's minimum fork release, they're refused for the whole instance (`validation_failed`: "Build contexts aren't available on this instance yet."), and builds work as legacy's do: a Dockerfile alone, the classic builder. There's no per-cluster detection ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)).
 
 ## Testing
 

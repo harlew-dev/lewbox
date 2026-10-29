@@ -24,7 +24,7 @@ A template is a container image built from a Dockerfile, so sandboxes start with
 
 ## Goals
 
-- Projects, and later profiles, can build any image a normal Dockerfile builds, **with a build context**, so files sit beside the Dockerfile rather than inlined.
+- Projects, and later profiles, can build any image a normal Dockerfile builds, **with a build context** (after the alpha, once the fork's build API takes one, F30), so files sit beside the Dockerfile rather than inlined. The alpha builds as legacy does: a Dockerfile alone, the classic builder ([D16](README.md#decisions)).
 - Build logs, live and kept.
 - A template is usable on a cluster the moment one build there is ready, and a rebuild never interrupts new sandboxes.
 - One definition format (JSON plus Dockerfile plus context directory), used by the dashboard, the API and the CLI (`lewbox templates push ./dir`).

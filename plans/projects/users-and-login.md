@@ -138,7 +138,7 @@ Some actions need a code entered recently ("sudo mode"): deleting a project, tra
 | `GET` | `/v0/me/sessions` | Their sessions |
 | `DELETE` | `/v0/me/sessions/{uss}` | Revoke one; `DELETE /v0/me/sessions?except=current` revokes the rest |
 | `GET` | `/v0/me/invitations` | Pending invitations to their email ([members-and-roles](members-and-roles.md#invitations)) |
-| `DELETE` | `/v0/me` | Delete the account: refused with `409 sole_owner` while they're the only owner of any project |
+| `DELETE` | `/v0/me` | Delete the account: refused with `409 last_owner` while they're the only owner of any project |
 
 The user object:
 
@@ -151,7 +151,7 @@ The user object:
 
 Lewbox sends mail through SMTP ([foundation/binary-and-commands](../foundation/binary-and-commands.md)). Sign-in codes are the one mail the instance can't work without, so:
 
-- `lewbox serve` refuses to start in production without `LEWBOX_SMTP_URL`, unless `LEWBOX_MAIL=log` is set explicitly, in which case codes are written to the log at `warn`, as legacy did, and the sign-in page says so to instance admins.
+- `lewbox serve` refuses to start in production without `LEWBOX_EMAIL_SMTP_URL`, unless `LEWBOX_EMAIL_LOG=true` is set explicitly, in which case codes are written to the log at `warn`, as legacy did, and the sign-in page says so to instance admins.
 - `lewbox users code <email>` prints a fresh code from the command line, for an operator locked out of their own instance (it needs database access, so it's no weaker than the database itself).
 - Templates are plain text with a minimal HTML version, with the instance's name; setup-page mail (none yet) would use the project's branding.
 
@@ -191,12 +191,12 @@ Lewbox sends mail through SMTP ([foundation/binary-and-commands](../foundation/b
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_SMTP_URL` | | `smtp://user:pass@host:587`, `smtps://…` |
-| `LEWBOX_MAIL_FROM` | `Lewbox <no-reply@{host}>` | |
-| `LEWBOX_MAIL` | `smtp` | `smtp` or `log` |
-| `LEWBOX_SESSION_IDLE` | `720h` | Sliding lifetime |
-| `LEWBOX_SESSION_MAX` | `2160h` | Absolute lifetime since a code |
-| `LEWBOX_SIGN_IN_CODE_TTL` | `10m` | |
+| `LEWBOX_EMAIL_SMTP_URL` | | `smtp://user:pass@host:587`, `smtps://…` |
+| `LEWBOX_EMAIL_FROM` | `Lewbox <no-reply@{host}>` | |
+| `LEWBOX_EMAIL_LOG` | `false` | Write sign-in codes to the log instead of sending them (development, or a production instance without mail, deliberately) |
+| `LEWBOX_USER_SESSION_IDLE` | `720h` | Sliding lifetime |
+| `LEWBOX_USER_SESSION_MAX` | `2160h` | Absolute lifetime since a code |
+| `LEWBOX_LOGIN_CODE_TTL` | `10m` | |
 | `LEWBOX_REAUTH_WINDOW` | `15m` | |
 
 ## Testing

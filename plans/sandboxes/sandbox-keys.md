@@ -53,7 +53,9 @@ A sandbox key (`lbs_…`) reaches **one sandbox** for **15 minutes**, with the p
 | `sandboxes.agents` | Prompting agents, following turns, replying, cancelling, reading and deleting the sandbox's conversations |
 | `sandboxes.activity.view` | Reading the sandbox's activity |
 | `sandboxes.activity` | Reading activity and adding app events |
-| `sandboxes.touch` | **New.** Marking the sandbox active (`POST …/activity` touch; see [timers-and-activity](timers-and-activity.md#open-questions)). Implied by `exec` |
+| `sandboxes.git` | Changing the sandbox's Git setting, up to the project's cap ([git/tokens](../git/tokens.md#the-sandboxs-git-setting)) |
+
+Touching the sandbox (`POST /v0/sandboxes/{sbx}/touch`) needs no permission of its own: any of `sandboxes.exec`, `sandboxes.ports.view` or `sandboxes.agents` allows it ([api/permissions](../api/permissions.md#sandbox-permissions)).
 
 Every key can read its sandbox (`GET /v0/sandboxes/{sbx}`), its ports and its operations, as any key that sees the sandbox can.
 
@@ -104,7 +106,7 @@ The React dashboard asks its own session endpoint for a key per sandbox (`POST /
 On every request with an `lbs_` bearer (in `internal/auth`; [api/authentication](../api/authentication.md)):
 
 1. Check the shape: `lbs_` plus 64 lowercase hex.
-2. Look up `sandbox_keys` by `sha256(token)`, joined to its sandbox and its minter, in one query. Results are cached in memory for up to `LEWBOX_SANDBOX_KEY_CACHE` (5 s), keyed by hash.
+2. Look up `sandbox_keys` by `sha256(token)`, joined to its sandbox and its minter, in one query. Results are cached in memory for up to `LEWBOX_AUTH_CACHE_TTL` (5 s), keyed by hash.
 3. Refuse with `401 invalid_key` if:
    - it isn't found;
    - it's expired (checked on every request, even when cached);
@@ -187,7 +189,7 @@ The public id becomes `key_` like every other key, rather than `sbk_` ([foundati
 |---|---|
 | `LEWBOX_SANDBOX_KEY_TTL` | `15m` |
 | `LEWBOX_SANDBOX_KEY_MAX_TTL` | `60m` |
-| `LEWBOX_SANDBOX_KEY_CACHE` | `5s` |
+| `LEWBOX_AUTH_CACHE_TTL` | `5s` |
 
 ## Testing
 
@@ -207,5 +209,5 @@ The public id becomes `key_` like every other key, rather than `sbk_` ([foundati
 ## Open questions
 
 1. **Conversation-scoped keys.** Lewagent's chat page needs `sandboxes.agents` for one conversation, not every conversation in the sandbox. Add an optional `conversation` to mint, limiting agent routes to it? Cheap, and shrinks the blast radius.
-2. **`sandboxes.exec` is broad.** A terminal needs it, and a file browser needs only files. Split `sandboxes.exec` into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both)? Would need a matching change on profile keys ([api/permissions](../api/permissions.md)).
+2. **`sandboxes.exec` is broad.** A terminal needs it, and a file browser needs only files. Split `sandboxes.exec` into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both)? Would need a matching change on profile keys ([api/permissions](../api/permissions.md)). Decided for the alpha: keep `sandboxes.exec`; the split stays open for after it.
 3. **Longer keys for long pages.** 60 minutes max, with re-minting. Is that enough for a desktop view open all day? Private-port *sessions* already last 12 hours independently ([inside-a-sandbox/private-ports](../inside-a-sandbox/private-ports.md)), so probably.

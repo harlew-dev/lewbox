@@ -28,7 +28,7 @@ A session is a process that outlives the request that started it: a dev server, 
 
 1. **Polling.** The 5 s poll runs on every replica. It also counts as activity, so a watched session keeps its sandbox awake by accident rather than by design.
 2. **Toolbox names aren't unique.** A create with a running session's name starts another (T2 in [toolbox](toolbox.md#problems-and-where-each-was-seen)). That's harmless for user sessions, which are named by id, but it broke private ports (`5f3d19e`).
-3. **Exit codes are lost under gVisor**, as above.
+3. **Exit codes are lost under gVisor**, as above (gVisor isn't in the alpha; the fork fixes it, F1, before it returns).
 4. **A session's log is gone** once it's killed or lost, and when its sandbox stops. That's fine, but Lewagent's Build panel would like the last lines of a failed step after a restart.
 
 ## Goals
@@ -89,7 +89,7 @@ Steps:
 
 1. Validate. Check the directory exists ([toolbox](toolbox.md#login-shells-and-directories)).
 2. **In one transaction:** with a `name`, look for a running session of that name and answer it if there is one; otherwise insert the row as `running` with no `toolbox_id`. The partial unique index makes two racing starts of the same name end with one row: the loser answers the winner's.
-3. **Start it in the toolbox,** named after its `ses_` id. The command is wrapped in a login shell, and in the exit-status trap when the node lacks `exit_status`.
+3. **Start it in the toolbox,** named after its `ses_` id, with `if_absent: true` (F2), so the toolbox itself never starts a second session of that name. The command is wrapped in a login shell.
 4. **Record** its `toolbox_id`.
 5. **If the toolbox refuses**, mark the row `exited` with `exit_code: -1` and answer the error.
 
@@ -119,27 +119,18 @@ As documented: `id`, `command`, `directory`, `pty`, `watch`, `status`, `exit_cod
 
 ### Exit codes
 
-Recording an end (`internal/sessions.RecordEnd`), shared by reads, the watcher and events:
+Recording an end (`internal/sessions.RecordEnd`), shared by reads and events:
 
-1. **The toolbox says it exited** with a code ≥ 0: record that.
-2. **The toolbox says `-1`, or `killed` with signal `waitid: no such process`** (gVisor without the `exit_status` fix):
-   - read `/root/.lewbox/sessions/<ses_id>`;
-   - if the file is there, record `exited` with that code and no signal;
-   - otherwise record the toolbox's answer.
-3. **Record conditionally:** `UPDATE … SET status = …, ended_at = now() WHERE id = $1 AND status = 'running'`. A second recorder, whether a racing read or another replica, changes nothing and sends nothing.
-4. **Only the recorder that changed the row** writes `session.ended` (with `exit_code`, `exit_signal`, `duration_ms`) and removes the status file.
-
-With the fork's `exit_status`, only step 1 happens, for login shells too.
+1. **The toolbox says how it ended:** an exit code, or a signal. Record that, as it is. On Docker it's right, login shells included; there are no status files or traps ([toolbox](toolbox.md#exit-codes)).
+2. **Record conditionally:** `UPDATE … SET status = …, ended_at = now() WHERE id = $1 AND status = 'running'`. A second recorder, whether a racing read or another replica, changes nothing and sends nothing.
+3. **Only the recorder that changed the row** writes `session.ended` (with `exit_code`, `exit_signal`, `duration_ms`).
 
 ### Watch
 
 `watch: true` asks Lewbox to record the session's end within seconds, so `session.ended` reaches the activity log and `activity.session.ended` reaches webhooks without anyone reading it. Lewagent's setup waits on these.
 
-- **With `session_events`** (fork): `lewbox node`, or the control plane, holds one stream per node: `GET /v0/sessions/events`, SSE from the fork, with `session.ended` for every session on the node. Each event is recorded as above.
-  - The stream is held by the replica that holds the node's lease ([foundation/jobs-and-scheduling](../foundation/jobs-and-scheduling.md#leadership)), and reconnects with `?since=`.
-  - Events for unwatched sessions are recorded too, cheaply, which keeps statuses right without reads.
-- **Without it:** a periodic job on the leader polls running watched sessions every 5 s, at most 8 sandboxes at once, one list call per sandbox. That's legacy's watcher, on one replica instead of all.
-- **Keeping the sandbox awake.** While a watched session runs, its sandbox counts as active: the watcher touches it at most every `activity_interval`. Lewbox does this on purpose rather than as a side effect of polling, and it's documented. Unwatched sessions don't keep a sandbox awake, so a dev server can still let its sandbox go idle.
+- **From the fork's events (F36, in the minimum release):** session ends arrive on the node's event stream, forwarded by `lewbox node` ([clusters/node-agent](../clusters/node-agent.md#lifecycle-events)), with `session_ended` for every session on the node. Each is recorded as above. Events for unwatched sessions are recorded too, cheaply, which keeps statuses right without reads. There's no polling watcher.
+- **Keeping the sandbox awake.** While a watched session runs, its sandbox counts as active: the fork counts a running session started with `keep_awake: true` (part of F36's change) as activity, and Lewbox starts watched sessions that way. It's deliberate and documented, not a side effect of polling. Unwatched sessions don't keep a sandbox awake, so a dev server can still let its sandbox go idle.
 
 ### Log
 
@@ -179,7 +170,7 @@ With the fork's `exit_status`, only step 1 happens, for login shells too.
 - **After a start** nothing is started again, except Lewbox's own:
   - `portd` for persisted private ports ([private ports](private-ports.md));
   - `agentd` on the next prompt ([agents/agentd](../agents/agentd.md)).
-- **A legacy sandbox whose toolbox nested on resume** has its command started as session `lewbox.command` ([sandboxes/persistence](../sandboxes/persistence.md)). That stays until the fork fixes the snapshot entrypoint.
+- **No `lewbox.command` session.** Legacy started the image's command itself for sandboxes whose toolbox nested on resume; the fork fixes resumes, including legacy snapshots (F10), so Lewbox doesn't.
 
 ### Errors
 
@@ -224,24 +215,23 @@ With the fork's `exit_status`, only step 1 happens, for login shells too.
 - **Create:** with and without `name` (idempotent, racing starts end with one session); with a login shell; with a missing directory; the toolbox refusing.
 - **Crash recovery:** a crash between insert and start, then a read finds it by name.
 - **Ends:** an exit, a signal, a kill, and a sandbox stop that loses every session.
-- **Exit codes:** under "gVisor loses statuses", from the file; for a login shell, `-1` without the fix and right with it.
+- **Exit codes:** as the toolbox reports them, login shells included.
 - **Recording:** conditional, so two recorders write one event.
-- **The watcher:** in polling mode and in events mode (fake event stream, reconnect with `since`).
+- **Events:** session ends from the fake event stream, replayed after a reconnect, recorded once.
 - **Log and tail:** edge cases ported from `lastLines`.
 - **Attach:** replay then follow; several clients; detach leaves it running; `1001` on shutdown; ended sessions refused.
 - **Internal sessions:** hidden from lists, refused to profile keys.
 
 ## Build plan
 
-1. Migration and `internal/sessions` (store, `RecordEnd`, status files).
+1. Migration and `internal/sessions` (store, `RecordEnd`).
 2. Handlers, ported from `sessions.go`, on the shared request path.
-3. The watcher as a periodic job, polling mode.
-4. Fork: `session_events` and `unique_session_names`; the event-stream holder; switch per node by capability.
+3. Session ends from the node's events (needs fork F36); `if_absent` starts (F2).
 5. Named sessions used by portd and agentd.
 
 ## Open questions
 
 1. **Keep the last lines of a watched session's log** in Lewbox when it ends (64 KB?), so a step's failure is still readable after a stop?
-2. **Who holds the node's event stream:** `lewbox node` pushing to the control plane over its own connection ([clusters/node-agent](../clusters/node-agent.md)), or the control plane pulling from AerolVM? Pushing works through the [tunnel](../clusters/connectivity.md) for nodes behind NAT.
+2. ~~**Who holds the node's event stream.**~~ Decided: `lewbox node` forwards it over its own connection ([clusters/node-agent](../clusters/node-agent.md#lifecycle-events)), which also works through the tunnel (beta).
 3. **Should unwatched sessions' ends also be webhooks?** They'd be recorded once events are pushed, so it costs little, but it changes what `watch` means.
 4. **Sessions' `env`.** Lewagent wants per-conversation env (`LEWAGENT_SESSION`). That's an agents concern ([agents/conversations](../agents/conversations.md)), but if sessions grow a `name`, should they also carry visible metadata?

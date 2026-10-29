@@ -10,7 +10,7 @@ A sandbox is an isolated Linux machine that a profile creates on one of its proj
 |---|---|---|
 | [lifecycle](sandboxes/lifecycle.md) | Statuses and every transition, `status_sequence`, the create request and its fields, choosing a cluster and template, sizes and limits, waiting (`201`/`202`), start, stop, restart, delete, settings and metadata, listing and filtering, who may do what | M1 |
 | [operations](sandboxes/operations.md) | Long-running work as `operations` rows run by Postgres jobs: kinds and steps, one at a time, resuming after a crash, idempotent steps, retries, capacity waits, timeouts, failure codes, what a failure leaves | M1 |
-| [persistence](sandboxes/persistence.md) | `persist`: snapshot, offload, resume on any node, `container_command`, layer stacking and flattening, which snapshots are kept, Firecracker | M1 |
+| [persistence](sandboxes/persistence.md) | `persist`: snapshot, offload, resume on any node, the image's command (kept by the fork), layer stacking and flattening, which snapshots are kept, Firecracker (later) | M1 |
 | [profile-setup](sandboxes/profile-setup.md) | The setup manifest: agent credentials, Git token and identity, telemetry, the profile env file, SSH keys; applying it on create and start, cleaning it before a stop, re-applying it on change, the setup report | M1 (manifest), M3 (agent and Git steps) |
 | [repositories](sandboxes/repositories.md) | Cloning repositories on create: fields, paths, tokens, the 5-minute budget, statuses | M3 |
 | [timers-and-activity](sandboxes/timers-and-activity.md) | `idle_timeout`, `lifetime`, what counts as activity, touches; **Lewbox decides when to stop**: the fork's notify-mode timers, idle warnings, the re-check, the node's backstop; stop reasons | M1, M2 |
@@ -56,7 +56,7 @@ A sandbox is an isolated Linux machine that a profile creates on one of its proj
 | Status changes raised webhooks from Eloquent model hooks (`saving`/`saved`) | One `Transition` function, which writes the event rows in the same transaction |
 | Start and stop as `PATCH status`, and also as `POST …/operations` | One way: `POST /v0/sandboxes/{sbx}/operations` with `kind` ([lifecycle](sandboxes/lifecycle.md#api); open question) |
 | Admin API couldn't create sandboxes; the dashboard reserved them through its own path (`ReserveSandbox::forProfile`) | One create. A profile key creates for its profile; an admin key or the dashboard names the `profile` |
-| Workarounds for AerolVM in the gateway: `container_command`, exit-status traps, phrase-matched capacity errors | Fixed in [our fork](clusters/aerolvm-fork.md) where we can, with the workaround kept until every supported fork version has the fix |
+| Workarounds for AerolVM in the gateway: `container_command`, exit-status traps, phrase-matched capacity errors | Fixed in [our fork](clusters/aerolvm-fork.md); Lewbox requires the fork release with the fixes and carries no workarounds ([D15](README.md#decisions)) |
 | Snapshots never flattened; layers stack up to overlayfs's ~127 limit | Flattened when a sandbox's snapshot passes a layer threshold ([persistence](sandboxes/persistence.md#layers)) |
 
 ## Who can do what
@@ -106,5 +106,5 @@ All of it is in the alpha. M1 builds lifecycle, operations, persistence, the set
 
 1. **Start and stop as `PATCH status`, or only `POST …/operations`?** The public docs show both. Proposed: only operations, as one way is simpler for SDKs and docs ([lifecycle](sandboxes/lifecycle.md#open-questions)).
 2. **Moving a sandbox to another cluster.** Lewagent asked for it later. A stopped, persisted sandbox is a snapshot in a cluster's registry; moving it means copying layers between buckets. Later.
-3. **Memory snapshots.** Firecracker can snapshot memory, which would make a stop keep running processes. Do we want "pause" as well as "stop"? ([persistence](sandboxes/persistence.md#open-questions))
+3. ~~**Memory snapshots.**~~ Decided (2026-10-29): no; memory can't be scrubbed of credentials ([persistence](sandboxes/persistence.md#open-questions)).
 4. **Upgrading a sandbox to a newer template build.** Sandboxes keep their build for life; Lewagent's computers never get template updates ([templates/builds](templates/builds.md#open-questions)).

@@ -77,7 +77,7 @@ GitHub connections move to their own tables ([git/github-app](../git/github-app.
 `PUT /v0/projects/{prj}/profiles/{prf}/agents/{agent}/credential { provider, ...fields }`:
 
 1. Validate fields from the registry (e.g. an Anthropic key starts `sk-ant-api`, a subscription token `sk-ant-oat01-`).
-2. **Verify** with the provider when the registry can (an HTTP call with a 10 s timeout from the control plane, to the provider's fixed host only, never a URL from the request). A refusal is `422 credential_refused` with the provider's message ("invalid x-api-key"); a provider that's down is `502 provider_unavailable`, and `?verify=false` stores it unverified (owner/admin only).
+2. **Verify** with the provider when the registry can (an HTTP call with a 10 s timeout from the control plane, to the provider's fixed host only, never a URL from the request). A refusal is `422 credential_invalid` with the provider's message (`provider_message`) ("invalid x-api-key"); a provider that's down is `502 provider_unavailable`, and `?verify=false` stores it unverified (owner/admin only).
 3. Encrypt and store; set `hint`, `account`, `verified_at`.
 4. In the same transaction, enqueue `apply_setup` for each of the profile's running sandboxes ([sandboxes/profile-setup](../sandboxes/profile-setup.md)), and write the audit event and `profile.setup_changed` webhook.
 
@@ -140,7 +140,7 @@ Under `/v0/projects/{prj}/profiles/{prf}`; owner, admin or member session, setup
 |---|---|---|
 | `404` | `not_found` | Unknown agent |
 | `422` | `validation_failed` | Unknown provider for the agent; missing or malformed fields |
-| `422` | `credential_refused` | The provider refused it; message is theirs |
+| `422` | `credential_invalid` | The provider refused it; its message is in `provider_message` |
 | `502` | `provider_unavailable` | The provider couldn't be reached to verify |
 
 ## Security

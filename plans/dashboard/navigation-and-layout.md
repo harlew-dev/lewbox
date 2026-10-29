@@ -138,7 +138,7 @@ File-based TanStack Router routes. `$` marks a parameter. Every route under `/p/
 ### URL rules
 
 - **The project is `/p/{project}`**, using the project's `prj_` id. A project's human slug, if we add one ([projects](../projects.md)), may redirect to it, but links the dashboard makes always use the id, so renaming never breaks them.
-- **Resources use their public ids** (`sbx_`, `prf_`, `clu_`, `node_`, `ses_`, `cnv_`, `whk_`, `bld_`, `op_`, `ins_`), and templates their slug. These are the same ids the API and SDKs use, so you can copy one from a log and paste it into a URL.
+- **Resources use their public ids** (`sbx_`, `prf_`, `clu_`, `node_`, `ses_`, `cnv_`, `whk_`, `bld_`, `op_`, `cin_`), and templates their slug. These are the same ids the API and SDKs use, so you can copy one from a log and paste it into a URL.
 - **Filters and tabs are search params**, validated per route. Defaults are left out of the URL.
 - **Cursors aren't in the URL.** "Load more" appends in place; a reload starts from the first page. A shared link shows the same filters, not the same scroll position.
 - **Legacy redirects:** `lewbox serve` answers `/t/{tenant}/…` with a `301` to the matching `/p/{project}/…` path, using the [migration](../migration/data.md) id map (project ids keep their tenant's random part), for the first months after cutover ([migration/cutover](../migration/cutover.md)).

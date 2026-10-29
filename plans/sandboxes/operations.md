@@ -84,14 +84,13 @@ Steps are for progress; the API documents that new ones may appear.
    - the lifecycle timers ([timers-and-activity](timers-and-activity.md));
    - the tags.
 
-   Record `runtime_id` and the node (from the sandbox index) → `created`.
-2. **Wait** until AerolVM reports it `started`, then `Transition` it to `running` (opening the metering run) → `running`.
-3. **Read its command** from `/proc/1/cmdline` and record `container_command` ([persistence](persistence.md#container-command)). Best effort; no step recorded.
-4. **Apply profile setup** ([profile-setup](profile-setup.md)) → `setup_applied`. Best effort: failures go in the setup report.
-5. **Clone repositories** ([repositories](repositories.md)) → `repositories_cloned`. Best effort, within 5 minutes.
-6. **Expose ports**: the template's and the create's, private ones behind their proxies ([inside-a-sandbox/ports](../inside-a-sandbox/ports.md)) → `ports_exposed`. Best effort.
-7. **Run hooks**: the template's and the sandbox's `on_create`, then `on_start`, in order; register the backstop's `pre_stop` script with AerolVM ([hooks](hooks.md#when-hooks-run)) → `hooks_ran`. Best effort, unless a hook is `required`: then the operation ends `failed` with `hook_failed`, and the sandbox stays `running`.
-8. Finish: `succeeded`.
+   Record `runtime_id` and the node (`owner_node_id` on the sandbox, F37) → `created`.
+2. **Wait** until AerolVM reports it `started` with its toolbox ready (F4), then `Transition` it to `running` (opening the metering run) → `running`.
+3. **Apply profile setup** ([profile-setup](profile-setup.md)) → `setup_applied`. Best effort: failures go in the setup report.
+4. **Clone repositories** ([repositories](repositories.md)) → `repositories_cloned`. Best effort, within 5 minutes.
+5. **Expose ports**: the template's and the create's, private ones behind their proxies ([inside-a-sandbox/ports](../inside-a-sandbox/ports.md)) → `ports_exposed`. Best effort.
+6. **Run hooks**: the template's and the sandbox's `on_create`, then `on_start`, in order; register the backstop's `pre_stop` script with AerolVM ([hooks](hooks.md#when-hooks-run)) → `hooks_ran`. Best effort, unless a hook is `required`: then the operation ends `failed` with `hook_failed`, and the sandbox stays `running`.
+7. Finish: `succeeded`.
 
 #### `start`
 
@@ -99,27 +98,26 @@ Steps are for progress; the API documents that new ones may appear.
   1. Reset the lifetime to count from now.
   2. Start it in AerolVM, and wait.
   3. `Transition` to `running` → `running`.
-- **Offloaded:** create a new AerolVM sandbox from its latest snapshot with `container_command` ([persistence](persistence.md#resume)), tagged as a create is.
+- **Offloaded:** create a new AerolVM sandbox from its latest snapshot ([persistence](persistence.md#resume)), tagged as a create is. The image's own command runs, as the fork keeps it (F10).
   1. Record the new `runtime_id` and node → `created`.
   2. Wait, then `Transition` → `running`.
 - **Then, either way:**
-  1. Check the command (a nested toolbox is started as the session `lewbox-command`, for legacy snapshots only).
-  2. Apply setup → `setup_applied`.
-  3. Re-expose persisted ports, restarting private proxies first, and record their new URLs. After an in-place start, close ports AerolVM kept that aren't persisted → `ports_exposed`.
-  4. Run the `on_start` hooks, and register the backstop's `pre_stop` script again ([hooks](hooks.md#when-hooks-run)) → `hooks_ran`.
+  1. Apply setup → `setup_applied`.
+  2. Re-expose persisted ports, restarting private proxies first, and record their new URLs. After an in-place start, close ports AerolVM kept that aren't persisted → `ports_exposed`.
+  3. Run the `on_start` hooks, and register the backstop's `pre_stop` script again ([hooks](hooks.md#when-hooks-run)) → `hooks_ran`.
 
 #### `stop`
 
 The same steps whatever asked for the stop: a person or key, credits, a budget, a suspension, a node drain moving it, or the reconciler offloading a sandbox AerolVM stopped on a timer. No snapshot leaves the node holding a credential Lewbox imported ([profile-setup](profile-setup.md#credentials-never-enter-a-snapshot)).
 
-1. **Disarm the timers** on the node, if it's still running (`PUT …/lifecycle` with notify-mode timers off), so the fork's backstop can't fire while the stop runs its hooks; skipped on releases without notify mode ([timers-and-activity](timers-and-activity.md#lewbox-decides-when-to-stop)) → `timers_disarmed`.
+1. **Disarm the timers** on the node, if it's still running (`PUT …/lifecycle` with notify-mode timers off), so the fork's backstop can't fire while the stop runs its hooks ([timers-and-activity](timers-and-activity.md#lewbox-decides-when-to-stop)) → `timers_disarmed`.
 2. **Run the `on_stop` hooks**, if it's still running: the template's then the sandbox's, within `stop_grace` (shorter for credits, budgets and suspensions), with `LEWBOX_STOP_REASON` set; failures are reported, never fatal ([hooks](hooks.md#stops-are-bounded)) → `stop_hooks_ran`. Skipped when AerolVM already stopped it; its backstop ran them, and step 6 reads their results.
 3. **Harvest**, if it's still running: read back the logins an agent may have refreshed in the sandbox (Codex's `auth.json`) through the toolbox, and adopt any newer than the profile's ([profile-setup](profile-setup.md#harvest-first)) → `harvested`. Skipped when AerolVM already stopped it; step 6 reads them from the node instead.
 4. Run setup cleanup, best effort, if it's still running: every step's cleanup, and `/run/lewbox` emptied ([profile-setup](profile-setup.md#cleanup)) → `setup_cleaned`.
 5. Stop it in AerolVM, unless already stopped → `stopped`.
-6. **Scrub** the stopped container's filesystem on the node, with the paths from the sandbox's last setup report **and the sandbox's own `scrub` paths** ([hooks](hooks.md#scrub)), reading the harvest paths (and the backstop's hook results, if it stopped itself) first if steps 2–3 couldn't; check the report → `scrubbed`. With cloud storage this is part of the snapshot call (step 8); without, it's `POST /v1/sandboxes/{id}/scrub`. On a fork release without the scrub, *scrub by restart*: start it in place, harvest and clean up inside, stop it again ([older fork releases](profile-setup.md#older-fork-releases)). A failed scrub or check is retried; at the deadline the stop fails `scrub_failed` and nothing is uploaded.
+6. **Scrub** the stopped container's filesystem on the node, with the paths from the sandbox's last setup report **and the sandbox's own `scrub` paths** ([hooks](hooks.md#scrub)), reading the harvest paths (and the backstop's hook results, if it stopped itself) first if steps 2–3 couldn't; check the report → `scrubbed`. With cloud storage this is part of the snapshot call (step 8); without, it's `POST /v1/sandboxes/{id}/scrub`. A failed scrub or check is retried; at the deadline the stop fails `scrub_failed` and nothing is uploaded.
 7. **Without cloud storage:** `Transition` → `stopped` and finish. (Only a sandbox that doesn't persist could be on such a cluster, and its stop is a `delete`; this case is a sandbox whose cluster lost its storage, or a legacy one.)
-8. Snapshot it as `<sbx>-<op>`, lowercased, with the scrub and `reset_config` ([persistence](persistence.md#snapshot-upload-remove)) → `snapshotted`.
+8. Snapshot it as `<sbx>-<op>` (the fork lowercases the path, F11), with the scrub and `reset_config` ([persistence](persistence.md#snapshot-upload-remove)) → `snapshotted`.
 9. Wait until the snapshot is uploaded (`active`) → `uploaded`. Waiting is unbounded within the deadline; a failed upload is retried by AerolVM.
 10. Destroy the AerolVM sandbox, and remove the snapshot's local copy on the node that took it → `removed`.
 11. Record the snapshot as the sandbox's latest ([persistence](persistence.md#data-model)); `Transition` → `stopped`, clearing `runtime_id` and `node_id`.
@@ -175,7 +173,7 @@ Each step's errors are classified by `internal/operations.classify(err)`:
 | **Permanent** | A `4xx` from AerolVM (image can't be pulled, invalid request); cluster gone; plain-HTTP cluster in production; Dockerfile build failure | Fail at once: `operation_failed`, or `build_failed` for builds |
 | **Deadline** | `LEWBOX_OPERATION_TIMEOUT` (30 min) since the operation was *asked for* passes, however many replicas worked on it | Fail with the last error, as `cluster_unavailable` when that error was transient, else `operation_failed` |
 
-Capacity errors are recognised by phrase today, which is fragile. **In our fork**, AerolVM returns a machine-readable `code: "capacity_exceeded"` ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)). We keep the phrase match as a fallback until every supported fork version has the code.
+Capacity errors were recognised by phrase in legacy, which was fragile. **The fork** returns a machine-readable `code: "capacity_exceeded"` with a `reason` (F34, in the minimum release), and Lewbox never reads an error's wording ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#no-workarounds-in-lewbox)).
 
 `attempts` counts handler runs, not step retries. A job that panics is recorded as a transient failure and retried; three panics in a row fail the operation with `internal_error` and an alert ([foundation/observability](../foundation/observability.md)).
 
@@ -313,7 +311,7 @@ Two nullable foreign keys with a `CHECK` replace the polymorphic `subject_type` 
 |---|---|---|
 | `LEWBOX_OPERATION_TIMEOUT` | `30m` | Deadline from when it's asked for |
 | `LEWBOX_CAPACITY_WAIT` | `2m` | |
-| `LEWBOX_OPERATION_CONCURRENCY` | `64` | Workers on the `operations` queue per replica |
+| `LEWBOX_JOBS_CONCURRENCY` | `64` | Workers on the `operations` queue per replica |
 | `LEWBOX_OPERATION_RETRY_MIN` / `_MAX` | `1s` / `30s` | |
 | `LEWBOX_CLONE_TIMEOUT` | `5m` | [repositories](repositories.md) |
 | `LEWBOX_AEROLVM_LONG_TIMEOUT` | `10m` | Create, start, stop, destroy, snapshot calls |

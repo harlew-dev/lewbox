@@ -1,6 +1,6 @@
 # Dockerfile rules
 
-> Status: Draft · Milestone: Alpha (M1) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1, classic builder, no context); BuildKit and contexts after the alpha · Updated: 2026-10-29
 
 A template's Dockerfile is checked when it's saved, so a mistake shows on the form or in the API's `422` at once, naming the line, instead of as a failed build minutes later. This plan covers what's checked, how the rules depend on whether the cluster builds with the classic builder or BuildKit, how build contexts change the rules, and the limits on size.
 

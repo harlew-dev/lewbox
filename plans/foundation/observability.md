@@ -66,7 +66,8 @@ Prometheus text format at `/metrics`.
 | `lewbox_aerolvm_request_duration_seconds` | histogram | `endpoint` |
 | `lewbox_toolbox_requests_total` | counter | `endpoint`, `result` |
 | `lewbox_toolbox_unavailable_total` | counter | `cluster` |
-| `lewbox_toolbox_exit_status_recovered_total` | counter | `how` (`trap`, `file`) — counts the gVisor workaround firing ([lessons](../lessons.md)) |
+| `lewbox_toolbox_unexpected_total` | counter | `route` — answers outside the fork's contract (an uncoded error, `-1` exit codes); each is a fork bug to fix, not a case to handle ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#no-workarounds-in-lewbox)) |
+| `lewbox_nodes_outdated` | gauge | `cluster` — nodes below the minimum fork release |
 | `lewbox_nodes` | gauge | `cluster`, `status` |
 | `lewbox_node_heartbeat_age_seconds` | gauge | `cluster`, `node` (nodes are few and stable; the one exception to the rule) |
 | `lewbox_helper_installs_total` | counter | `helper`, `result` |
@@ -120,13 +121,13 @@ Both are unauthenticated, cheap, and not logged at `info` (they'd flood the log)
 An audit log of administrative actions, separate from the activity log (which is about sandboxes):
 
 - **What's audited**: instance admins' actions (projects created or suspended, users made admins); project admins' actions (members added or removed, roles changed, admin keys made or revoked, clusters created or suspended, nodes removed, webhook endpoints and secrets changed, GitHub App registered, settings changed); profiles made, suspended, deleted; profile keys made or revoked; secret and signing key rotations; `lewbox admin` commands.
-- **Table** `audit_log`: `(id, occurred_at, project_id null, actor_type, actor_id, action, target_type, target_id, details jsonb, request_id, ip)`. Append-only: the application role has no `UPDATE` or `DELETE` on it, and pruning (default 1 year, `LEWBOX_AUDIT_RETENTION`) runs as a separate statement allowed only for that.
+- **Table** `audit_log`: `(id, occurred_at, project_id null, actor_type, actor_id, action, target_type, target_id, details jsonb, request_id, ip)`. Append-only: the application role has no `UPDATE` or `DELETE` on it, and pruning (default 1 year, `LEWBOX_AUDIT_DEFAULT_RETENTION`) runs as a separate statement allowed only for that.
 - **Shown** to project admins in the dashboard (Settings → Audit log), and to instance admins for everything. Readable by `GET /v0/projects/{prj}/audit-log` with an admin key.
 - **Not** in webhooks (for now).
 
 ## Configuration
 
-`LEWBOX_LOG_LEVEL`, `LEWBOX_LOG_FORMAT`, `LEWBOX_LOG_SAMPLE_SUCCESS`, `LEWBOX_METRICS_ADDR`, `LEWBOX_METRICS_TOKEN`, `LEWBOX_METRICS_CLUSTER_LABEL`, `LEWBOX_AUDIT_RETENTION`, standard `OTEL_*`: see [configuration](configuration.md#observability).
+`LEWBOX_LOG_LEVEL`, `LEWBOX_LOG_FORMAT`, `LEWBOX_LOG_SAMPLE_SUCCESS`, `LEWBOX_METRICS_ADDR`, `LEWBOX_METRICS_TOKEN`, `LEWBOX_METRICS_CLUSTER_LABEL`, `LEWBOX_AUDIT_DEFAULT_RETENTION`, standard `OTEL_*`: see [configuration](configuration.md#observability).
 
 ## Security
 

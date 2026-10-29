@@ -62,6 +62,7 @@ prefix   14 × [0-9A-Za-z], from crypto/rand
 | `msg_` | Message (prompt or turn) | [agents/turns-and-events](../agents/turns-and-events.md) | |
 | `tsk_` | Background task | [agents/background-tasks](../agents/background-tasks.md) | New; legacy used the agent's own task ids |
 | `wtr_` | Worktree | [agents/worktrees](../agents/worktrees.md) | Later |
+| `enk_` | Conversation encryption key | [agents/storage-and-uploads](../agents/storage-and-uploads.md) | Later |
 | `evt_` | Activity event | [activity-and-webhooks/activity-log](../activity-and-webhooks/activity-log.md) | |
 | `whk_` | Webhook endpoint | [activity-and-webhooks/webhooks](../activity-and-webhooks/webhooks.md) | |
 | `whe_` | Webhook event | [activity-and-webhooks/webhooks](../activity-and-webhooks/webhooks.md) | Also the Standard Webhooks `webhook-id` |
@@ -93,7 +94,8 @@ kind      32 bytes from crypto/rand
 | `lbn_` | Node token | One node's node API | Until the node is removed; rotated on renewal | [clusters/node-agent](../clusters/node-agent.md) |
 | `lbi_` | Install token | One cluster installation | 1 hour, once | [clusters/installation](../clusters/installation.md) |
 | `lbl_` | Setup link token | One profile's setup page, chosen sections | 7 days, then a 1 h session once used | [profiles/setup-links](../profiles/setup-links.md) |
-| (none) | Dashboard session | One user's session | 30 days sliding | [projects/users-and-login](../projects/users-and-login.md) |
+| `lbv_` | Invitation token | One project invitation, accepted once by the invited email | 7 days, once | [projects/members-and-roles](../projects/members-and-roles.md) |
+| (none) | Dashboard session | One user's session | 30 days unused, 90 days at most | [projects/users-and-login](../projects/users-and-login.md) |
 | (none) | Login code | One sign-in | 10 minutes, 5 attempts | [projects/users-and-login](../projects/users-and-login.md) |
 
 Legacy `lbt_` tenant keys become `lba_`. Since the API is new (D4), no legacy token works against it. Lewagent and others make new keys ([migration](../migration.md)).

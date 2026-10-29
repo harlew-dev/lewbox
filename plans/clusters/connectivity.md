@@ -1,8 +1,10 @@
 # Connectivity
 
-> Status: Draft · Milestone: Alpha (M1 direct; M4 tunnel) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1: direct only, as legacy); Beta (tunnel and relay) · Updated: 2026-10-29
 
 How the control plane reaches a cluster's nodes, and how people reach the sandboxes on them. A cluster connects in one of two ways. **Direct**: every node has a public IP and its own subdomain, and is reached on port 443, as in legacy. **Tunnel**: nodes only dial out, through the node agent, so they can sit behind NAT, in a homelab or a private network. The announcement promises both: the hosted control plane "reaches your servers through a secure tunnel or exposed ports".
+
+**The alpha is direct only**, as legacy Lewbox is ([D16](../README.md#decisions)). Tunnel mode and the relay come in the **beta**; this plan designs them now so the alpha's AerolVM client (the `Dialer`) and node agent connection don't have to change for them.
 
 ## Today
 
@@ -106,11 +108,11 @@ A node's tunnel lands on one replica, but any replica may need it: for an API ca
 1. **The agent keeps a tunnel to every relay-capable replica** listed in its spec (`tunnel.endpoints`, each replica's own address). Every replica can then reach every tunnel node directly. Simple, and with 2–3 replicas cheap.
 2. **Replicas forward to the one that holds the tunnel,** found in `node_connections`, over an internal mTLS connection between replicas. One tunnel per node, but an extra internal hop and an internal CA.
 
-**Proposed: option 1 for the alpha.** An instance with one replica has one tunnel; an instance with many runs a few relay replicas, and agents connect to those.
+**Proposed: option 1 when tunnels ship (beta).** An instance with one replica has one tunnel; an instance with many runs a few relay replicas, and agents connect to those.
 
 ### The relay
 
-The relay is a role of `lewbox serve` ([foundation/binary-and-commands](../foundation/binary-and-commands.md)): `lewbox serve --roles api,worker,relay`. All roles are on by default; a large instance runs relays on their own hosts, near its nodes.
+The relay is a role of `lewbox serve` ([foundation/binary-and-commands](../foundation/binary-and-commands.md)): `lewbox serve --role api,worker,relay` (`LEWBOX_ROLE`, [foundation/binary-and-commands](../foundation/binary-and-commands.md#process-roles)). `all` includes the relay when `LEWBOX_RELAY_DOMAIN` is set; a large instance runs relays on their own hosts, near its nodes.
 
 - **HTTPS:**
   - It listens on `:443` for `*.<relay domain>` and peeks the TLS ClientHello for the server name, without terminating TLS.
@@ -202,7 +204,7 @@ The enrollment rule against a shared IP applies only to direct clusters.
 
 | Setting | Default | What |
 |---|---|---|
-| `LEWBOX_ROLES` | `api,worker,relay` | Which roles this replica runs |
+| `LEWBOX_ROLE` | `all` | Which roles this replica runs: `all`, or a list of `api`, `worker`, `relay` ([foundation/binary-and-commands](../foundation/binary-and-commands.md#process-roles)) |
 | `LEWBOX_RELAY_DOMAIN` | unset | The relay's domain, e.g. `lewbox.net`; unset disables tunnel clusters |
 | `LEWBOX_RELAY_ADVERTISE` | the public URL | The address agents connect to for this replica's tunnel |
 | `LEWBOX_RELAY_TCP_PORTS` | `30000-40000` | Ports the relay offers for TCP sandbox ports |
@@ -228,17 +230,17 @@ The enrollment rule against a shared IP applies only to direct clusters.
    - the `Dialer` abstraction in the AerolVM client;
    - direct mode as legacy;
    - development-only IP mode.
-2. **M4:**
+2. **Beta:**
    - yamux over the agent's WebSocket;
    - the target allow-list;
    - `tunnels.Dial`;
    - tunnel-mode installation (LAN advertise addresses, firewall).
-3. **M4:**
+3. **Beta:**
    - the relay role, with SNI pass-through and TCP;
    - relay DNS records;
-   - DNS-01 through the control plane for tunnel nodes.
-4. **M4:** dashboard and API for choosing a mode; node connection status.
-5. **Beta:**
+   - DNS-01 through the control plane for tunnel nodes (needs F43, also beta).
+4. **Beta:** dashboard and API for choosing a mode; node connection status.
+5. **After the first tunnel release:**
    - relay bandwidth metering;
    - per-node caps;
    - relays in more than one region.

@@ -1,6 +1,6 @@
 # PKI and DNS
 
-> Status: Draft · Milestone: Alpha (M1; delegated DNS-01 in M4) · Core PKI; DNS through the `dns/libdns` plugin (Cloudflare by default, and the other libdns providers) · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1: PKI, and DNS with Cloudflare only, as legacy); Beta (DNS-01 through the control plane, other DNS providers) · Core PKI; DNS through the `dns/libdns` plugin · Updated: 2026-10-29
 
 Two kinds of trust hold a cluster together. **The cluster CA** signs every node's certificate for AerolVM's internal mTLS (Raft, gossip and the internal channel). Lewbox holds it, signs each node's certificate as it joins, and renews them. **Public TLS** lets the control plane and browsers reach nodes over HTTPS: each node has its own subdomain with a wildcard certificate, issued by Let's Encrypt through DNS-01. This plan covers both, plus the DNS records Lewbox keeps for nodes, and the DNS providers it supports.
 
@@ -122,9 +122,9 @@ A dashboard action, *Rotate cluster CA*, shows each phase. Until F42 lands, rota
 
 ### DNS providers
 
-DNS is behind a **DNS provider** extension point ([plugins/dns-providers](../plugins/dns-providers.md)). Core (`internal/dns`) owns the interface, records, the nightly check and the connection test; providers come from **one plugin, `dns/libdns`** (decided 2026-10-29), which wraps [libdns](https://github.com/libdns) packages, the same ones Caddy's DNS modules use. Each provider registers its id, its credential fields (a JSON Schema the dashboard renders) and a constructor, about 20 lines. Which providers are compiled in is set in `plugins/config.json`; the default build has Cloudflare (supported) and Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC and RFC 2136 (experimental until each passes the live suite). A host without a libdns package can still be its own plugin. Adding a provider never touches core. A cluster whose provider's plugin is turned off keeps its records and settings, but nothing new is enrolled on it until the plugin is back (`409 plugin_disabled`).
+DNS is behind a **DNS provider** extension point ([plugins/dns-providers](../plugins/dns-providers.md)). Core (`internal/dns`) owns the interface, records, the nightly check and the connection test; providers come from **one plugin, `dns/libdns`** (decided 2026-10-29), which wraps [libdns](https://github.com/libdns) packages, the same ones Caddy's DNS modules use. Each provider registers its id, its credential fields (a JSON Schema the dashboard renders) and a constructor, about 20 lines. Which providers are compiled in is set in `plugins/config.json`. **The alpha has Cloudflare only**, as legacy does ([D16](../README.md#decisions)). After the alpha, once DNS-01 goes through the control plane (F43), the default build has Cloudflare (supported) and Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC and RFC 2136 (experimental until each passes the live suite). A host without a libdns package can still be its own plugin. Adding a provider never touches core. A cluster whose provider's plugin is turned off keeps its records and settings, but nothing new is enrolled on it until the plugin is back (`409 plugin_disabled`).
 
-**AerolVM doesn't need per-provider support:** certificates' DNS-01 challenges are relayed through the control plane ([below](#dns-01-through-the-control-plane)), so the fork's Caddy only ever talks to Lewbox. Until that relay (F43) is in the fork, direct clusters can only use providers whose Caddy module the fork's Caddy includes, which is Cloudflare ([plugins/dns-providers](../plugins/dns-providers.md#aerolvm-and-the-fork)).
+**In the alpha, DNS-01 works as legacy's does:** Caddy's own Cloudflare module on each node, with a zone-scoped token. **After the alpha, AerolVM won't need per-provider support:** certificates' DNS-01 challenges are relayed through the control plane ([below](#dns-01-through-the-control-plane)), so the fork's Caddy only ever talks to Lewbox, and any `dns/libdns` provider works ([plugins/dns-providers](../plugins/dns-providers.md#aerolvm-and-the-fork)).
 
 The interface:
 
@@ -136,7 +136,7 @@ type Provider interface {
 }
 ```
 
-- **Backed by libdns:** Cloudflare, Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC, and RFC 2136 for self-run servers, all inside `dns/libdns`. Cloudflare is supported in the alpha (M1); Route 53, Hetzner and RFC 2136 become supported as they pass the live suite (M3); the rest stay experimental until they do.
+- **Backed by libdns:** Cloudflare, Route 53, DigitalOcean, Hetzner, Google Cloud DNS, Azure, Gandi, Porkbun, deSEC, and RFC 2136 for self-run servers, all inside `dns/libdns`. Cloudflare is the only one in the alpha (M1); the others arrive with F43 (beta), Route 53, Hetzner and RFC 2136 supported as they pass the live suite, the rest experimental until they do.
 - **Per cluster,** `cluster_dns`:
   - `provider`, `domain`;
   - `credentials` (encrypted; the shape depends on the provider);
@@ -178,7 +178,7 @@ When a node enrolls on a cluster with DNS (`PUT /node/v0/dns`, [installation](in
 
 #### DNS-01 through the control plane
 
-Today each node holds a token that can edit its cluster's whole zone. Instead:
+**Beta.** In the alpha each node holds the cluster's Cloudflare token, scoped to the zone, for Caddy, exactly as legacy does. That's a trade-off we accept for the alpha: a compromised node could edit the zone's records. It's a *node* credential, on the project's own server, and doesn't touch [D11](../README.md#decisions), which is about credentials inside sandboxes. From the beta:
 
 - **The fork adds a Caddy DNS provider, `lewbox`** ([F43](aerolvm-fork.md#api-clustering-and-lifecycle), proposed upstream as a generic "webhook" provider). It asks the node agent, which asks the control plane over its connection:
   - `POST /node/v0/acme-challenges {name, value}` to set a TXT record;
@@ -186,7 +186,7 @@ Today each node holds a token that can edit its cluster's whole zone. Instead:
 - **The control plane only sets `_acme-challenge.<name>`** where `<name>` is that node's own subdomain or its wildcard. Anything else is refused and logged.
 - **It uses the cluster's provider credentials,** which never leave the control plane.
 - **The same mechanism serves tunnel nodes** on the relay domain, which a project must never hold credentials for.
-- **Until F43 is in the fork,** direct clusters fall back to legacy's way: the provider token is copied to nodes for Caddy's own DNS module, with a dashboard warning that it should be scoped to the zone. That only works for providers whose Caddy module the fork's Caddy includes, which is **Cloudflare**; a direct cluster on another provider needs a fork version with F43 (`422 validation_failed` on `provider` otherwise). F43 makes it unnecessary to compile more Caddy DNS modules into the fork.
+- **The alpha's way is the design until then, not a fallback kept after it:** once F43 is in the minimum fork release, nodes no longer get a DNS token, and the token files are removed from them by the spec. F43 also makes it unnecessary to compile more Caddy DNS modules into the fork.
 
 ### Node tokens
 
@@ -215,7 +215,7 @@ Node API: `PUT /node/v0/dns`, `PUT /node/v0/bundles`, `PUT /node/v0/certificate`
 
 - **Keys at rest:** CA keys, PATs, gossip keys, credential keys and DNS credentials are encrypted with the keyring. Rotating the keyring re-wraps them; nothing on the clusters changes.
 - **Signing is by authenticated node id only.** A node token can only get a certificate for its own node.
-- **DNS credentials:** after F43 they stay on the control plane. Projects should still scope them to one zone, and the test reports the scope where the provider says.
+- **DNS credentials:** in the alpha, the Cloudflare token is on every node of its cluster (as legacy), so the dashboard asks for one scoped to the zone and the connection test reports its scope. From the beta (F43) they stay on the control plane.
 - **Audit:** every certificate issued (node, serial, expiry, by which request), every DNS change, and every refused ACME challenge, in the cluster's activity.
 
 ## Observability
@@ -241,7 +241,7 @@ Node API: `PUT /node/v0/dns`, `PUT /node/v0/bundles`, `PUT /node/v0/certificate`
 | `LEWBOX_CERTIFICATE_LIFETIME` | `2160h` | Node certificate lifetime |
 | `LEWBOX_CERTIFICATE_RENEW_WITHIN` | `720h` | Renew when this little is left |
 | `LEWBOX_CERTIFICATE_WARNING` | `336h` | Notify when this little is left |
-| `LEWBOX_DNS_PROVIDERS` | `cloudflare,route53,hetzner,rfc2136` | Providers offered |
+| `LEWBOX_DNS_PROVIDERS` | `cloudflare` in the alpha; after it, every provider the build has | Providers offered to projects ([plugins/dns-providers](../plugins/dns-providers.md)) |
 | `LEWBOX_RELAY_DNS_PROVIDER` + credentials | | For the relay domain |
 
 ## Testing
@@ -273,11 +273,12 @@ Node API: `PUT /node/v0/dns`, `PUT /node/v0/bundles`, `PUT /node/v0/certificate`
    - deleting on removal;
    - the nightly check;
    - the connection test.
-3. **M3:** Route 53, Hetzner and RFC 2136 through `dns/libdns`'s live suite to supported; `acme_email`.
-4. **M4:**
-   - DNS-01 through the control plane (with F43);
-   - relay-domain records for tunnel clusters.
-5. **Beta:** PAT and gossip key rotation; CA rotation (with F42).
+3. **M3:** `acme_email`.
+4. **Beta:**
+   - DNS-01 through the control plane (with F43), and the token removed from nodes;
+   - the other `dns/libdns` providers; Route 53, Hetzner and RFC 2136 through the live suite to supported;
+   - relay-domain records for tunnel clusters;
+   - PAT and gossip key rotation; CA rotation (with F42).
 
 ## Open questions
 

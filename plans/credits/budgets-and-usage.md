@@ -73,7 +73,7 @@ reaches_at = t + (limit − spent(t)) × 3600 / rate
 | `memory_mb_seconds`, `disk_gb_seconds` | bigint |
 | `compute_units` | bigint — micro-units |
 
-Primary key (`hour`, `sandbox_id`). Written by a leader job a minute after each hour ends, from runs overlapping it (idempotent upsert, so a rerun or a late-ended run fixes it: the job also re-rolls hours touched by runs whose `ended_observed_at` is in the last hour). Partitioned by month; kept 13 months by default (`LEWBOX_USAGE_RETENTION`). Daily and monthly figures sum hours.
+Primary key (`hour`, `sandbox_id`). Written by a leader job a minute after each hour ends, from runs overlapping it (idempotent upsert, so a rerun or a late-ended run fixes it: the job also re-rolls hours touched by runs whose `ended_observed_at` is in the last hour). Partitioned by month; kept 13 months by default (`LEWBOX_CREDITS_USAGE_RETENTION`). Daily and monthly figures sum hours.
 
 ### Usage reports
 
@@ -145,8 +145,8 @@ Errors: `422 validation_failed` (range too long, bad granularity), `429 limit_ex
 
 | Variable | Default | |
 |---|---|---|
-| `LEWBOX_USAGE_RETENTION` | `13mo` | Roll-ups |
-| `LEWBOX_BUDGET_WARNING_THRESHOLD` | `0.8` | Default for new projects |
+| `LEWBOX_CREDITS_USAGE_RETENTION` | `9504h` (13 months) | Roll-ups |
+| `LEWBOX_CREDITS_BUDGET_WARNING_THRESHOLD` | `0.8` | Default for new projects |
 
 ## Testing
 

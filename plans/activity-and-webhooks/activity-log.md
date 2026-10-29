@@ -177,7 +177,7 @@ Errors: `403 permission_denied`, `404 not_found`, `422 validation_failed`, `422 
 |---|---|---|
 | `LEWBOX_ACTIVITY_MAX_RETENTION` | `90d` | Partitions dropped after |
 | `LEWBOX_ACTIVITY_DEFAULT_RETENTION` | `30d` | New projects |
-| `LEWBOX_ACTIVITY_SUCCEEDED_COMMAND_RETENTION` | `3d` | New projects |
+| `LEWBOX_ACTIVITY_DEFAULT_SUCCEEDED_COMMAND_RETENTION` | `3d` | New projects |
 | `LEWBOX_ACTIVITY_QUEUE` | `50000` | Per replica |
 | `LEWBOX_ACTIVITY_CLIENT_EVENTS_PER_MINUTE` | `60` | Per key |
 

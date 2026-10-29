@@ -122,7 +122,7 @@ More agents (Cursor, Grok, OpenCode, pi, Antigravity) follow the same pattern la
    4. Write the env file from the env of every step that applies (0600).
    5. For each applicable, configured step: files (JSON merge via a tiny embedded merge helper, `lewbox agentd json-merge`, if agentd is installed, else a `python3`/`jq`-free fallback written in `sh`+`awk` for flat merges; see [open questions](#open-questions)), commands, check.
 2. **Large files** (over 64 KiB, e.g. a Codex `auth.json` is small, but future steps may not be) are written with the files API before the script runs, and referenced by path.
-3. **Exit statuses** are written by the script itself into the report, so lost exit codes under gVisor don't matter ([lessons](../lessons.md)).
+3. **Each step's result** is written by the script itself into the report, one structured line per step, so one script run reports every step's outcome at once.
 4. **Redaction:** every value in `Secrets` is replaced with `[redacted]` in check output and errors before the report is stored. Output is capped at 2 KiB per step.
 5. **Timeouts:** the whole script 120 s; each command its own (default 30 s).
 6. **Retries:** if the toolbox can't be reached (warming up after a start, `502`/`503`), retry as a transient failure within the operation's deadline. If it never could, the report's `error` says so, and the operation still succeeds.
@@ -184,8 +184,8 @@ Each apply records the exact paths it wrote in the setup report (internal, not i
                                       "read":   ["/root/.codex/auth.json"] },
      "reset_config": true }
    ```
-   - **Docker and gVisor** (gVisor's writes land in the container's overlay upper directory, as the fork runs it with `--overlay2=none`, F21): each path is deleted from the upper directory; a path that also exists in a lower layer (a previous snapshot, or the image) gets an overlay whiteout, so the committed layer hides it. Symlinks are removed, not followed.
-   - **Firecracker:** the stopped VM's `rootfs.ext4` is opened on the host (`debugfs -w`, no mount needed) and the paths unlinked, before the disk is snapshotted. Only disk is ever snapshotted ([Firecracker](#memory-is-never-snapshotted)).
+   - **Docker** (and gVisor from the beta: gVisor's writes land in the container's overlay upper directory, as the fork runs it with `--overlay2=none`, F21): each path is deleted from the upper directory; a path that also exists in a lower layer (a previous snapshot, or the image) gets an overlay whiteout, so the committed layer hides it. Symlinks are removed, not followed.
+   - **Firecracker** (later): the stopped VM's `rootfs.ext4` is opened on the host (`debugfs -w`, no mount needed) and the paths unlinked, before the disk is snapshotted. Only disk is ever snapshotted ([Firecracker](#memory-is-never-snapshotted)).
    - **`read`** paths are read before they're removed and returned in the answer (64 KiB each at most), over the node's TLS API with the cluster's PAT: the [harvest](#harvest-first) for sandboxes AerolVM stopped itself.
    - **`reset_config`** (fork change F47) commits the image with the base image's own `Env`, `Entrypoint` and `Cmd` (folding in F10's entrypoint fix), so the create-time `env`, which can hold secrets, isn't copied into the snapshot's image config in the registry. Lewbox already sends `env` again on every resume ([persistence](persistence.md#resume)), so nothing is lost.
    - The same scrub runs on a stop **without** a snapshot (a cluster without storage, or a sandbox left stopped on its node): `POST /v1/sandboxes/{id}/scrub` with the same body, so a stopped container on a node's disk doesn't hold them either.
@@ -208,26 +208,19 @@ A snapshot that may hold a credential is never uploaded, and never kept:
 - At the deadline the stop ends `failed`, `error_code: scrub_failed`, with the sandbox left `stopped` on its node (as a stop that couldn't upload is, [operations](operations.md#what-a-failure-leaves)): starting it again resumes it in place, and setup writes the credentials again. An operator alert fires (`lewbox_snapshot_scrub_failures_total`), the project gets a notification, and the activity log an `operation` event with the reason.
 - The reconciler doesn't try to offload it again on its own; a new stop does, once the cause is fixed.
 
-#### Older fork releases
+#### No fallback for older fork releases
 
-The rule holds on every supported fork release; what changes is how. Lewbox checks the cluster's `Features` ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)):
-
-| Release has | Stops Lewbox asks for | Stops AerolVM makes (timers) |
-|---|---|---|
-| F46 + F47 (+ F48) | All four layers | Layers 1, 3, 4 |
-| Neither | Layer 2, then snapshot; `env` given on create is refused for persistent sandboxes with `422 validation_failed` ("this cluster can't keep env out of snapshots yet") | **Scrub by restart:** start the container in place, wait for the toolbox, harvest and clean up inside it, stop it, then snapshot. Slower (seconds, and the image's command runs briefly), but nothing leaves the node before it's clean |
-
-F46 and F47 are P0 for the alpha, so the fallback is for development clusters and the weeks before the fork release ships.
+F46, F47 and F48 are P0 and in Lewbox's minimum fork release, so every node Lewbox uses has them, and there's one way a stop works ([D15](../README.md#decisions)). Legacy's alternative, accepting credentials in snapshots after timer stops, and the interim idea of scrubbing by restarting a stopped sandbox in place, are both gone.
 
 #### Memory is never snapshotted
 
-A stop saves disk, never memory, on every runtime, including Firecracker once its snapshots are in the fork ([persistence](persistence.md#firecracker)). Memory can't be scrubbed: `/run/lewbox` is in it, and so is every process's environment, and a shell started an hour ago still holds `ANTHROPIC_API_KEY`. So a "pause that keeps processes" (persistence's old open question) isn't offered, because it can't keep this rule. Firecracker *templates* keep their build-time memory snapshot ([clusters/runtimes](../clusters/runtimes.md#firecracker-microvm)): it's taken at build, before any setup, so it holds no credential.
+A stop saves disk, never memory, on every runtime, including Firecracker once its snapshots are in the fork ([persistence](persistence.md#firecracker)). Memory can't be scrubbed: `/run/lewbox` is in it, and so is every process's environment, and a shell started an hour ago still holds `ANTHROPIC_API_KEY`. So a "pause that keeps processes" (persistence's old open question) isn't offered, because it can't keep this rule. Firecracker *templates* keep their build-time memory snapshot ([clusters/runtimes](../clusters/runtimes.md#firecracker-microvm-later)): it's taken at build, before any setup, so it holds no credential.
 
 #### What's tested
 
 - **Golden scrub lists** per manifest: every path a step writes is in `Scrub`, checked by a test that renders each step and compares the paths it writes with the scrub list.
 - **Fake AerolVM** honours `scrub` and `reset_config`, can fail either, and can leave a path behind; Lewbox must refuse the snapshot in each case.
-- **Live, on each runtime:** apply setup with canary credentials (distinct random strings per path), stop by each route (asked for, idle timeout, lifetime, credits, drain), pull the snapshot from the registry, and search every layer and the image config for the canaries. Any hit fails the release. Nightly on `container` and `gvisor`; on `microvm` once its snapshots ship.
+- **Live, on each supported runtime (Docker in the alpha):** apply setup with canary credentials (distinct random strings per path), stop by each route (asked for, idle timeout, lifetime, credits, drain), pull the snapshot from the registry, and search every layer and the image config for the canaries. Any hit fails the release. Nightly on `container` and `gvisor`; on `microvm` once its snapshots ship.
 
 ### The report
 

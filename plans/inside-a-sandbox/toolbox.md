@@ -53,8 +53,8 @@ Unused but present: Daytona-style `toolbox/files/*` (search, find), `git/…`, e
 
 - One client, `internal/aerolvm`, for the node API and the toolbox, with every route above typed.
 - One request path for every endpoint inside a sandbox, so each handler only does its own work.
-- Each toolbox problem fixed in the fork, with a pull request upstream, and Lewbox's workaround kept only for nodes that don't have the fix yet.
-- The same behaviour on Docker, gVisor and Firecracker.
+- Each toolbox problem fixed in the fork, with a pull request upstream. **Lewbox carries no workaround** for any of them ([D15](../README.md#decisions)): it requires the fork release with the fixes, and has one code path per behaviour.
+- Docker in the alpha; the same behaviour on gVisor (beta) and Firecracker (later) when they come.
 
 ## Design
 
@@ -71,9 +71,9 @@ err := h.withToolbox(ctx, func() error {  // step 6
 if err != nil { h.writeToolboxError(w, r, in, err, "…not found message…"); return }
 ```
 
-- **`runningSandbox`** reads the sandbox in one query scoped to the key's project, profile and clusters (one sandbox for a sandbox key), and the cluster connection from the [cluster cache](../clusters.md). It returns an `inSandbox`: the sandbox row, AerolVM's id for it (it changes on every resume), the node's client, the cluster's architecture and runtime, and the node's [capabilities](#capabilities).
+- **`runningSandbox`** reads the sandbox in one query scoped to the key's project, profile and clusters (one sandbox for a sandbox key), and the cluster connection from the [cluster cache](../clusters.md). It returns an `inSandbox`: the sandbox row, AerolVM's id for it (it changes on every resume), the node's client, the cluster's architecture and runtime.
 - **No HTTP to an app.** Legacy's `GET sandboxes/{sbx}?key=` and its 60 s key cache go; the key is checked against Postgres on every request, with a short in-process cache only if profiling says so ([api/authentication](../api/authentication.md)).
-- **`withToolbox`** retries only calls that are safe to repeat and whose bodies can be sent again: everything except a streamed upload's body, which waits for the toolbox with a `health` call first (as legacy's `writeFile` does). 250 ms doubling to 2 s, up to `toolbox_wait` (30 s). Only `ToolboxUnavailable` errors are retried (T7); with the fork's [error codes](#errors) it matches a code, not words.
+- **`withToolbox`** waits for the toolbox to be ready, then calls it. Readiness comes from the fork (F4): the sandbox's `toolbox_ready`, set by the `started` event on the [event stream](../sandboxes/reconciler.md#events), so a request right after a start waits for that signal, up to `toolbox_wait` (30 s), rather than retrying on `502`/`503` to guess. Network errors on calls that are safe to repeat are retried as any client would, 250 ms doubling to 2 s; a streamed upload's body is never sent twice.
 - **A node that doesn't answer at all** is forgotten in the cluster cache, so the next request finds the cluster's nodes again, and answers `503 cluster_unavailable`.
 - **A `410` from AerolVM** means the sandbox's node died and was evicted: answer `409 sandbox_not_running` ("lost"), and tell the [reconciler](../sandboxes/reconciler.md) to look at the sandbox now rather than within a minute.
 
@@ -86,102 +86,74 @@ if err != nil { h.writeToolboxError(w, r, in, err, "…not found message…"); r
   ```
 
   So every path loads `/etc/profile.d`, where [profile setup](../sandboxes/profile-setup.md) writes the agents' keys and Git's settings. One shell quoter (`setup.Quote` today) is used for everything; it's tested with every byte value.
-- **Directories.** `~` and `~/…` resolve to `/root/…`; anything else must be absolute (`422 validation_failed` on `directory`). Before running in a directory, Lewbox stats it, so a missing one is `validation_failed` ("There's no directory at …") rather than the toolbox's `fork/exec /usr/bin/bash: no such file or directory`. With the fork, the toolbox answers this itself with a code, and the extra stat goes.
+- **Directories.** `~` and `~/…` resolve to `/root/…`; anything else must be absolute (`422 validation_failed` on `directory`). A missing directory is `validation_failed` ("There's no directory at …"): the fork's toolbox answers it with the code `directory_not_found` (F6), so Lewbox doesn't stat first.
 - **The default directory** is the sandbox's own: `/root/workspace` when it was created with repositories, else `/root`. (Legacy leaves it to the toolbox, which uses the image's `WORKDIR`; we make it explicit and documented.)
 - **Terminals** get `TERM=xterm-256color` and `COLORTERM=truecolor` unless `env` sets them.
 
 ### Exit codes
 
-Fixes T1.
-
-The fix belongs in `toolboxd`, and goes to the fork first:
-
-- **Fork fix:** as init, `toolboxd` reaps every child, so it must remember the statuses it reaps. A reaper loop records `pid → status` in a map; a waiter that gets `ECHILD` *or* `ESRCH` takes the status from the map. This covers Execute, the exec stream, sessions and login shells alike, on every runtime. Upstream issue and pull request: [clusters/aerolvm-fork](../clusters/aerolvm-fork.md).
-- **Until a node has it** (capability `exit_status`):
-  - **Execute:** prefix `trap 'printf "\n__lewbox_exit_status=%s\n" "$?" >&2' EXIT; ` on the command's first line, so its line numbers stay; take the last marker line from stderr and remove it, and anything after it. No marker, as for a command its timeout killed or one that sets its own EXIT trap, leaves the toolbox's answer.
-  - **Sessions:** a trap that writes the status to `/root/.lewbox/sessions/<ses_id>`, read when the toolbox says `-1` or `killed` with signal `waitid: no such process`, and removed once the end is recorded ([sessions](sessions.md#exit-codes)).
-  - **Exec streams** (commands streamed or interactive): a trap that writes the marker to a file, as for sessions, read once the stream ends with `-1`. Legacy doesn't fix these at all. With `pty`, stderr is the terminal, so writing to it would show the marker.
-  - **Installing helpers:** check a file's mode with `Stat` after `chmod` rather than trusting its exit (`4f0da62`).
+On Docker the toolbox reports exit codes correctly, so Lewbox takes them as they come: no traps, no status files, no markers in stderr. Legacy's traps were for gVisor (T1), where toolboxd, as init, lost statuses to `ESRCH`; the fork fixes that in toolboxd (F1) before `gvisor` is offered in the beta ([clusters/runtimes](../clusters/runtimes.md)).
 
 ### Activity
 
-Fixes T3.
-
-- **Fork fix:** the node's proxy counts activity while bytes move on any toolbox stream (exec stream, attach, file transfer), at most once a minute, the way it already counts a request's start. Capability `stream_activity`.
-- **Until then:** Lewbox counts bytes on each relayed stream, and at most every `activity_interval` (60 s) calls `toolbox/health` in the background, never holding up the stream. Pings and keepalives don't count.
+- **The fork counts it (F5, in the minimum release):** the node's proxy counts activity while bytes move on any toolbox stream (exec stream, attach, file transfer), at most once a minute, the way it counts a request's start; and requests marked as not activity (status reads, Lewbox's own maintenance) don't count. Lewbox never touches `toolbox/health` to keep a sandbox awake.
 - **What doesn't count:** reading the sandbox's own record, listing ports or SSH keys, links. These are reads of Lewbox's database, not the sandbox.
-- **Watched sessions** keep their sandbox awake ([sessions](sessions.md#watch)). Today that's a side effect of polling them. With the fork's session events, Lewbox touches the sandbox on purpose while a watched session runs.
+- **Watched sessions** keep their sandbox awake while they run ([sessions](sessions.md#watch)), on purpose: Lewbox learns of their end from the fork's session events (F36), not by polling.
 
 ### Streams
 
 - **Upstream WebSockets** are dialled with the PAT in `Authorization`, and a read limit of 4 MiB, since attaching replays a session's 1 MiB buffer as one message.
-- **Kill on drop (T5).** A command's stream sends `{"type":"signal","signal":"KILL"}` before closing when its client goes. Fork fix: an `on_disconnect: kill` option on the exec stream, default for Lewbox; capability `exec_kill_on_close`.
-- **Pings (T6).** Lewbox pings its own clients every 30 s. The fork adds pings on the toolbox's side, so a node-side stream whose Lewbox replica died is noticed and its command killed.
+- **Kill on drop.** When a command's client goes, Lewbox ends the command: it sends `{"type":"signal","signal":"KILL"}`, then closes. That's Lewbox's documented behaviour for a streamed command whose caller left, not a workaround (T5 is AerolVM leaving it running, which a session is for).
+- **Pings.** Lewbox pings its own clients every 30 s. Pings on the toolbox's side (F3, P3) would let a node notice a stream whose Lewbox replica died.
 - **Replica shutdown.** On `SIGTERM`, every relayed stream ends: commands are killed and their clients get `1001`; attached sessions carry on and their clients get `1001` to reattach ([api/streaming](../api/streaming.md)).
 
 ### Errors
 
-How toolbox and node errors map to Lewbox's. Callers pass the `404` message, since a 404 means a file, a session or the sandbox depending on the call.
+The fork answers every toolbox, envd and proxy error in one shape with a stable code (F6, in the minimum release), and Lewbox maps codes, never wording. Callers pass the `404` message, since a 404 means a file, a session or the sandbox depending on the call.
 
-| From AerolVM | Lewbox answers |
+| From the fork | Lewbox answers |
 |---|---|
-| `502`/`503` with `toolbox unavailable` or `sandbox not adopted` (after retries) | `503 toolbox_unavailable` |
-| `410` | `409 sandbox_not_running`, the sandbox lost with its node |
-| `404` | `404 not_found`, with the caller's message |
-| `403` | `403 path_forbidden` |
-| `409` | `409 already_exists` |
-| Other `4xx` (not `401`) | `422 sandbox_refused`, with the toolbox's message |
-| `500` with a message | `502 sandbox_error`, with the toolbox's message |
-| No answer, `401`, anything else | `503 cluster_unavailable`; forget the cluster's cached nodes; log at `warn` |
+| `toolbox_unavailable` (still not ready after `toolbox_wait`) | `503 toolbox_unavailable` |
+| `410`, `sandbox_gone` | `409 sandbox_not_running`, the sandbox lost with its node |
+| `not_found` | `404 not_found`, with the caller's message |
+| `path_forbidden` | `403 path_forbidden` |
+| `already_exists` | `409 already_exists` |
+| `directory_not_found` | `422 validation_failed` on `directory` |
+| `not_a_directory`, `is_a_directory`, other client errors | `422 sandbox_refused`, with the fork's message |
+| `precondition_failed` | `412 precondition_failed` ([files](files.md#uploads)) |
+| a server error with a code | `502 sandbox_error`, with the fork's message |
+| No answer, `401`, anything unexpected | `503 cluster_unavailable`; forget the cluster's cached nodes; log at `error`, as an unexpected answer is a fork bug to fix, not to match |
 
-**Fork fix (T8):** one error shape across the toolbox, envd and the proxy, `{"error": "…", "code": "…"}`, with codes Lewbox can match: `toolbox_unavailable`, `not_found`, `path_forbidden`, `already_exists`, `not_a_directory`, `is_a_directory`, `directory_not_found`, `precondition_failed`. Matching words stays as a fallback for older nodes.
+### The minimum fork release
 
-### Capabilities
+Every toolbox problem legacy worked around is a fix in the fork, and Lewbox requires the release that has it ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)). There's no capability table and no per-node fallback:
 
-Each fix in the fork is a **capability** the node reports, so Lewbox applies a workaround only where it's needed and drops it once every node has moved on.
-
-- The fork adds `GET /v0/capabilities` (or capabilities on `GET /v0/version`): the fork's version and a list of names.
-- `lewbox node` reports the AerolVM version with its heartbeat ([clusters/health-and-metrics](../clusters/health-and-metrics.md)); the control plane fetches capabilities when a node's version changes, and caches them on the node's row.
-- `inSandbox.Capabilities` carries them into every handler.
-
-| Capability | Fixes | Removes from Lewbox |
+| Problem | Fork fix | When |
 |---|---|---|
-| `exit_status` | T1 | Execute's stderr trap, sessions' status files, stream traps, the `chmod` stat |
-| `unique_session_names` | T2 | Listing sessions before starting a proxy or agentd. `POST …/sessions` with `if_absent: true` answers the running session of that name |
-| `stream_activity` | T3 | Touches while streams move |
-| `streamed_downloads` | T4 | The memory limit on downloads; adds `Range` |
-| `exec_kill_on_close` | T5 | Sending `KILL` before closing |
-| `stream_pings` | T6 | |
-| `error_codes` | T8 | Matching error words |
-| `session_events` | T9 | Polling watched sessions |
-| `login_shell` | T10 | Wrapping commands in `bash -lc` |
-| `conditional_writes` | T11 | Lewbox's own compare-then-write ([files](files.md#uploads)) |
-| `watch` | T11 | Enables file watching ([files](files.md#watching)) |
-| `helpers_mount` | | Uploading `portd` and `agentd` ([below](#lewboxs-helpers-in-the-sandbox)) |
-
-The alpha supports nodes with none of these, and every workaround is tested against a fake toolbox that has the bug ([testing](#testing)).
+| T1 exit statuses (gVisor) | F1 | With gVisor (beta); Docker doesn't have the bug |
+| T2 session names | F2 `if_absent` | Alpha (P0) |
+| T3 activity on streams | F5 | Alpha (P0) |
+| T4 downloads in memory | F7 streamed, with `Range` | Alpha (P1); until it lands, downloads have a documented size limit |
+| T5 dropped streams | None needed: Lewbox kills on drop ([Streams](#streams)) | |
+| T6 pings | F3 | P3 |
+| T7 readiness | F4 `toolbox_ready` | Alpha (P0) |
+| T8 errors | F6 coded errors | Alpha (P0) |
+| T9 session ends | F36 events | Alpha (P0) |
+| T10 login shell | None needed: commands run in a login shell by Lewbox's own design ([above](#login-shells-and-directories)) | |
+| T11 conditional writes, watching | F51 conditional writes, F9 watching | P1 and P2: the [files](files.md) features that need them wait for them |
 
 ### Lewbox's helpers in the sandbox
 
 Lewbox runs two of its own programs inside sandboxes: `lewbox portd` ([private ports](private-ports.md)) and `lewbox agentd` ([agents/agentd](../agents/agentd.md)).
 
 - **Today**, the gateway uploads each build into the sandbox (`/usr/local/lib/lewbox/portd-<sha12>`, `agentd-<version>`), writing a `.part-…` file, `chmod`, then a move, so two requests can't run a half-written file. Every sandbox, every start, through the files API, with the gVisor `chmod` problem.
-- **Proposed:** the fork mounts a node directory read-only into every sandbox, as it mounts `toolboxd`: `/opt/lewbox` → `/usr/local/lib/lewbox`. `lewbox node` keeps the right helper build there for the node's architecture, and updates it with the control plane ([clusters/node-agent](../clusters/node-agent.md)). No uploads, no `chmod`, one copy per node, and the version is the node's. Capability `helpers_mount`.
+- **The alpha uploads them,** as legacy does, through the files API, with the part-file-then-move so two requests can't run a half-written file. On Docker `chmod` behaves, so there's no mode check after it (that was gVisor's).
+- **Later, a mount (F52):** the fork mounts a node directory read-only into every sandbox, as it mounts `toolboxd`: `/opt/lewbox` → `/usr/local/lib/lewbox`. `lewbox node` keeps the right helper build there. When it's in the minimum release, uploads go entirely; there's no period with both.
 - **Which binary.** The helpers are subcommands of `lewbox`, but the full binary carries the dashboard and server. Build a slim helper binary from the same module with only `agentd` and `portd` (a build tag), a few MB, embedded in the main binary for upload and shipped with `lewbox node` for the mount ([foundation/build-and-release](../foundation/build-and-release.md)).
-- **Upload stays as the fallback** for nodes without `helpers_mount`, with legacy's part-file-then-move and the mode check.
 
 ### Which fixes go to the fork
 
-All of T1–T11, in this order, as each blocks something in the alpha:
-
-1. **T1 exit statuses**: wrong exit codes break setup, `git` in Lewagent's Git panel, and port proxies.
-2. **T2 unique session names**: double proxies and double agentd daemons.
-3. **T9 session events**: removes polling, and makes watched setup steps finish within a second.
-4. **T3 stream activity**, **T5 kill on close**, **T6 pings**.
-5. **T4 streamed downloads**, **T11 conditional writes and watching**: Lewagent's editor and artifacts.
-6. **T8 error codes**, **T10 login shell**, **`helpers_mount`**.
-
-Each is a branch in the fork, a pull request upstream, and an entry in [lessons](../lessons.md) with the commit that found it.
+All of them, with the priorities in [clusters/aerolvm-fork](../clusters/aerolvm-fork.md#fix-backlog). For the alpha's toolbox: F2 unique sessions, F4 readiness, F5 stream activity, F6 coded errors and F36 session events (P0), then F7 streamed downloads and F51 conditional writes (P1). Each is a branch in the fork, a pull request upstream, and an entry in [lessons](../lessons.md) with the commit that found it.
 
 ## Security
 
@@ -193,7 +165,7 @@ Each is a branch in the fork, a pull request upstream, and an entry in [lessons]
 
 ## Observability
 
-- **Metrics:** `lewbox_toolbox_requests_total{route, outcome}`, `lewbox_toolbox_request_seconds{route}`, `lewbox_toolbox_retries_total`, `lewbox_toolbox_unavailable_total`, `lewbox_streams_open{kind}` (command, interactive, attach, sse), `lewbox_stream_bytes_total{kind, direction}`, `lewbox_workarounds_applied_total{capability}` (so we know when one can be deleted).
+- **Metrics:** `lewbox_toolbox_requests_total{route, outcome}`, `lewbox_toolbox_request_seconds{route}`, `lewbox_toolbox_retries_total`, `lewbox_toolbox_unavailable_total`, `lewbox_streams_open{kind}` (command, interactive, attach, sse), `lewbox_stream_bytes_total{kind, direction}`, `lewbox_toolbox_unexpected_total{route}` (answers the fork's contract doesn't allow: each one is a fork bug to fix).
 - **Logs:** each toolbox call at `debug` with sandbox, node, route and duration; failures to reach a node at `warn`.
 - **Traces:** a span per toolbox call, child of the request's.
 
@@ -202,7 +174,6 @@ Each is a branch in the fork, a pull request upstream, and an entry in [lessons]
 | Setting | Default | What |
 |---|---|---|
 | `LEWBOX_TOOLBOX_WAIT` | `30s` | How long a request waits for the toolbox after a start |
-| `LEWBOX_ACTIVITY_INTERVAL` | `60s` | Most often a moving stream counts as activity |
 | `LEWBOX_WEBSOCKET_PING_INTERVAL` | `30s` | Pings to clients |
 | `LEWBOX_SSE_KEEPALIVE` | `15s` | Keepalive comments on quiet SSE streams |
 | `LEWBOX_AEROLVM_TIMEOUT` | `30s` | One ordinary call to a node |
@@ -215,22 +186,21 @@ Names follow [foundation/configuration](../foundation/configuration.md).
   - **Exec:** `SetExec` scripts Execute results. The exec stream runs `cat` (echo), `sleep` (until killed), or scripted output.
   - **Sessions** echo their input, exit on `KILL`, and replay then follow on attach. Every create makes a new session, as toolboxd does.
   - **Files** live in memory, with modes.
-  - **Fault injection** for every problem above, each switchable by capability: `SetExecLosesStatus`, `SetSessionsLoseStatus` (gVisor), `ToolboxWarmUp` (502/503 at start), duplicate session names, whole-file downloads, streams that don't kill on close.
-  - **Recording:** `Touches`, `Killed` and `StreamStarts` record what happened.
-- **Every workaround** has a test with the bug on and with the capability on, so deleting a workaround is a test change, not a guess.
-- **Live checks** before each release, on a Docker, a gVisor and (once supported) a Firecracker cluster: run a command, stream one, kill one, a session's exit code, a 2 GB download, a private port in an iframe ([foundation/testing](../foundation/testing.md)).
+  - It plays the **minimum fork release**: coded errors, `toolbox_ready`, `if_absent` sessions, session-end events, stream activity. It doesn't model legacy's bugs, as Lewbox has no code for them; a contract test runs the same cases against a real node so the fake can't drift.
+  - **Faults that are real:** a node that doesn't answer, a toolbox not ready for a while, a sandbox lost with its node.
+  - **Recording:** `Killed` and `StreamStarts` record what happened.
+- **Live checks** before each release, on a Docker cluster (gVisor and Firecracker when they're supported): run a command, stream one, kill one, a session's exit code, a 2 GB download, a private port in an iframe ([foundation/testing](../foundation/testing.md)).
 
 ## Build plan
 
-1. `internal/aerolvm`: port legacy's client and types; add capability fetching.
+1. `internal/aerolvm`: port legacy's client and types, without its workarounds; the minimum-release check.
 2. `internal/httpapi`: `runningSandbox`, `withToolbox`, `writeToolboxError`, `loginShell`, `workingDirectory`, `missingDirectory`, `activity`, `terminalEnv`; the SSE writer with its UTF-8 decoder, and the WebSocket relay (port `sse.go`, `websocket.go`).
-3. The fake toolbox, with the faults.
-4. The capability table, and each workaround behind it.
-5. Fork work, in the order above, tracked in [clusters/aerolvm-fork](../clusters/aerolvm-fork.md).
+3. The fake toolbox, playing the minimum release.
+4. Fork work, by the backlog's priorities, tracked in [clusters/aerolvm-fork](../clusters/aerolvm-fork.md).
 
 ## Open questions
 
-1. **Capabilities endpoint.** Does upstream want a capabilities endpoint, or do we keep it to the fork and key off the fork's version string?
-2. **Helper mount and Firecracker.** A bind mount works for containers; for Firecracker microVMs it needs a second block device or virtiofs. Does the fork's Firecracker support give us a way to share a read-only directory?
+1. ~~**Capabilities endpoint.**~~ Decided (2026-10-29): none. Lewbox requires a minimum fork release instead of detecting fixes per node ([D15](../README.md#decisions)).
+2. **Helper mount and Firecracker (later).** A bind mount (F52) works for containers; for Firecracker microVMs it needs a second block device or virtiofs.
 3. **Default directory.** `/root/workspace` with repositories, `/root` without? Or always `/root/workspace`, made at create?
 4. **Key checks per request.** Is a Postgres read per request inside a sandbox fine at our scale (interactive terminals don't re-check after connecting), or do we want a short in-process cache with invalidation over `LISTEN/NOTIFY` when a key is revoked?

@@ -67,6 +67,7 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | `session_expired` | A session cookie that has expired, been signed out, or whose user was disabled | new | M1 |
 | `invalid_token` | On `/agentd/v0` and `/node/v0`: an agentd token, node token or install token that's invalid, expired, or for something else | kept (agentd), widened | M1 |
 | `wrong_domain` | A key used on a custom domain that belongs to another project | kept (planned) | Later |
+| `setup_session_ended` | A setup session that expired, or whose link was revoked or ended ([profiles/setup-links](../profiles/setup-links.md)) | new | M3 |
 
 ### 403: what they may do
 
@@ -81,6 +82,11 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | `user_disabled` | Signing in as a user an instance admin disabled | | new | M1 |
 | `section_forbidden` | A setup session on a setup section its link wasn't made for | `section` | new | M3 |
 | `path_forbidden` | The sandbox refused a file operation on a path it may not touch | | kept | M2 |
+| `instance_admin_required` | A user who isn't an instance admin, on `/v0/instance` ([projects/instance-administration](../projects/instance-administration.md)) | | new | M1 |
+| `project_creation_disabled` | Creating a project when the instance's policy doesn't let this user ([projects/instance-administration](../projects/instance-administration.md)) | | new | M1 |
+| `invitation_email_mismatch` | Accepting a project invitation made for another email address ([projects/members-and-roles](../projects/members-and-roles.md)) | | new | M1 |
+| `node_failed` | Node API: a node token whose installation failed, until it's retried ([clusters/installation](../clusters/installation.md)) | | new | M1 |
+| `sign_up_disabled` | Reserved for OAuth sign-up refusals; email-code sign-up answers like any code request ([projects/instance-administration](../projects/instance-administration.md)) | | new (reserved) | Later |
 
 ### 404
 
@@ -89,7 +95,7 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | `not_found` | Nothing at this path, or nothing this principal can see. A sandbox on a cluster the key doesn't reach, another project's anything, another profile's sandbox: all `404`, never `403`, so ids can't be probed | kept | M0 |
 | `repository_not_found` | A repository GitHub doesn't have, or the profile's connection doesn't reach | kept | M3 |
 
-### 405, 406, 409
+### 405, 406, 409, 410
 
 | Status | Code | When | Extra | State | M |
 |---|---|---|---|---|---|
@@ -108,8 +114,21 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | 409 | `cluster_not_empty` | Deleting a cluster that still has nodes or sandboxes | | new | Beta |
 | 409 | `profile_has_sandboxes` | Deleting a profile that still has sandboxes | | kept | M1 |
 | 409 | `project_not_empty` | Deleting a project that still has sandboxes or nodes | | new | M1 |
-| 409 | `installation_finished` | Cancelling a cluster installation that's already online or failed | | kept | M1 |
-| 409 | `last_owner` | Removing or demoting a project's last owner | | new | M1 |
+| 409 | `installation_finished` | Cancelling a cluster installation that's already online or failed; on the node API, using its token after it has finished | | kept | M1 |
+| 409 | `last_owner` | Removing or demoting a project's last owner, or deleting the account of someone who is the only owner of a project ([projects/users-and-login](../projects/users-and-login.md)) | | new | M1 |
+| 409 | `already_member` | Inviting someone who's already a member ([projects/members-and-roles](../projects/members-and-roles.md)) | | new | M1 |
+| 409 | `external_id_taken` | Creating a profile, or changing one, to an `external_id` a live profile has; carries that `profile` so a retry can recover it ([profiles](../profiles.md)) | `profile` | new | M1 |
+| 409 | `isolation_in_use` | Removing an isolation level from a cluster while sandboxes at that level exist on it ([clusters/runtimes](../clusters/runtimes.md)) | `count` | new | M1 |
+| 409 | `cluster_locked` | Changing a cluster's architecture or GPU vendor after a node has enrolled ([clusters/runtimes](../clusters/runtimes.md)) | | new | M1 |
+| 409 | `ssh_key_on_profile` | Adding to a sandbox an SSH key its profile already has, which removing from the sandbox couldn't revoke ([profiles/ssh-keys](../profiles/ssh-keys.md)) | | new | M2 |
+| 409 | `setup_link_used` | Using a setup link that's already been used ([profiles/setup-links](../profiles/setup-links.md)) | | new | M3 |
+| 409 | `sign_ins_unavailable` | Starting an agent sign-in when it can't run: no sign-in cluster, the `agents` template not ready there, or the instance turned the provider off ([profiles/agent-sign-ins](../profiles/agent-sign-ins.md)) | `reason` | new | M3 |
+| 409 | `sign_in_not_awaiting_code` | Sending a code to a sign-in that isn't waiting for one | | new | M3 |
+| 409 | `sign_in_finished` | Cancelling, or sending a code to, a sign-in that has finished | | new | M3 |
+| 409 | `worktree_removed` | Prompting a conversation, or starting one, in a worktree that's been removed ([agents/worktrees](../agents/worktrees.md)) | | new | Later |
+| 409 | `reference_used` | A credit transaction whose `reference` the profile has already used; carries the original `transaction` ([credits/balances](../credits/balances.md)) | `transaction` | new | Beta |
+| 409 | `subscription_exists` | A second subscription bucket when the project doesn't allow several ([credits/balances](../credits/balances.md)) | | new | Beta |
+| 409 | `installation_started`, `already_enrolled`, `seed_not_ready`, `cluster_has_no_bundles` | Node API: an installation token used again after it started; a node enrolling twice; a joining node before the cluster's seed is online, or before the seed has uploaded the CA ([clusters/installation](../clusters/installation.md), [clusters/pki-and-dns](../clusters/pki-and-dns.md)) | | new | M1 |
 | 409 | `turn_running` | Prompting with `queue: false`, or deleting a conversation, while a turn runs; cancelling a turn that has ended | | kept | M3 |
 | 409 | `queue_full` | Prompting a conversation with 20 prompts queued | | kept | M3 |
 | 409 | `not_steerable` | Steering into a turn that can't take it now, as one waiting on an approval | | kept | M3 |
@@ -128,13 +147,16 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | 409 | `plugin_in_use` | Turning off a driver plugin something still uses, e.g. `dns/libdns` while clusters use one of its providers | `plugin`, `used_by` | new | M0 |
 | 409 | `cluster_has_nodes` | Changing a cluster's DNS provider or domain while it has nodes ([clusters/pki-and-dns](../clusters/pki-and-dns.md)) | | new | M1 |
 | 409 | `cluster_has_snapshots` | Changing a cluster's storage while snapshots exist ([clusters/storage-and-registry](../clusters/storage-and-registry.md#the-bucket)) | | new | M1 |
+| 409 | `aerolvm_version_unsupported` | Enrolling a node, or upgrading a cluster, to an AerolVM release below Lewbox's minimum fork release; carries `minimum` ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)) | `minimum` | new | M1 |
+| 410 | `setup_link_expired` | Using a setup link past its expiry ([profiles/setup-links](../profiles/setup-links.md)) | | new | M3 |
+| 410 | `installation_expired` | Node API: an installation token past its expiry ([clusters/installation](../clusters/installation.md)) | | new | M1 |
 | 409 | `idempotency_key_in_use` | A request with an `Idempotency-Key` whose first request is still being handled, after waiting 30 s for it ([idempotency](idempotency.md#races)) | | new | M0 |
 
 ### 412, 413, 415, 422, 426
 
 | Status | Code | When | Extra | State | M |
 |---|---|---|---|---|---|
-| 412 | `precondition_failed` | A conditional file write (`If-Match`, `If-Unmodified-Since`) whose file has changed | `etag` | new | Beta |
+| 412 | `precondition_failed` | A conditional file write (`If-Match`, `If-None-Match`) whose file has changed. Offered once the fork's conditional writes (F51) are in the minimum release | `etag` | new | Alpha with F51 (P1), else Beta |
 | 413 | `payload_too_large` | A body over its endpoint's limit | `limit_bytes` | new | M0 |
 | 415 | `unsupported_media_type` | A body that isn't JSON on a JSON endpoint | | new | M0 |
 | 422 | `validation_failed` | The request's fields are invalid; see `errors` | `errors` | kept | M0 |
@@ -152,6 +174,12 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | 422 | `plugin_dependency` | Turning on a plugin whose required plugin is off for the project, or turning off one that another plugin on for the project requires, e.g. `limits` while `credits` is on ([projects/settings](../projects/settings.md#plugins)) | `plugin`, `requires` or `required_by` | new | M0 |
 | 422 | `dns_connection` | A cluster's DNS connection test failed ([plugins/dns-providers](../plugins/dns-providers.md)) | `step`, `reason` | new | M1 |
 | 422 | `storage_connection` | A cluster's storage connection test failed ([plugins/storage-providers](../plugins/storage-providers.md)) | `step`, `reason` | new | M1 |
+| 422 | `invalid_code` | A sign-in code that's wrong, expired or used: one code for all three, so it reveals nothing ([projects/users-and-login](../projects/users-and-login.md)) | | new | M1 |
+| 422 | `dns_required` | A `direct` cluster without DNS settings, outside development ([clusters/connectivity](../clusters/connectivity.md)) | | new | M1 |
+| 422 | `relay_unavailable` | A `tunnel` cluster on an instance with no relay domain ([clusters/connectivity](../clusters/connectivity.md)) | | new | Beta |
+| 422 | `credits_disabled` | Credit buckets or transactions on a profile that doesn't use credits ([credits/balances](../credits/balances.md)) | | new | Beta |
+| 422 | `architecture_mismatch`, `ip_in_use`, `ip_not_public` | Node API, enrolling: the host's architecture isn't the cluster's; its IP is another node's; a `direct` node without a public IP ([clusters/installation](../clusters/installation.md)) | | new | M1 |
+| 422 | `invalid_certificate_request` | Node API: a certificate request that isn't a PEM CSR, has a bad signature or a weak key ([clusters/pki-and-dns](../clusters/pki-and-dns.md)) | | new | M1 |
 | 422 | `idempotency_key_reused` | An `Idempotency-Key` already used within 24 hours for a different request, or by another credential | | kept | M0 |
 | 426 | `upgrade_required` | A WebSocket endpoint opened without `Upgrade: websocket` | | kept | M2 |
 
@@ -162,6 +190,7 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | 402 | `credits_exhausted` | The profile's credits are used up: creates and starts are refused, and its running sandboxes are being stopped | | kept | Beta |
 | 429 | `limit_exceeded` | A profile limit refuses this (running sandboxes, vCPUs, storage, a budget, or `git_connections`: Git people and accounts linked to the profile, across providers, [git/github-app](../git/github-app.md#the-limit)). Retrying won't help until something stops, the period ends, or something is unlinked | `limit` | kept | M1 |
 | 429 | `rate_limited` | Too many requests from this credential. Wait for `Retry-After` | | kept | M0 |
+| 429 | `quota_exceeded` | A project quota the instance set refuses a create: clusters, nodes, profiles, admin keys, webhook endpoints or members ([projects/instance-administration](../projects/instance-administration.md#quotas)). Distinct from a profile's `limit_exceeded` | `quota` | new | M1 |
 
 ### 5xx: failures
 
@@ -191,6 +220,8 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | `invalid_request` | The gateway's code for a bad worktree name; it's `validation_failed` on `worktree.name` like any other field |
 | `wrong_key_kind` as `401` | Always `403` now (above) |
 
+Codes earlier drafts of these plans used for something the catalogue already had, merged so each failure has one code: `credential_refused` → `credential_invalid`; `role_forbidden` → `permission_denied` (the message names the role); `sole_owner` → `last_owner`; `insufficient_credits` → `validation_failed` on `amount`; `limit_reached` (webhook endpoints) → `quota_exceeded`; `provider_disabled` (sign-ins) → `sign_ins_unavailable` with `reason: provider_disabled`.
+
 ---
 
 ## Extra fields
@@ -205,6 +236,11 @@ Every error response also carries `Lewbox-Request-Id`. `401` responses carry `WW
 | `cluster_suspended`, `persistence_unsupported`, `cluster_unavailable` | `cluster` | object | `id`, `name` |
 | `isolation_unavailable` | `isolation`, `cluster`, `reason`, `available` | string or null, object, string, array | The level asked for (or `null`); the cluster's `id` and `name`; `not_offered`, `not_allowed` or `none_allowed`; the levels this profile may use on this cluster |
 | `create_failed` | `sandbox` | object | `id`, `status` |
+| `external_id_taken` | `profile` | object | The live profile with that `external_id`: `id`, `name` |
+| `isolation_in_use` | `count` | integer | Sandboxes at that level on the cluster, stopped persistent ones included |
+| `sign_ins_unavailable` | `reason` | string | `no_cluster`, `template_building`, `template_failed` or `provider_disabled` |
+| `quota_exceeded` | `quota` | object | `kind`, `value`, and `current` |
+| `reference_used` | `transaction` | object | The transaction first made with that reference |
 | `section_forbidden` | `section` | string | `agents`, `git`, `ssh_keys` or `telemetry` |
 | `precondition_failed` | `etag` | string | The file's current ETag |
 | `payload_too_large` | `limit_bytes` | integer | The endpoint's limit |

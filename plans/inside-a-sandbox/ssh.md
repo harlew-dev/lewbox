@@ -98,8 +98,8 @@ The SSH key object: `id`, `name`, `type`, `public_key`, `fingerprint`, `created_
 
 1. **Read** `/root/.ssh/authorized_keys` through the files API (missing is empty).
 2. **Replace** the block between `# lewbox begin` and `# lewbox end` (appended on a line of its own if absent) with the profile's keys, then the sandbox's, oldest first, de-duplicated by fingerprint. With no keys, remove the block.
-3. **Write it back** with a conditional write (`If-Match` on the ETag from step 1, [files](files.md#uploads)), so a user's own edit between the read and the write isn't lost. On `412`, start again, up to three times.
-4. **Ensure** `/root/.ssh` is `0700` and the file `0600`, owned by root, with one `chmod` command (checked by `Stat`, as gVisor can lose its exit code).
+3. **Write it back** with a conditional write (`If-Match` on the ETag from step 1, [files](files.md#uploads)), so a user's own edit between the read and the write isn't lost. On `412`, start again, up to three times. Conditional writes need fork F51 (P1); if it isn't in the alpha's minimum release, the alpha writes plainly and the docs say an edit made during a key change can be lost. The write becomes conditional when F51 is the minimum, with no period running both.
+4. **Ensure** `/root/.ssh` is `0700` and the file `0600`, owned by root, with one `chmod` command, taking its exit code as the toolbox reports it.
 
 - **For a running sandbox,** the request waits for the write. If it fails, the change is saved and the request answers `502 sandbox_error` with why; retrying the same request is safe. A stopped sandbox gets the keys at its next start.
 - **Profile key changes** fan out as a job ([foundation/jobs-and-scheduling](../foundation/jobs-and-scheduling.md)) over the profile's running sandboxes, each synced independently.
@@ -167,7 +167,7 @@ An SSH server in Lewbox, so `ssh sbx_Qm4pL0sX2bN8cV@ssh.lewbox.com` reaches a sa
 
 - **Parsing:** a table of valid keys of each type, comments with control characters, every option refused, private keys (PEM and OpenSSH) refused, RSA under 2048 refused, a mislabelled type.
 - **Block replacement:** empty file, a file without the block, with it, user lines above and below kept, removal with no keys, de-duplication.
-- **Sync:** the conditional write retries on `412`; modes set; the `chmod` exit code lost under gVisor is checked by `Stat`.
+- **Sync:** the conditional write retries on `412` (with F51); modes set.
 - **API rules:** same name same key (`200`, no write), same key other name (`422`), profile key (`422`), the 21st key, deleted sandbox, removal idempotent.
 - **Fan-out:** a profile key change syncs each running sandbox, and one failing doesn't stop the others.
 

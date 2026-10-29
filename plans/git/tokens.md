@@ -436,9 +436,9 @@ The sandbox's `setup.steps` shows the Git step's status (`ready`, `configured`, 
 |---|---|---|
 | `LEWBOX_GIT_TOKEN_REFRESH_BEFORE` | `15m` | |
 | `LEWBOX_GIT_MAX_SANDBOX_REPOSITORIES` | `100` | Per sandbox |
-| `LEWBOX_GIT_MAX_REPOSITORIES` | `20` | Cloned per create ([sandboxes/repositories](../sandboxes/repositories.md)) |
-| `LEWBOX_GITHUB_TOKENS_PER_MINUTE` | `120` | Token API, per profile |
-| `LEWBOX_GITHUB_ISSUED_TOKENS_RETENTION` | `30d` | |
+| `LEWBOX_SANDBOX_MAX_REPOSITORIES` | `20` | Cloned per create ([sandboxes/repositories](../sandboxes/repositories.md)) |
+| `LEWBOX_GIT_TOKENS_PER_MINUTE` | `120` | Token API, per profile |
+| `LEWBOX_GIT_ISSUED_TOKENS_RETENTION` | `30d` | |
 
 ## Testing
 

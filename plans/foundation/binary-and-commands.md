@@ -75,13 +75,14 @@ Each writes an audit entry ([observability](observability.md#audit)).
 
 ### Process roles
 
-`lewbox serve --role` (env `LEWBOX_ROLE`) chooses what a process does. Default `all`.
+`lewbox serve --role` (env `LEWBOX_ROLE`) chooses what a process does: `all` (the default), or a comma-separated list such as `api,worker`. `all` includes `relay` when `LEWBOX_RELAY_DOMAIN` is set (Beta).
 
 | Role | HTTP | Job workers | Periodic schedule (leader only) | Stream relays |
 |---|---|---|---|---|
 | `all` | Yes | Yes | Takes part in leader election | Yes |
 | `api` | Yes | No (inserts jobs only) | No | Yes |
 | `worker` | Only `/up`, `/ready`, `/metrics` | Yes | Takes part | No |
+| `relay` (Beta) | The relay's listeners only ([clusters/connectivity](../clusters/connectivity.md#the-relay)) | No | No | No |
 
 A homelab runs one `all`. lewbox.com might run three `all` replicas, or split API and workers. The code doesn't care: anything a handler needs from a worker goes through Postgres.
 
@@ -142,7 +143,7 @@ One library, `internal/sandboxhelper`, used by agents, private ports and anythin
 1. **Choose the build** by the sandbox's architecture (the cluster's, recorded on the sandbox).
 2. **Path:** `/usr/local/lib/lewbox/lewbox-sandbox-<hash12>`, where `hash12` is the first 12 hex characters of the build's SHA-256. A new build gets a new path, so it sits beside the old one, which may still be running.
 3. **Check:** `test -x <path> && sha256sum <path>` through the toolbox. If it's there and matches, done.
-4. **Upload** to `<path>.part-<random>` through the toolbox's file API, `chmod 0755`, check the mode with `stat` (gVisor has silently ignored `chmod` before; legacy commit `4f0da62`), then `mv` into place. Two concurrent installs can't run a half-written file.
+4. **Upload** to `<path>.part-<random>` through the toolbox's file API, `chmod 0755`, then `mv` into place. (Legacy also checked the mode with `stat`, as gVisor once ignored `chmod`, `4f0da62`; gVisor isn't in the alpha and Lewbox carries no workarounds, [D15](../README.md#decisions).) Two concurrent installs can't run a half-written file.
 5. **Clean up** builds older than the last two, best-effort, after a successful install.
 
 The legacy code installed per helper (`portd-<sha12>`, `agentd-<version>`); now both are one file.
@@ -188,7 +189,7 @@ Recommended: **option 2**. It's one extra build target with no code of its own, 
 
 | Setting | Default | |
 |---|---|---|
-| `LEWBOX_ROLE` | `all` | `all`, `api` or `worker` |
+| `LEWBOX_ROLE` | `all` | `all`, or a list of `api`, `worker` and (Beta) `relay` |
 | `LEWBOX_MIGRATE_ON_START` | `true` | Run pending migrations when `serve` starts |
 | `LEWBOX_SHUTDOWN_DRAIN` | `5s` | How long `/ready` answers 503 before the listener closes |
 | `LEWBOX_SHUTDOWN_TIMEOUT` | `30s` | How long requests and job steps get to finish |

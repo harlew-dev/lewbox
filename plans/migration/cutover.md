@@ -37,6 +37,7 @@ Two of these are hard to move:
 | Weeks before | New SDK releases (TypeScript, PHP) and the CLI published ([sdks-and-cli](../sdks-and-cli.md)); Lewagent's `lewbox-v1` branch passing against staging ([lewagent](lewagent.md)) |
 | Rehearsals, repeated | [Rehearsals](#rehearsals) |
 | 7 days before | Lower DNS TTLs to 60 s on every hostname that moves. Announce the window to anyone holding keys |
+| Weeks before | **Move every node to the fork's minimum release, under legacy**, rolling, node by node ([Nodes](#nodes)). The new control plane has no workarounds for upstream v0.6.x ([D15](../README.md#decisions)), so it can't take over a node that hasn't moved. Legacy's gateway is tested against that fork release first (its workarounds are harmless there) |
 | 7 days before | Install `lewbox node` on every node in **passive** mode ([Nodes](#nodes)) |
 | 1 day before | Final rehearsal on that morning's production copy; go/no-go |
 | 1 hour before | Freeze changes to legacy code and config; scale the new servers up; open the runbook and a shared log of times |
@@ -61,7 +62,7 @@ Legacy nodes run `install.sh`'s systemd timers (certificate renewal daily, firew
 1. **Passive install** (a week before): `lewbox node install --passive --adopt-legacy` puts the binary and a disabled systemd unit on the node, records the legacy config it found (node id, token file, AerolVM paths), and does nothing else. Run over SSH by us, or by the project's operator with a one-liner ([clusters/node-agent](../clusters/node-agent.md)).
 2. **During cutover**, legacy timers keep calling `box.harlew.com/api/node/v1/…`. After [DNS](#dns) moves, that hostname reaches the new server, which serves the **legacy node API paths** (`PUT node/certificate`, `GET node/firewall`, `POST node/metrics`) as compatibility routes with the same tokens ([data](data.md#tokens)). Nothing on the node notices.
 3. **Adoption** (the days after): `lewbox node adopt` enables the new agent, which enrolls with its existing token, takes over certificates, firewall, metrics and snapshot clean-up, and disables the legacy timers. Done node by node, watching each.
-4. **AerolVM stays v0.6.4** through all this. Moving to our fork is its own rollout afterwards ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)).
+4. **AerolVM is already on the fork** by then: every node moves to Lewbox's minimum fork release weeks before, while legacy still runs it, one node at a time with its sandboxes moved off first ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)). Running sandboxes keep their old `toolboxd` until they next start, so their toolbox's legacy bugs last until then; a node below the minimum is `outdated` and not used by the new control plane.
 5. The compatibility node routes are removed once every node is adopted.
 
 ### DNS
@@ -128,7 +129,7 @@ The point of no return is go/no-go 2. Everything before it is undone in minutes.
 | Day 30 | Archive the final MySQL dump, encrypted, for a year; turn legacy off |
 | Day 30–90 | **Rotate:** each cluster's PAT, the GitHub Apps' private keys and webhook secrets (where projects agree), the imported port-link key (once no legacy portd remains), and destroy every copy of the legacy `APP_KEY` |
 | Day 90 | `lbt_` keys stop working; projects warned at 60 and 80 days, by email and in the dashboard |
-| After | Node by node, AerolVM moves to our fork ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)) |
+| After | Nodes follow new fork releases by their cluster's upgrade policy ([clusters/node-agent](../clusters/node-agent.md#upgrading-aerolvm)) |
 
 ### Read-only mode
 

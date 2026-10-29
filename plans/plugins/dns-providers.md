@@ -1,6 +1,6 @@
 # DNS providers
 
-> Status: Draft · Milestone: Alpha (M1) for the interface, the `dns/libdns` plugin and its Cloudflare provider; more providers as they pass the live suite · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1) for the interface, the `dns/libdns` plugin and **Cloudflare only**; the other providers after the alpha, with DNS-01 through the control plane (F43) · Updated: 2026-10-29
 
 A DNS provider lets Lewbox manage records in a zone:
 
@@ -24,8 +24,9 @@ Legacy supports Cloudflare only, in three places:
 ## Goals
 
 - **Many DNS hosts with almost no code.** libdns is the provider library Caddy's own DNS modules are built on, so Lewbox uses the same packages.
-- **AerolVM never needs to know which DNS host a cluster uses.** DNS-01 is relayed through the control plane ([F43](../clusters/aerolvm-fork.md#api-clustering-and-lifecycle)), so the fork's Caddy only ever talks to Lewbox, not to the DNS host.
-- **Credentials stay on the control plane.** They're a schema the dashboard renders, and with the relay they never leave the control plane.
+- **The alpha matches legacy: Cloudflare only** ([D16](../README.md#decisions)), with Caddy's own Cloudflare module on nodes. The interface and plugin are built in the alpha, so the rest is adding providers.
+- **After the alpha, AerolVM never needs to know which DNS host a cluster uses.** DNS-01 is relayed through the control plane ([F43](../clusters/aerolvm-fork.md#api-clustering-and-lifecycle)), so the fork's Caddy only ever talks to Lewbox, not to the DNS host.
+- **Credentials stay on the control plane** once F43 is in: they're a schema the dashboard renders, and with the relay they never leave the control plane. In the alpha the Cloudflare token is also on nodes, as legacy has it ([clusters/pki-and-dns](../clusters/pki-and-dns.md#dns-01-through-the-control-plane)).
 - **Every provider passes the same contract suite.**
 
 ### Non-goals
@@ -56,20 +57,20 @@ plugins/dns/libdns/
 
 The plugin registers several providers. Each keeps its own id (`cloudflare`, `route53`, …), which is what `cluster_dns.provider` stores, so a cluster names a DNS host, not a plugin.
 
-| Provider | libdns package | Default build | Status for the alpha |
+| Provider | libdns package | Default build (after the alpha) | Status |
 |---|---|---|---|
-| Cloudflare | `github.com/libdns/cloudflare` | yes | **supported** (M1); the default |
-| Amazon Route 53 | `github.com/libdns/route53` | yes | supported once the live suite passes (target M3) |
+| Cloudflare | `github.com/libdns/cloudflare` | yes | **supported** (M1); the default, and the only provider in the alpha |
+| Amazon Route 53 | `github.com/libdns/route53` | yes | after the alpha (with F43); supported once the live suite passes |
 | DigitalOcean | `github.com/libdns/digitalocean` | yes | experimental until the live suite passes |
-| Hetzner | `github.com/libdns/hetzner` | yes | supported once the live suite passes (target M3) |
+| Hetzner | `github.com/libdns/hetzner` | yes | after the alpha (with F43); supported once the live suite passes |
 | Google Cloud DNS | `github.com/libdns/googleclouddns` | yes | experimental |
 | Azure DNS | `github.com/libdns/azure` | yes | experimental |
 | Gandi | `github.com/libdns/gandi` | yes | experimental |
 | Porkbun | `github.com/libdns/porkbun` | yes | experimental |
 | deSEC | `github.com/libdns/desec` | yes | experimental |
-| RFC 2136 (self-run BIND, Knot, PowerDNS…) | `github.com/libdns/rfc2136` | yes | supported once the live suite passes (target M3) |
+| RFC 2136 (self-run BIND, Knot, PowerDNS…) | `github.com/libdns/rfc2136` | yes | after the alpha (with F43); supported once the live suite passes |
 
-*Experimental* means the dashboard labels it as such and the docs say it hasn't passed the live suite yet. It works the same way, and graduates to *supported* when it passes.
+The others are after the alpha too, experimental until the live suite passes. **The alpha's build compiles in Cloudflare only.** *Experimental* means the dashboard labels it as such and the docs say it hasn't passed the live suite yet. It works the same way, and graduates to *supported* when it passes.
 
 ### Choosing providers
 
@@ -180,10 +181,7 @@ Every call has a 30 s deadline. It's retried by its job, or the request fails wi
 
 So any provider Lewbox supports works for certificates, and DNS credentials never leave the control plane ([clusters/pki-and-dns](../clusters/pki-and-dns.md#dns-01-through-the-control-plane)).
 
-**Until F43 lands,** direct clusters fall back to legacy's way: the provider's token is copied to the nodes for Caddy's own DNS module. That works only for providers whose Caddy module the fork's Caddy includes, which today is **Cloudflare** only (`Features.CaddyModule`, checked against the fork version's module list).
-
-- **A cluster on any other provider needs F43:** saving it on a fork without F43 is refused with `422 validation_failed` on `provider`, saying the cluster's AerolVM version can't use it yet.
-- **Tunnel clusters always use the relay** and are unaffected.
+**In the alpha, before F43,** clusters work as legacy's do: the Cloudflare token (scoped to the zone) is on the nodes for Caddy's own Cloudflare module. That's the alpha's design, not a fallback kept afterwards: when F43 is in Lewbox's minimum fork release, nodes stop getting the token, and the other providers are offered. There's no per-cluster version check in between ([D15](../README.md#decisions)).
 
 We don't plan to compile more Caddy DNS modules into the fork: F43 makes them unnecessary.
 
@@ -239,11 +237,10 @@ Credentials are stored encrypted in `cluster_dns.credentials`, shaped by the pro
 
 1. `plugin/dns`, `dns.FromLibDNS`, `dnstest` (M1).
 2. `plugins/dns/libdns` with the generator's `providers` option and Cloudflare, supported (M1).
-3. The other nine providers compiled in as experimental (M1, cheap); Route 53, Hetzner and RFC 2136 through the live suite to supported (M3); the rest as test zones allow.
-4. Validation against the cluster's fork version until F43 (M1); dropped for clusters on a fork with F43 (M4).
+3. After the alpha, with F43 (beta): the other nine providers compiled in as experimental; Route 53, Hetzner and RFC 2136 through the live suite to supported; the rest as test zones allow.
 
 ## Open questions
 
 1. ~~**One plugin per provider, or a `dns/libdns` plugin with many?**~~ Decided (2026-10-29): one `dns/libdns` plugin, providers chosen in `plugins/config.json`; separate plugins only for hosts without a libdns package.
 2. ~~**The instance's relay provider.**~~ Decided (2026-10-29): any provider the build has, set in configuration (`LEWBOX_RELAY_DNS_PROVIDER` and its credentials). A built-in DNS server for the relay domain is a Later option for instances with no DNS API ([clusters/connectivity](../clusters/connectivity.md#dns-for-the-relay-domain)).
-3. ~~**Default build size.**~~ Decided (2026-10-29): every provider is compiled into the default build. Those that haven't passed the live suite are labelled *experimental* in the dashboard and docs until they do.
+3. ~~**Default build size.**~~ Decided (2026-10-29): after the alpha, every provider is compiled into the default build (the alpha's has Cloudflare only). Those that haven't passed the live suite are labelled *experimental* in the dashboard and docs until they do.
