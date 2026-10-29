@@ -23,7 +23,7 @@ A **profile key** (`lbp_…`) is how a project's customer's software, or the pro
 
 ### Format and storage
 
-`lbp_` + 64 lowercase hex. Rows in the shared `api_keys` table with `kind = 'profile'` and `profile_id` set ([projects/admin-keys](../projects/admin-keys.md#data-model)); restricted clusters in `api_key_clusters`. Only the SHA-256 and last four characters are stored; 32 random bytes need no slow hash.
+`lbp_` + 58 lowercase hex + a 6-character base62 checksum ([foundation/ids-and-keys](../foundation/ids-and-keys.md), decided 2026-10-29). Rows in the shared `api_keys` table with `kind = 'profile'` and `profile_id` set ([projects/admin-keys](../projects/admin-keys.md#data-model)); restricted clusters in `api_key_clusters`. Only the SHA-256 and last four characters are stored; 32 random bytes need no slow hash.
 
 ### Cluster access
 
@@ -71,7 +71,7 @@ Core permissions are constants in `internal/auth/permissions.go`, and plugins re
 
 ### Expiry
 
-Optional `expires_at`, from an hour to 2 years ahead (legacy allowed any). The management API and the dashboard show expiring keys; a project notification fires a week ahead for keys made by the dashboard (keys made by a project's backend for its customers are the backend's to rotate, so no notifications for those unless the project turns them on).
+Optional `expires_at`, from an hour to 2 years ahead (legacy allowed any). Keys made in the dashboard default to 90 days, changeable (including to none); keys made through the API default to none (decided 2026-10-29). The management API and the dashboard show expiring keys; a project notification fires a week ahead for keys made by the dashboard (keys made by a project's backend for its customers are the backend's to rotate, so no notifications for those unless the project turns them on).
 
 ### Rate limits
 
@@ -153,6 +153,6 @@ In `internal/auth`: the shared key table, lookup with NOTIFY-invalidated cache, 
 
 ## Open questions
 
-1. **`sandboxes.keys` as a new permission.** It changes behaviour for keys with a permission list (they can no longer mint sandbox keys without it). Fine since the API is new?
-2. **Default expiry.** Should keys made in the dashboard default to an expiry (e.g. 90 days), while API-made keys default to none?
-3. **Changing a key.** Keep "fixed once made", or allow narrowing permissions and clusters in place (never widening)?
+1. ~~**`sandboxes.keys` as a new permission.**~~ Decided (2026-10-29): yes; the API is new, and it's in the [registry](../api/permissions.md). A key with full access has it.
+2. ~~**Default expiry.**~~ Decided (2026-10-29): keys made in the dashboard default to 90 days (changeable, including to none); API-made keys default to none.
+3. ~~**Changing a key.**~~ Decided (2026-10-29): fixed once made, as the docs say; narrowing in place is Later if asked.

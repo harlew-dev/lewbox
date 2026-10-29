@@ -142,6 +142,6 @@ Sign-in clusters are a project setting ([profiles/agent-sign-ins](../profiles/ag
 
 ## Open questions
 
-1. **Contexts for built-ins.** Built-ins aren't in a project, but `template_contexts` rows are project-scoped. Store built-in contexts as a separate table, or pass them to the build straight from the binary's embedded files? Proposed: straight from the binary, no row.
-2. **Prebuilt images.** Instead of every project building `agents` and the catalog on its own nodes, publish them to a public registry (`ghcr.io/harlew-dev/lewbox-…`), multi-arch and signed, and let templates `FROM` them, or use them directly as `image`. Much faster first runs. Projects that want to build everything themselves still can. Proposed for beta.
-3. **More agents.** Cursor, Grok, OpenCode, pi and Antigravity in `agents` when their sign-ins are ported. One image, or one per agent?
+1. ~~**Contexts for built-ins.**~~ Decided (2026-10-29): passed to the build straight from the binary's embedded files, with no `template_contexts` row.
+2. **Prebuilt images.** Deferred (Beta): publish `agents` and the catalog to a public registry (`ghcr.io/harlew-dev/lewbox-…`), multi-arch and signed; projects can still build everything themselves.
+3. **More agents.** Deferred (when the next agent's sign-in is ported): decide one `agents` image or one per agent then; OpenCode is the first candidate ([plugins/agent-providers](../plugins/agent-providers.md)).

@@ -50,7 +50,7 @@ What's wrong with it:
 
 | | What |
 |---|---|
-| **Keep** | Public ids as prefix + 14 base62. Token formats (`prefix_` + 64 hex), stored as SHA-256 with last four. `Lewbox-Request-Id` (`req_` + 24 hex). Operations with leases and idempotent steps. The gateway's settings and their defaults, where they still mean something. JSON logs. The `aerolvmtest` and fake toolbox, ported. `-trimpath`, static `CGO_ENABLED=0` builds. |
+| **Keep** | Public ids as prefix + 14 base62. Token formats (a prefix and a random part), stored as SHA-256 with last four; the random part is now 58 hex plus a 6-character checksum ([ids-and-keys](foundation/ids-and-keys.md#checksums)). `Lewbox-Request-Id` (`req_` + 24 hex). Operations with leases and idempotent steps. The gateway's settings and their defaults, where they still mean something. JSON logs. The `aerolvmtest` and fake toolbox, ported. `-trimpath`, static `CGO_ENABLED=0` builds. |
 | **Change** | Two processes → one binary with subcommands. MySQL/SQLite → Postgres. Laravel queue and goroutine polls → a Postgres job queue with `LISTEN/NOTIFY` wake-ups and a leader for periodic work. `APP_KEY` → a rotatable keyring with envelope encryption. Helper binaries in directories → embedded, versioned by content hash. Settings that were "set on nodes as they're installed" → pushed to nodes by the control plane, so changing them reaches existing nodes. |
 | **Drop** | The app's internal API for the gateway (`/api/gateway/v1`), `LEWBOX_GATEWAY_TOKEN`, the key and cluster caches as correctness concerns, the event recorder's queue, `lewboxtest`, `packages/laravel-aerolvm` (unused), `build.sh` for Laravel Cloud. |
 
@@ -142,9 +142,9 @@ M0, in order. Each item is a pull request or a few.
 
 ## Open questions
 
-1. **River or our own queue?** Recommended: River for dispatch, with operations keeping their own leases ([jobs-and-scheduling](foundation/jobs-and-scheduling.md#river-or-our-own)). River is MPL-2.0; check that's acceptable alongside MIT.
-2. **One binary for everything, or a slim CLI build too?** The full binary embeds the dashboard and two helper builds (~80–100 MB). A CLI user may not want that ([binary-and-commands](foundation/binary-and-commands.md#one-binary-or-two)).
-3. **Partition the big tables** (activity events, node metrics, conversation chunks) by month from the start, or add it later ([database](foundation/database.md#partitioning))?
-4. **A KMS for the keyring's root key** (AWS KMS, GCP KMS, Vault transit) in the alpha, or later ([secrets-and-encryption](foundation/secrets-and-encryption.md#kms))?
-5. **Configuration file format:** TOML or YAML ([configuration](foundation/configuration.md#file))?
-6. **Checksummed tokens** (a CRC suffix for secret scanning), now that the token format can change ([ids-and-keys](foundation/ids-and-keys.md#checksums))?
+1. ~~**River or our own queue?**~~ Decided (2026-10-29): River for dispatch, with operations keeping their own leases ([jobs-and-scheduling](foundation/jobs-and-scheduling.md#river-or-our-own)). MPL-2.0 is fine alongside MIT: its copyleft covers only River's own files, and only if we modify them.
+2. ~~**One binary for everything, or a slim CLI build too?**~~ Decided (2026-10-29): both. The full `lewbox` binary for servers and releases, and a slim `lewbox-cli` build (`-tags cli`, ~15 MB) for npm and Homebrew ([binary-and-commands](foundation/binary-and-commands.md#one-binary-or-two)).
+3. ~~**Partition the big tables**~~ Decided (2026-10-29): yes, by month from the start, for activity events and node metrics ([database](foundation/database.md#partitioning)).
+4. **A KMS for the keyring's root key.** Deferred (Later): keys from configuration first; AWS KMS, GCP KMS and Vault transit when someone needs them ([secrets-and-encryption](foundation/secrets-and-encryption.md#kms)).
+5. ~~**Configuration file format.**~~ Decided (2026-10-29): TOML (`lewbox.toml`); `plugins/config.json` stays JSON ([configuration](foundation/configuration.md#file)).
+6. ~~**Checksummed tokens.**~~ Decided (2026-10-29): yes, before the alpha: `<prefix>_<58 lowercase hex><6 base62 checksum>`, registered with GitHub secret scanning ([ids-and-keys](foundation/ids-and-keys.md#checksums)).

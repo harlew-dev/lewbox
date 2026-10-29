@@ -141,7 +141,7 @@ On `sandboxes.status_reason`, in activity, and in webhook events:
 | `credits_exhausted` | The sandbox was stopped, as its profile's credits ran out. |
 | `budget_reached` | The sandbox was stopped, as its profile reached a budget. |
 | `profile_suspended` | The sandbox was stopped, as its profile was suspended. |
-| `node_lost` | The sandbox was lost with its node. |
+| `node_lost` | The sandbox was lost with its node. When it persists and has a snapshot, it's `stopped` and a start resumes from that snapshot; changes since it are lost. |
 | `requested` | (implicit; no reason shown) |
 
 ### `last_active_at`
@@ -233,4 +233,4 @@ Not security-sensitive, except that timers bound cost when credentials leak. A l
 
 1. ~~**Port traffic and idleness**, until T2 lands.~~ Decided (2026-10-29): `POST /v0/sandboxes/{sbx}/touch`, which a desktop page calls with its sandbox key while it's visible ([API](#api)).
 2. **Idle while an agent waits on a person.** An approval left unanswered keeps the sandbox awake forever (agentd heartbeats). Should waiting on a person count only up to a limit (e.g. an hour)?
-3. **Maintenance counted today.** Until T3, refresh jobs reset idle timers. Skip refreshing sandboxes that are close to their idle stop?
+3. ~~**Maintenance counted today.**~~ Decided (2026-10-29): moot. Lewbox carries no workaround: the fork's maintenance flag (T3, requests marked `X-Lewbox-Maintenance` don't count as activity) ships before the alpha, so refresh jobs never reset idle timers.

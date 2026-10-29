@@ -208,6 +208,6 @@ The public id becomes `key_` like every other key, rather than `sbk_` ([foundati
 
 ## Open questions
 
-1. **Conversation-scoped keys.** Lewagent's chat page needs `sandboxes.agents` for one conversation, not every conversation in the sandbox. Add an optional `conversation` to mint, limiting agent routes to it? Cheap, and shrinks the blast radius.
-2. **`sandboxes.exec` is broad.** A terminal needs it, and a file browser needs only files. Split `sandboxes.exec` into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both)? Would need a matching change on profile keys ([api/permissions](../api/permissions.md)). Decided for the alpha: keep `sandboxes.exec`; the split stays open for after it.
-3. **Longer keys for long pages.** 60 minutes max, with re-minting. Is that enough for a desktop view open all day? Private-port *sessions* already last 12 hours independently ([inside-a-sandbox/private-ports](../inside-a-sandbox/private-ports.md)), so probably.
+1. ~~**Conversation-scoped keys.**~~ Decided (2026-10-29): add an optional `conversation` when minting, limiting agent routes to that conversation (M3, with agents). Cheap, and it shrinks a leaked chat page key's reach.
+2. **`sandboxes.exec` is broad.** Deferred (Beta): keep `sandboxes.exec` for the alpha; a split into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both) comes after, with the matching change on profile keys ([api/permissions](../api/permissions.md)).
+3. ~~**Longer keys for long pages.**~~ Decided (2026-10-29): 60 minutes at most, with re-minting; a desktop view open all day relies on its private-port session (12 hours), not on the key ([inside-a-sandbox/private-ports](../inside-a-sandbox/private-ports.md)).

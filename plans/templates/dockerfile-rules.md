@@ -108,6 +108,6 @@ The template docs keep the "build it locally the way Lewbox does" tip: with Buil
 
 ## Open questions
 
-1. **Dockerfile size with BuildKit.** With contexts, is 64 KiB still enough? Lewagent's inlined Dockerfile was near the limit only because of inlining.
-2. **Linting.** Add BuildKit's own linter warnings (e.g. `JSONArgsRecommended`) as warnings, not errors? A `warnings` array on the check endpoint is cheap.
-3. **Private base images.** `FROM ghcr.io/acme/private` needs registry credentials on the node during the build. Later, with private images for sandboxes ([sandboxes/lifecycle](../sandboxes/lifecycle.md#open-questions)).
+1. **Dockerfile size with BuildKit.** Deferred (with BuildKit, after the alpha): keep 64 KiB; contexts remove the inlining that made Lewagent's Dockerfile large.
+2. **Linting.** Deferred (with BuildKit, after the alpha): BuildKit's linter findings as a `warnings` array on the check endpoint, never errors.
+3. **Private base images.** Deferred (Later): needs registry credentials on the node during builds, with private images for sandboxes ([sandboxes/lifecycle](../sandboxes/lifecycle.md#open-questions)).

@@ -130,5 +130,5 @@ Taking **Google Cloud Storage** as the example:
 
 ## Open questions
 
-1. **Instance-provided storage** for hosted projects (README open question 1): would it be a provider, or a cluster setting pointing at an instance-owned bucket? Proposed: the latter, with this provider underneath.
-2. **Short-lived node credentials.** Could the control plane hand nodes short-lived, prefix-scoped credentials (STS on AWS, temporary R2 tokens) instead of the bucket key? A provider capability, `IssueNodeCredentials`, Later.
+1. **Instance-provided storage** for hosted projects. Deferred (Later): no shared clusters or instance-provided storage on lewbox.com in the alpha or Beta; every project brings its own servers and bucket (decided 2026-10-29). If it comes, it's a cluster setting pointing at an instance-owned bucket, with this provider underneath.
+2. **Short-lived node credentials** (STS on AWS, temporary R2 tokens, via an `IssueNodeCredentials` capability). Deferred (Later).

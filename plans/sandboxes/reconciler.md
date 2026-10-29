@@ -76,7 +76,7 @@ A periodic job, `reconcile.sandboxes`, every `LEWBOX_RECONCILE_INTERVAL` (60 s),
    | `stopped` | Yes | `Transition` → `stopped` (reason from the event, or, when the pass finds it, from the fork's `stop_reason` on the sandbox, F35), then a `stop` operation to offload it, reason the same ([AerolVM's own stops](#aerolvms-own-stops)) |
    | `stopped` | No | Its destroy timer should have destroyed it, so this is a stop without one: `Transition` → `deleting`, and a `delete` operation |
    | `destroyed`, or missing and `GET` says `404`/`410` | No | `Transition` → `deleted` (the destroy timer did it), reason from the event or the fork's record; never inferred from timers |
-   | `destroyed`, or missing and `GET` says `404`/`410` | Yes | `Transition` → `failed` with `node_lost`, or with `vanished` when its node is fine. See [open questions](#open-questions) |
+   | `destroyed`, or missing and `GET` says `404`/`410` | Yes | With a snapshot from an earlier stop: `Transition` → `stopped` with `node_lost` (or `vanished` when its node is fine), resumable from that snapshot; the reason's message says changes since it are lost. Without one: `Transition` → `failed` with the same reason |
    | `error` | | `Transition` → `failed`, with AerolVM's message in `status_reason.message` |
    | Missing, and its node is unreachable | | Nothing; the node's health decides ([nodes offline](#nodes-offline)) |
 
@@ -108,7 +108,7 @@ Node health is the [clusters](../clusters.md) plan's ([clusters/health-and-metri
 
 - **Offline:** metering for its `running` sandboxes pauses (the run ends at the last heartbeat), and each sandbox gets `reachable: false` (new) in the API. Status stays `running`, since nothing says it stopped. Requests inside it fail with `503 cluster_unavailable`.
 - **Back online:** on the next pass, sandboxes AerolVM still has `started` are `reachable` again, metered again (a new run), and get an `apply_setup` (reason `node_back_online`), since profile changes made while it was away skipped them. Ones AerolVM lost are handled by the table above.
-- **Lost:** a node offline for `LEWBOX_NODE_LOST_AFTER` (24 h), or removed by a project admin, is `lost`. Its `running` sandboxes become `failed` with `node_lost`.
+- **Lost:** a node offline for `LEWBOX_NODE_LOST_AFTER` (24 h), or removed by a project admin, is `lost`. Its `running` sandboxes become `stopped` with `node_lost` when they persist and have a snapshot to resume from (losing changes since it), and `failed` with `node_lost` otherwise.
 
 ### Orphans
 
@@ -187,6 +187,6 @@ Ported from `lewbox-gateway-legacy/internal/reconcile/reconcile_test.go`, plus:
 
 ## Open questions
 
-1. **A persistent sandbox that vanished.** If AerolVM lost a running persistent sandbox (node died, disk wiped), its latest snapshot (from its previous stop) still exists. Mark it `failed`, or `stopped` with `status_reason: node_lost`, so a start resumes from that snapshot and loses only what changed since? The second is kinder but surprising. Proposed: `stopped` with a clear reason and message, when a snapshot exists; `failed` otherwise.
-2. **Node lost after 24 h:** too long or too short? Projects may run homelab nodes that sleep. Make it a per-cluster setting?
-3. **Instance tag.** Do we need `lewbox_instance` as well as `lewbox_project`, given a cluster belongs to one project? Yes if two instances might ever share a cluster (e.g. staging and production pointing at one homelab). Cheap to add.
+1. ~~**A persistent sandbox that vanished.**~~ Decided (2026-10-29): `stopped` with `status_reason: node_lost` (or `vanished`) when a snapshot exists, so a start resumes from it, and the API's message says changes since that snapshot are lost; `failed` when there's no snapshot.
+2. **Node lost after 24 h.** Deferred (Beta): `LEWBOX_NODE_LOST_AFTER` stays instance-wide (24 h) for the alpha; a per-cluster setting for homelab nodes that sleep comes if asked for.
+3. ~~**Instance tag.**~~ Decided (2026-10-29): add `lewbox_instance` beside `lewbox_project`, so two instances can never adopt each other's sandboxes on a shared homelab cluster.

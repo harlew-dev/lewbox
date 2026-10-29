@@ -247,6 +247,6 @@ Beyond the contract suite: the conversation API's tests run once per registered 
 
 ## Open questions
 
-1. **Adapter versions per project.** Instance setting only (proposed), or may a project pin its own?
-2. **Agents in the image vs installed on first use.** Should a provider be able to say "requires the template to have it" and refuse in sandboxes without it, rather than installing the adapter (57 MB, ~26 s)? Proposed: keep installing on first use, as agentd does.
-3. **Third-party ACP adapters' trust.** An adapter package runs as root in the sandbox with the profile's logins: is pinning a version enough, or do we vendor and mirror adapter packages?
+1. ~~**Adapter versions per project.**~~ Decided (2026-10-29): an instance setting only.
+2. ~~**Agents in the image vs installed on first use.**~~ Decided (2026-10-29): keep installing on first use, as agentd does; a template that already has the adapter skips the install.
+3. **Third-party ACP adapters' trust.** Deferred (Beta): decided before the first third-party adapter ships (OpenCode). The alpha's two first-party adapters are pinned by version and npm integrity hash.

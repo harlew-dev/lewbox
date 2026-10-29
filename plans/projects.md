@@ -123,7 +123,7 @@ A project has a `slug`, lowercase letters, digits and hyphens, 3 to 40 character
 2. Inserts default settings for each area.
 3. Writes `project.created` to the audit log.
 
-A new project has no clusters. The dashboard's empty state walks through adding one ([clusters/installation](clusters/installation.md)), or, on an instance with shared clusters, choosing one ([open question](README.md#open-questions)).
+A new project has no clusters. The dashboard's empty state walks through adding one ([clusters/installation](clusters/installation.md)). Every project brings its own servers: no instance, lewbox.com included, offers shared clusters in the alpha or the beta (decided 2026-10-29; shared clusters are Later).
 
 ### Deleting a project
 
@@ -275,8 +275,8 @@ Packages: `internal/projects` (projects, settings, audit), `internal/users` (use
 
 ## Open questions
 
-1. **Shared clusters.** Can an instance offer clusters to many projects (lewbox.com's own servers), or does every project bring its own? It changes whether a cluster's `project_id` is nullable ([README](README.md#open-questions)).
-2. **Viewer role.** Is a read-only role worth having in the alpha, or do owner, admin and member suffice?
-3. **Project limits.** Should the instance cap what a project may have (clusters, nodes, profiles), for lewbox.com's free tier?
-4. **Audit events as webhooks.** Which, if any, should be deliverable to the project's webhook endpoints?
-5. **Slug in the API.** Accepting slugs as well as ids is friendly, but a renamed slug breaks scripts. Accept ids only in the API?
+1. ~~**Shared clusters.**~~ Decided (2026-10-29): no shared clusters or instance-provided storage in the alpha or the beta, lewbox.com included; every project brings its own servers, and a cluster's `project_id` stays required. Shared clusters are Later.
+2. ~~**Viewer role.**~~ Decided (2026-10-29): ship `viewer` in the alpha, as [members-and-roles](projects/members-and-roles.md) designs it: a fixed, read-only permission set, cheap to build and useful for support and finance.
+3. ~~**Project limits.**~~ Decided (2026-10-29): yes, as [instance quotas](projects/instance-administration.md#quotas) on clusters, nodes, profiles and members, set by instance admins and copied from `default_project_quotas`; unlimited on self-hosted by default.
+4. **Audit events as webhooks.** Deferred (Beta): the audit log is read through the API in the alpha; which `audit.*` events reach project webhooks is decided with [activity-and-webhooks](activity-and-webhooks.md).
+5. ~~**Slug in the API.**~~ Decided (2026-10-29): the API takes ids only; slugs are for dashboard URLs, so renaming one never breaks a script.

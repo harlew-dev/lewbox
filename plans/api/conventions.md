@@ -60,7 +60,7 @@ The rules every `/v0` endpoint follows, so a client that has used one endpoint c
 | `PUT` | Creates or replaces one at a known path (`ports/{port}`, `ssh-keys/{name}`, `limits`, singletons) | `200` with it (`201` if it was created) |
 | `DELETE` | Deletes one | `204`; `202` with an operation when the work carries on |
 
-- **No verbs in paths.** Starting a sandbox is `PATCH {status: running}`. Where an action has no natural resource, it becomes one: a `test`, a `redelivery`, a `secret-roll`, an `operation`. The SDKs give them natural names.
+- **No verbs in paths.** Starting a sandbox is `POST …/operations {kind: start}`: the action is a resource. Where an action has no natural resource, it becomes one: a `test`, a `redelivery`, a `secret-roll`, an `operation`. The SDKs give them natural names.
 - **`PATCH` semantics:** a field that's present is changed; a field that's absent is left alone; `null` clears it, or for a limited setting means "the limit" (`idle_timeout: null`, [sandboxes](../sandboxes.md)). Nested objects (`metadata`) are replaced whole unless the field's docs say they're merged.
 
 ### Responses
@@ -191,6 +191,6 @@ Tasks: respond package; strict decoder with field-error mapping; cursor codec an
 
 ## Open questions
 
-1. Should list responses carry a `has_more` boolean besides `links.next`? (Proposed: no; `next` being `null` says it.)
-2. Do we want `ETag`s on every resource (for `If-None-Match` caching by the dashboard), or only on files? (Proposed: files only, for conditional writes; revisit if the dashboard's polling hurts.)
-3. Prompts with images: base64 in JSON (as ACP content blocks are) with a 20 MiB body limit, or upload to the sandbox first and reference a path? (Proposed: both, [agents](../agents.md).)
+1. ~~**`has_more` on lists?**~~ Decided (2026-10-29): no; `links.next` being `null` says it.
+2. ~~**`ETag`s on every resource?**~~ Decided (2026-10-29): on files only, for conditional writes; revisit if the dashboard's polling hurts.
+3. ~~**Prompts with images.**~~ Decided (2026-10-29): both: base64 content blocks in JSON (20 MiB body limit), or a path to a file uploaded to the sandbox first ([agents](../agents.md)).

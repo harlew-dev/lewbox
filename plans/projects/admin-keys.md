@@ -28,7 +28,7 @@ An **admin key** lets a project's own servers manage the project through the API
 
 ### Format
 
-`lba_` + 64 lowercase hex (32 random bytes). Stored as SHA-256 and the last four characters, as every key ([foundation/ids-and-keys](../foundation/ids-and-keys.md)). The prefix lets secret scanners find it; we register the `lba_`, `lbp_` and `lbs_` patterns with GitHub's secret scanning partner program (Later).
+`lba_` + 58 lowercase hex (29 random bytes) + a 6-character base62 checksum ([foundation/ids-and-keys](../foundation/ids-and-keys.md)), decided 2026-10-29. Stored as SHA-256 and the last four characters, as every key ([foundation/ids-and-keys](../foundation/ids-and-keys.md)). The prefix lets secret scanners find it; the checksum lets scanners reject false positives offline, and we register the `lba_`, `lbp_` and `lbs_` patterns with GitHub's secret scanning partner program (Later).
 
 ### Data model
 
@@ -156,6 +156,6 @@ In `internal/auth` (lookup, permissions) and `internal/projects` (endpoints).
 ## Open questions
 
 1. ~~**Permission names.**~~ Decided: admin keys use the API's one registry, the same names as profile keys ([api/permissions](../api/permissions.md)).
-2. **Personal tokens.** Should users be able to make tokens tied to themselves (revoked when they leave), for the CLI and scripts, instead of project-wide admin keys?
-3. **Cluster reach for admin keys.** Profile keys can be restricted to clusters; is that worth having on admin keys too (e.g. a regional backend)?
-4. **One table for all keys.** Proposed for one lookup path. Any reason to keep admin keys separate?
+2. **Personal tokens.** Deferred (Beta): tokens tied to a user, revoked when they leave, for the CLI and scripts; decided with `lewbox login` ([users-and-login](users-and-login.md#open-questions)).
+3. **Cluster reach for admin keys.** Deferred (Later): admin keys reach every cluster in their project; add `cluster_access` if a regional backend needs it.
+4. ~~**One table for all keys.**~~ Decided (2026-10-29): one `api_keys` table for admin, profile and sandbox keys, with `kind`, for one lookup path.

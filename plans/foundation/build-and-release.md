@@ -187,7 +187,7 @@ The release is the default build: the plugins in `plugins/config.json`. Anyone c
 
 ## Open questions
 
-1. GoReleaser (free or Pro?) or our own release script?
-2. Do we publish `.deb`/`.rpm` packages for nodes, or is the bootstrap script enough?
-3. Where are docs hosted for self-hosters: embedded in the binary at `/docs`, or only lewbox.com/docs?
-4. Do we need an LTS line, or only the latest minor, once past v1?
+1. ~~**GoReleaser or our own release script?**~~ Decided (2026-10-29): GoReleaser, the free open-source edition; Pro only if a feature we need requires it.
+2. **`.deb`/`.rpm` packages for nodes.** Deferred (Later): the bootstrap script is enough for the alpha; packages if self-hosters ask.
+3. ~~**Where are docs hosted for self-hosters?**~~ Decided (2026-10-29): guides live on lewbox.com/docs; each instance serves its own API reference at `/docs/api`, a static page over `/v0/openapi.json` ([api/openapi-and-codegen](../api/openapi-and-codegen.md#open-questions)). Embedding the full guides in the binary is Later.
+4. **An LTS line after v1.** Deferred (Later): only the latest minor until then.

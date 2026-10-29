@@ -183,7 +183,7 @@ Templates are core. Plugins contribute to them in two ways only: agent provider 
 
 ## Open questions
 
-1. **Profile templates in the alpha?** The docs preview them, and Lewagent doesn't need them. Proposed: M4 if time allows, else Beta. They need the build-isolation question answered first.
-2. **Restricting project templates to some profiles.** Today every profile in the project can use every project template. Is per-profile access needed (e.g. a premium template)?
-3. **Build secrets.** BuildKit's `--mount=type=secret` for private package registries during builds. It needs the fork's BuildKit support, and secret storage on the template.
-4. **Template definition files.** Should the API accept the whole directory (a `template.json` plus `Dockerfile` plus files) as one tarball, or keep context upload and create as two calls? Proposed: two calls in the API, one command in the CLI.
+1. ~~**Profile templates in the alpha?**~~ Decided (2026-10-29): M4 if time allows, else Beta; they need build isolation first ([builds](templates/builds.md#open-questions)).
+2. **Restricting project templates to some profiles.** Deferred (Later): every profile in the project can use every project template until someone needs per-profile access.
+3. **Build secrets.** Deferred (Later): BuildKit's `--mount=type=secret`, which needs the fork's BuildKit support and secret storage on the template.
+4. ~~**Template definition files.**~~ Decided (2026-10-29): two calls in the API (upload a context, then create), one command in the CLI.

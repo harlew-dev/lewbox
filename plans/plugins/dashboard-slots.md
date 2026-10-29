@@ -108,5 +108,5 @@ Loading a plugin's pre-built ES module at run time, without rebuilding the dashb
 
 ## Open questions
 
-1. **`definePlugin` in the plugin folder or in `web/`.** Keeping each plugin's UI beside its Go code (proposed) means the dashboard's build reads outside `web/`; Vite handles it, but `tsconfig` paths and linting need to cover `plugins/*/web`.
-2. **Slots for Lewagent.** Should `@lewbox/react` (the chat, terminal and file browser components proposed in [sdks-and-cli](../sdks-and-cli.md)) share the slot model, so a Lewbox plugin's sandbox tab can appear in Lewagent too? Later.
+1. ~~**`definePlugin` in the plugin folder or in `web/`.**~~ Decided (2026-10-29): beside the plugin's Go code (`plugins/*/web`); the dashboard's `tsconfig` paths and linting cover it.
+2. **Slots for Lewagent** (sharing the slot model with `@lewbox/react`). Deferred (Later).

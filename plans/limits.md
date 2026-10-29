@@ -213,7 +213,7 @@ In `plugins/limits/` (types, validation, resolution, the admission hook), called
 
 ## Open questions
 
-1. **`stopping` counting as running.** It prevents double-booking during slow stops but may surprise a user who just stopped one. Keep it?
-2. **Per-cluster per-sandbox caps above the profile-wide cap.** Useful for GPU clusters, but less obvious than "the lowest wins". Which rule?
-3. **`conversations_running` in the alpha?** Or wait for evidence it's needed beyond sandbox memory?
-4. **Units in the API.** Keep millicores and seconds (exact, as documented), or accept friendlier strings (`"2"` vCPUs, `"30m"`) too?
+1. ~~**`stopping` counting as running.**~~ Decided (2026-10-29): keep it; a stopping sandbox still holds its node's resources, and counting it prevents double-booking. The error's message says a sandbox is still stopping.
+2. ~~**Per-cluster per-sandbox caps above the profile-wide cap.**~~ Decided (2026-10-29): the lowest applicable cap wins; a cluster can't raise a profile-wide cap. GPU clusters wait for GPU limits ([clusters/runtimes](clusters/runtimes.md)).
+3. **`conversations_running` in the alpha?** Deferred (Beta): sandbox memory limits conversations in the alpha; add the kind if evidence shows it's needed.
+4. ~~**Units in the API.**~~ Decided (2026-10-29): exact units only (millicores, MB, seconds), as documented; friendlier strings are for the SDKs and CLI to convert.

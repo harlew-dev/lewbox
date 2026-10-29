@@ -207,7 +207,7 @@ Documented for self-hosters ([foundation](../foundation.md)):
 
 ## Open questions
 
-1. **Live changes for profile keys in the alpha**, or only sessions (the dashboard) at first? (Proposed: all principals in M4; it's one filter.)
-2. **Exec-stream exit codes under gVisor**: fix in the AerolVM fork (preferred, [clusters/aerolvm-fork](../clusters/aerolvm-fork.md)) or apply the `Execute` trap to streams too? Interactive commands need the right code either way.
-3. Should commands optionally survive the stream (`detach_on_disconnect`) by becoming a session, rather than being killed? (Proposed: no; sessions exist for that. Keep commands simple.)
-4. Should the dashboard connect to node domains directly for terminals (lower latency, less control-plane load), with sandbox keys checked at the node? (Proposed: Later; it needs auth at the node.)
+1. ~~**Live changes for profile keys in the alpha?**~~ Decided (2026-10-29): yes, for all principals in M4; it's one filter.
+2. ~~**Exec-stream exit codes under gVisor.**~~ Decided (2026-10-29): fixed in the AerolVM fork, never with a trap in Lewbox (D15). gVisor isn't in the alpha, so it lands with gVisor in the Beta ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md)).
+3. ~~**`detach_on_disconnect` for commands?**~~ Decided (2026-10-29): no; sessions exist for that. Commands stay simple.
+4. **The dashboard connecting to node domains directly for terminals.** Deferred (Later): it needs authentication at the node.

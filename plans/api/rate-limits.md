@@ -142,6 +142,6 @@ Retry `429 rate_limited` after `Retry-After`, up to `maxRetries` (3), never `429
 
 ## Open questions
 
-1. Per-project overrides set by instance admins in the alpha, or only global configuration? (Proposed: global only; per project Later.)
-2. Should approximate limits use Postgres advisory counters every few seconds to correct for uneven load balancing? (Proposed: no until we see it matter.)
-3. Do profile keys need a separate, lower limit than admin keys, since there may be thousands of profiles? (Proposed: the same per credential; total load is bounded by profile limits on sandboxes.)
+1. ~~**Per-project overrides.**~~ Decided (2026-10-29): global configuration only in the alpha; per-project overrides Later.
+2. ~~**Advisory counters for uneven load balancing?**~~ Decided (2026-10-29): no, until we see it matter.
+3. ~~**A lower limit for profile keys?**~~ Decided (2026-10-29): no, the same per credential; total load is bounded by profiles' sandbox limits.

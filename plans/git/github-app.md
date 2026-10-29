@@ -59,7 +59,7 @@ The words GitHub uses, and how they map:
 | An **installation** of it on an account (personal or organization), choosing all or selected repositories | `github_installations`: an **account** | One per account the App is installed on, known to the project |
 | A **person** who authorizes the App, getting a user token | `github_people` | One per GitHub user who has connected anywhere in the project |
 | The installations a person can reach (`GET /user/installations`) | `github_person_installations` | Refreshed whenever the person connects, and on installation webhooks |
-| What a profile uses | `profile_github_people`, `profile_github_accounts` | **Any number of each, together at most the limit** (25 by default) |
+| What a profile uses | `profile_git_people`, `profile_git_accounts` (core, with `provider`) | **Any number of each, together at most the limit** (25 by default) |
 
 So a profile might hold two people, `harrisonclewis` and the machine user `harlew-bot`, and four accounts: `harrisonclewis` (personal), `harlew-dev`, `acme` and `harlew-bot`. Its sandboxes get tokens for each account's repositories; the token API issues installation tokens on any of them, and user tokens for either person.
 
@@ -134,25 +134,27 @@ So a profile might hold two people, `harrisonclewis` and the machine user `harle
 
 `github_person_installations`: (`github_person_id` fk cascade, `github_installation_id` fk cascade, `seen_at`), primary key on both: which installations a person reaches, from `GET /user/installations`.
 
-`profile_github_people`:
+`profile_git_people` (core, shared by every Git provider; each provider's people live in its own table, here `github_people`):
 
 | Column | Type | Notes |
 |---|---|---|
 | `profile_id` | fk, cascade | |
-| `github_person_id` | fk, cascade | |
-| `is_default` | bool | Exactly one per profile with people (partial unique index): the person whose identity and own account are used when nothing names one |
+| `provider` | text | The Git provider plugin, e.g. `github` |
+| `person_id` | bigint | The person in the provider's own table (`github_people.id` for GitHub). The provider enforces it and removes the link when it deletes the person, as there's no foreign key across providers |
+| `is_default` | bool | Exactly one per profile with people, across providers (partial unique index): the person whose identity and own account are used when nothing names one |
 | `linked_at`, `linked_by` | timestamptz, actor | A setup link, a user, an admin key's install link |
 
-`profile_github_accounts`:
+`profile_git_accounts` (core):
 
 | Column | Type | Notes |
 |---|---|---|
 | `profile_id` | fk, cascade | |
-| `github_installation_id` | fk, cascade | |
-| `via_person_id` | fk | A linked person who reaches it; re-pointed to another when that person is unlinked, or the account is unlinked when none reaches it |
+| `provider` | text | e.g. `github` |
+| `account_id` | bigint | The account in the provider's own table (`github_installations.id` for GitHub), enforced by the provider |
+| `via_person_id` | bigint | A linked person who reaches it; re-pointed to another when that person is unlinked, or the account is unlinked when none reaches it |
 | `linked_at`, `linked_by` | timestamptz, actor | |
 
-Primary keys on both columns of each. The limit is checked in the linking transaction, under a row lock on the profile, counting both tables.
+Primary keys on (`profile_id`, `provider`, `person_id`) and (`profile_id`, `provider`, `account_id`). The tables are core, so every Git provider links people and accounts to profiles the same way, and the limit counts across providers ([plugins/git-providers](../plugins/git-providers.md)). The limit is checked in the linking transaction, under a row lock on the profile, counting both tables.
 
 ### Registering the App
 
@@ -261,7 +263,7 @@ A public repository can always be named on create even when no installation reac
 What `git config user.name` and `user.email` are set to in the profile's sandboxes, the first of:
 
 1. The profile's `git_name` and `git_email` ([profiles](../profiles.md)).
-2. The profile's default person (`github_people.name`, `.email`, through `profile_github_people.is_default`).
+2. The profile's default person (`github_people.name`, `.email`, through `profile_git_people.is_default`).
 3. The App's bot, when the profile's identity is set to `bot`: `<slug>[bot]` and `<bot_user_id>+<slug>[bot]@users.noreply.github.com`.
 4. None: git refuses to commit until one's set, as anywhere else.
 
@@ -383,7 +385,7 @@ The manifest's permissions and events are in code; changing them affects only Ap
 
 ## Build plan
 
-1. `github_apps`, `github_installations`, `github_people`, `github_person_installations`, `profile_github_people`, `profile_github_accounts` migrations; sqlc queries.
+1. `github_apps`, `github_installations`, `github_people`, `github_person_installations`, `profile_git_people`, `profile_git_accounts` (core) migrations; sqlc queries.
 2. `plugins/git/github` (the `git/github` plugin): JWT (RS256, `iss` client id, 9 minutes, backdated 60 s), installation tokens, OAuth and refresh, REST client.
 3. Manifest flow and bring-your-own endpoints; the dashboard's GitHub settings page.
 4. Connect callback; install links; linking and unlinking people and accounts; the limit; the default person.

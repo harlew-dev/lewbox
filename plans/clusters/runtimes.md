@@ -259,8 +259,8 @@ Errors:
 ## Open questions
 
 1. ~~**Level names or runtime names?**~~ Decided (2026-10-29): levels, `container`, `gvisor` and `microvm`, which describe the guarantee and survive a change of VMM.
-2. **Should Lewagent's hosted computers default to `microvm`** once it's offered, to match "every computer runs in its own microVM"? Until the beta they run at `container`, weaker than today's gVisor clusters ([migration/data](../migration/data.md)).
-3. **GPUs for consumers:** a `gpu` count on create, and a per-profile GPU limit? Legacy never exposed GPUs to profiles.
+2. **Should Lewagent's hosted computers default to `microvm`?** Deferred (Later): decided once `microvm` is offered.
+3. **GPUs for consumers.** Deferred (Later).
 4. ~~**Memory snapshots.**~~ Decided (2026-10-29): not offered; memory can't be scrubbed of credentials ([Firecracker](#firecracker-microvm-later)).
-5. **gVisor's `--host-uds=open`:** what does AerolVM need it for, and can we turn it off?
-6. **Per-level limits:** should a profile's limits (e.g. running sandboxes) be settable per level, so `microvm` (reserved memory) can be capped separately? Proposed: Later; one set of limits for now.
+5. **gVisor's `--host-uds=open`.** Deferred (Beta): with gVisor.
+6. **Per-level limits.** Deferred (Later): one set of limits for now.

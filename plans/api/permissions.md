@@ -94,7 +94,7 @@ Held by admin keys and users (through roles). Profile keys and sandbox keys neve
 | `profiles.credentials` | Setting agent credentials, running sign-ins, Git, telemetry, profile SSH keys; making setup links |
 | `profiles.credits` | Credit buckets and transactions (Beta; the `credits` plugin) |
 | `clusters.read` | Reading clusters, installations, nodes and their metrics |
-| `clusters.write` | Creating and changing clusters, storage and DNS settings, installations, cordoning, draining and removing nodes, upgrades |
+| `clusters.write` | Creating and changing clusters, storage and DNS settings, installations, cordoning, draining and removing nodes, upgrades. Owners and admins only among roles (decided 2026-10-29); members and viewers have `clusters.read` |
 | `webhooks.read` | Reading webhook endpoints and deliveries |
 | `webhooks.write` | Creating, changing, testing and deleting endpoints; rolling secrets; redelivering |
 
@@ -174,7 +174,7 @@ Handlers that decide late (a `PATCH /v0/sandboxes/{sbx}` that may be a start, a 
 ## Open questions
 
 1. ~~**Admin keys and customer data.**~~ Decided: admins are admins. Admin keys reach inside every sandbox in their project; no profile scope, no opt-out for profiles. Leaving out `sandboxes.exec` and `sandboxes.agents` makes a key that can't read customers' files.
-2. **Member role and profiles.** Should members be able to create profiles and keys? (Proposed: no; profiles are customers, and admins manage them.)
-3. **Custom roles**: wanted by anyone before Beta?
-4. **Per-profile access for users** (a user who only sees one profile's sandboxes, e.g. a customer's own staff)? (Proposed: Later; a project per customer covers it today.)
-5. **Splitting `sandboxes.exec`** into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both), so a file browser's sandbox key can't run commands? Decided for the alpha: keep `sandboxes.exec` as one permission; the split stays open for after it ([sandboxes/sandbox-keys](../sandboxes/sandbox-keys.md#open-questions)).
+2. ~~**Member role and profiles.**~~ Decided (2026-10-29): members can't create profiles or keys; profiles are customers, and owners and admins manage them. Likewise only owners and admins manage clusters.
+3. **Custom roles.** Deferred (Later): if anyone asks.
+4. **Per-profile access for users** (e.g. a customer's own staff seeing only their profile). Deferred (Later): a project per customer covers it today.
+5. **Splitting `sandboxes.exec`** into `sandboxes.commands` and `sandboxes.files` (with `exec` implying both). Deferred (Later): the alpha keeps `sandboxes.exec` as one permission ([sandboxes/sandbox-keys](../sandboxes/sandbox-keys.md#open-questions)).

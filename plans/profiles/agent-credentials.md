@@ -176,7 +176,7 @@ Core: `internal/agents/registry` (the provider interface and registry), `interna
 
 ## Open questions
 
-1. **An API proxy for keys.** Lewbox could hand sandboxes a per-sandbox token for a Lewbox proxy to Anthropic and OpenAI, keeping real keys out of sandboxes and metering tokens. Big, but strong for security; Later?
-2. **More agents.** Which comes after Claude Code and Codex: OpenCode (many providers), Cursor, Gemini CLI?
-3. **Project-wide credentials.** Should a project be able to set one API key used by all its profiles (its own account), rather than setting it on each?
-4. **Bedrock and Vertex** for enterprises whose policy forbids direct API keys: alpha or Later?
+1. **An API proxy for keys.** Deferred (Later): a per-sandbox token for a Lewbox proxy to Anthropic and OpenAI, keeping real keys out of sandboxes.
+2. **More agents.** Deferred (Beta): OpenCode first (its plugin is planned, through the generic ACP driver), then by demand; each is an agent plugin ([plugins/agent-providers](../plugins/agent-providers.md)).
+3. **Project-wide credentials.** Deferred (Beta): one key a project sets for all its profiles, with a profile's own taking precedence.
+4. **Bedrock and Vertex.** Deferred (Later): as credential methods of the `agents/claude-code` plugin, when an enterprise needs them.

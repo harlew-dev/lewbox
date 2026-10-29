@@ -93,7 +93,7 @@ Full columns in the part plans.
 | `github_installations` | The App's installations the project knows of, one per GitHub account: installation id, account, selection, permissions accepted, suspended | [github-app](git/github-app.md#tables) |
 | `github_people` | GitHub users who authorized the project's App: identity and user token (encrypted, refreshed). One per person per project | [github-app](git/github-app.md#tables) |
 | `github_person_installations` | Which installations each person reaches | [github-app](git/github-app.md#tables) |
-| `profile_github_people`, `profile_github_accounts` | The people and accounts a profile holds, one person the default; together at most `LEWBOX_GIT_MAX_CONNECTIONS_PER_PROFILE` (25) | [github-app](git/github-app.md#tables) |
+| `profile_git_people`, `profile_git_accounts` | The people and accounts a profile holds, one person the default; together at most `LEWBOX_GIT_MAX_CONNECTIONS_PER_PROFILE` (25) | [github-app](git/github-app.md#tables) |
 | `sandbox_git_repositories` | The repositories a sandbox's tokens reach: cloned on create, or added later | [tokens](git/tokens.md#tables) |
 | `sandboxes.git_access`, `sandbox_git_repositories.access` | The sandbox's access and each repository's own (`read`, `write`, `full` or a permission set; default `full`) | [tokens](git/tokens.md#the-sandboxs-git-setting) |
 | `sandbox_git_tokens` | The token written into a sandbox for each installation, its repositories and `expires_at` (never the token) | [tokens](git/tokens.md#tables) |
@@ -108,7 +108,7 @@ Commit identity stays on the profile (`profiles.git_name`, `profiles.git_email`)
  Setup page / install link / dashboard                    GitHub
    │  install the App on an account, or authorize it        ▲
    ▼                                                        │ App JWT (RS256) → installation tokens
- profile_github_people ── profile_github_accounts ──────────┤ user tokens (refreshed, per person)
+ profile_git_people ── profile_git_accounts ──────────┤ user tokens (refreshed, per person)
    │                         │                              │
    │                         ▼                              │
    │                  github_installations ◀── installation webhooks (/hooks/github/{prj})

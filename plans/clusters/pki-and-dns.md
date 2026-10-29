@@ -282,7 +282,7 @@ Node API: `PUT /node/v0/dns`, `PUT /node/v0/bundles`, `PUT /node/v0/certificate`
 
 ## Open questions
 
-1. **Shorter node certificates** (30 days) now that renewal runs hourly from a daemon? This shortens how long a removed node can still talk to its cluster.
-2. **One certificate per node** for the name and its wildcard, to halve Let's Encrypt usage: a change to how the fork configures Caddy.
-3. **Node tokens vs agent mTLS:** should the node agent authenticate to the control plane with a client certificate instead of a bearer token?
-4. **Should DNS be required for direct clusters,** or may projects bring their own certificates and records (an "unmanaged DNS" option)?
+1. ~~**Shorter node certificates.**~~ Decided (2026-10-29): keep 90 days, configurable (`LEWBOX_CERTIFICATE_LIFETIME`); an instance can lower it to 30 days now that renewal runs hourly.
+2. **One certificate per node.** Deferred (Beta): a change to how the fork configures Caddy, wanted when Let's Encrypt limits start to matter.
+3. **Node tokens vs agent mTLS.** Deferred (Later): bearer node tokens, rotated every 90 days, for now.
+4. ~~**Should DNS be required for direct clusters?**~~ Decided (2026-10-29): yes, as in legacy outside development; an "unmanaged DNS" option (own certificates and records) is Later.

@@ -247,10 +247,10 @@ The enrollment rule against a shared IP applies only to direct clusters.
 
 ## Open questions
 
-1. **One tunnel per relay replica (proposed), or forwarding between replicas?** It decides how relays scale on the hosted instance.
-2. **Mixed clusters:** may a direct cluster have some tunnel nodes (e.g. one node at home)? It complicates firewall rules and Raft addresses.
-3. **Clusters across networks:** should the node agent manage a WireGuard mesh between a cluster's nodes, so one cluster can span sites without the project running a VPN?
-4. **A friendly error when a tunnel is down:** the relay can't serve a page without a certificate for the name. Should relays hold a wildcard certificate for the relay domain to answer with an error page (and pass through everything else)?
-5. **Relay bandwidth on lewbox.com:** Lewagent streams desktops at 60 fps. Is relay traffic affordable at that rate, or do Lewagent's hosted clusters stay direct?
+1. **One tunnel per relay replica, or forwarding between replicas?** Deferred (Beta): one tunnel per relay replica is proposed for when tunnels ship.
+2. **Mixed clusters.** Deferred (Later): a direct cluster with some tunnel nodes complicates firewall rules and Raft addresses.
+3. **Clusters across networks.** Deferred (Later): a WireGuard mesh managed by the node agent.
+4. **A friendly error when a tunnel is down.** Deferred (Beta): with tunnels.
+5. **Relay bandwidth on lewbox.com.** Deferred (Beta): measured when tunnels ship; Lewagent's hosted clusters are direct until then.
 
 Later: a built-in DNS server for the relay domain, so an instance needs no DNS API ([option C](#dns-for-the-relay-domain)).

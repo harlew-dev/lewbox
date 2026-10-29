@@ -175,5 +175,5 @@ Taking **GitLab** as the example:
 ## Open questions
 
 1. ~~**Error code names.**~~ Decided (2026-10-29): provider-neutral codes (`git_not_connected`, `git_provider_not_configured`, `git_person_not_authorized`, `git_provider_refused`, `git_provider_unavailable`), routes under `…/git/…` with `provider`, and `git_connection.*` events. GitHub-specific: plugin settings, inbound hooks, callbacks, forwarded `github.<event>` and the plugin's tables.
-2. **Bare `owner/name`.** Always the default provider (GitHub in the default build), or refused when more than one Git provider is on for the project?
-3. **Profile linking tables.** The Git plans name them `profile_github_people` and `profile_github_accounts`; generalise to `profile_git_people`/`profile_git_accounts` with a `provider` column (proposed), or let each provider keep its own?
+2. **Bare `owner/name` with more than one Git provider.** Deferred (Later): GitHub is the only Git provider until a second one is built; decide then whether a bare name means the default provider or is refused.
+3. ~~**Profile linking tables.**~~ Decided (2026-10-29): generalised to `profile_git_people` and `profile_git_accounts`, with a `provider` column, so every Git provider shares them.

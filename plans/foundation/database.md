@@ -193,7 +193,7 @@ The initial schema, by area. Each owner plan defines the columns; this list says
 | `profile_key_clusters` | Clusters a restricted key reaches | [profiles/profile-keys](../profiles/profile-keys.md) | Alpha |
 | `profile_limits` | One row per limit kind and period. Owned by the `limits` plugin | [limits](../limits.md) | Alpha |
 | `profile_credentials` | Agent credentials (encrypted), agent and provider (from the agent plugins' registries), `verified_at`. Core: the agent framework's | [profiles/agent-credentials](../profiles/agent-credentials.md) | Alpha |
-| `github_people`, `github_person_installations`, `profile_github_people`, `profile_github_accounts` | GitHub people (identity, user token) and what they reach, the project's; the people and accounts each profile links, up to `LEWBOX_GIT_MAX_CONNECTIONS_PER_PROFILE` | [git/github-app](../git/github-app.md#tables) | Alpha |
+| `github_people`, `github_person_installations`, `profile_git_people`, `profile_git_accounts` | GitHub people (identity, user token) and what they reach, the project's; the people and accounts each profile links, up to `LEWBOX_GIT_MAX_CONNECTIONS_PER_PROFILE` | [git/github-app](../git/github-app.md#tables) | Alpha |
 | `profile_telemetry` | OTLP export settings (encrypted). Owned by the `telemetry` plugin | [profiles/telemetry](../profiles/telemetry.md) | Alpha |
 | `profile_setup_links` | `psl_`, token hashed, sections, return URL, expiry, use | [profiles/setup-links](../profiles/setup-links.md) | Alpha |
 | `ssh_keys` | `ssh_`, profile or sandbox, name, fingerprint. Partial unique indexes per owner | [profiles/ssh-keys](../profiles/ssh-keys.md) | Alpha |
@@ -306,7 +306,7 @@ See [testing](testing.md#postgres). In short: every test package that touches th
 
 ## Open questions
 
-1. Partition `activity_events` and `node_metrics` from the start? (Recommended.)
-2. Row-level security as defence in depth for project isolation: later, or never?
-3. goose or golang-migrate?
-4. Should `user_sessions` and `login_codes` be in Postgres, or signed cookies with no table? (Postgres recommended, so sessions can be listed and revoked.)
+1. ~~**Partition `activity_events` and `node_metrics` from the start?**~~ Decided (2026-10-29): yes, by month.
+2. **Row-level security** as defence in depth for project isolation. Deferred (Later): queries are scoped by project in code and tested; revisit RLS once the schema settles.
+3. ~~**goose or golang-migrate?**~~ Decided (2026-10-29): goose (`pressly/goose/v3`), for its Go API, embedding and `status` output.
+4. ~~**Sessions in Postgres or signed cookies?**~~ Decided (2026-10-29): `user_sessions` and `login_codes` in Postgres, so sessions can be listed and revoked.

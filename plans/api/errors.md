@@ -343,6 +343,6 @@ Tasks: registry and type; mapping from service errors; validation error builder;
 
 ## Open questions
 
-1. Should `wrong_key_kind` stay one code for every principal mismatch, or split (`wrong_key_kind`, `session_required`)? (Proposed: one code; the message says which credential to use.)
-2. Should field error messages be localisable (a `errors` entry as `{code, message}` objects)? The dashboard is English-only for now. (Proposed: keep strings; add codes in `/v2` if ever needed.)
-3. `already_exists` vs a code per resource (`name_taken`, `slug_taken`)? (Proposed: `already_exists` everywhere, and drop `name_taken` from the worktree plan.)
+1. ~~**One `wrong_key_kind`, or split?**~~ Decided (2026-10-29): one code; the message says which credential to use.
+2. ~~**Localisable field errors?**~~ Decided (2026-10-29): keep strings; field error codes would come in `/v2` if ever needed.
+3. ~~**`already_exists` or a code per resource?**~~ Decided (2026-10-29): `already_exists` everywhere; the worktree plan's `name_taken` becomes `already_exists`.

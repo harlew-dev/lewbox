@@ -163,7 +163,7 @@ The checks above are the tests. Plus: every example in the document validates ag
 
 ## Open questions
 
-1. **Generator**: `oapi-codegen` vs `ogen` vs hand-written types, decided by the M0 spike.
-2. **Reference docs renderer**: Scalar or Redoc, and hosted on lewbox.com/docs or served by each instance at `/docs/api` too (self-hosters' own reference)? (Proposed: both; it's a static page over `/v0/openapi.json`.)
-3. **Internal surfaces in the document**: kept separate (as proposed), or in the same file with `x-internal` and filtered out of the public bundle?
-4. **PHP model generation**: our own small generator vs `jane-php`. Lewagent is the main PHP user; ask its maintainers what they'd rather read.
+1. **Generator** (`oapi-codegen`, `ogen` or hand-written types). Spike (M0): generate the server types for three areas (sandboxes, files with streaming, conversations with SSE) with each; the one that handles OpenAPI 3.1, streaming bodies and our error shape with the least hand-written glue wins.
+2. ~~**Reference docs.**~~ Decided (2026-10-29): served in both places, on lewbox.com/docs and by each instance at `/docs/api`, as a static page over `/v0/openapi.json`. The renderer (Scalar or Redoc) is picked in the M0 generator spike.
+3. ~~**Internal surfaces in the document.**~~ Decided (2026-10-29): kept in separate documents, never in the public bundle.
+4. **PHP model generation** (our own small generator or `jane-php`). Deferred (Beta), with the PHP SDK; decided with Lewagent's maintainers, its main user.

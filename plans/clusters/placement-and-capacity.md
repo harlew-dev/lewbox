@@ -235,7 +235,7 @@ The consumer's `GET /v0/profile` may show each cluster's largest allowed sandbox
 
 ## Open questions
 
-1. **Ingress nodes:** with dedicated ingress nodes, port URLs can't name the sandbox's node. Do we adopt AerolVM's shared-domain topology (a TLS pass-through load balancer in front of ingress nodes) for large clusters?
+1. **Ingress nodes.** Deferred (Later): AerolVM's shared-domain topology for large clusters.
 2. **Show consumers a cluster's largest sandbox size** on their profile, so apps can size requests? It leaks a little about the project's hardware.
-3. **Default CPU overcommit:** 4× is common for dev workloads; should Lewagent's hosted clusters use less, as agents build and test heavily?
+3. ~~**Default CPU overcommit.**~~ Decided (2026-10-29): `cpu_overcommit` 4.0 by default, a per-cluster setting; Lewagent's project sets its own for its clusters.
 4. **Should the capacity wait be longer for starts** (a user resuming their computer) than for creates?

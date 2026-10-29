@@ -156,6 +156,6 @@ An audit log of administrative actions, separate from the activity log (which is
 
 ## Open questions
 
-1. Is a `cluster` label acceptable on hosted lewbox.com, with many projects bringing clusters? If not, default `LEWBOX_METRICS_CLUSTER_LABEL=false` there.
-2. Should the audit log also be deliverable by webhook (`audit.*` events)?
-3. Error reporting (Sentry or similar) in addition to logs and traces? Not planned; OTel errors cover it.
+1. ~~**A `cluster` label on hosted lewbox.com?**~~ Decided (2026-10-29): on by default; lewbox.com sets `LEWBOX_METRICS_CLUSTER_LABEL=false`, as it has many projects' clusters.
+2. **Audit log by webhook** (`audit.*` events). Deferred (Beta), with [projects](../projects.md#open-questions)' question on which audit events projects may receive.
+3. ~~**Error reporting (Sentry or similar)?**~~ Decided (2026-10-29): no; errors are recorded on OpenTelemetry traces and in logs.

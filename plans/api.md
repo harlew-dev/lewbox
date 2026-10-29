@@ -62,7 +62,7 @@ What that costs:
 | | What | Why |
 |---|---|---|
 | **Keep** | Every Consumer API route and its request and response fields, as documented on lewbox.com | It's the best-designed part of legacy, and documented |
-| **Keep** | Resource-shaped endpoints: start is `PATCH {status: running}`, not `POST /start` | Consistent, and the SDKs give them natural names |
+| **Change** | Start, stop and restart only through `POST /v0/sandboxes/{sbx}/operations` (`kind`), not `PATCH {status}` | One way to do it, answering with the operation; decided 2026-10-29 |
 | **Keep** | `{message, code, errors}`, `Lewbox-Request-Id`, `Idempotency-Key`, `Idempotent-Replayed`, `links.next`, operations and `202` | Documented, used by Lewagent and the PHP SDK |
 | **Keep** | The command WebSocket, session attach, SSE turn events, `lewbox.bearer` subprotocol | Protocols browsers already speak |
 | **Change** | Admin API `/api/v1` on the app's host → management routes under `/v0/projects/{prj}` on the one host | One base URL ([decision A1](#decisions)) |
@@ -298,11 +298,11 @@ Not in Lewbox's API. A project does them on its own servers with a token from `�
 | POST | `/v0/sandboxes` | S, A, P | `sandboxes.create`; with `hooks` or `scrub`, also `sandboxes.exec` | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md): idempotent; S and A send `profile`; `hooks`, `stop_grace`, `scrub` ([sandboxes/hooks](sandboxes/hooks.md), M2) |
 | GET | `/v0/sandboxes` | S, A, P | — | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md): `status`, `cluster`, `profile` (S, A), `metadata[k]`, `project` (S) |
 | GET | `/v0/sandboxes/{sbx}` | S, A, P, K | — | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md) |
-| PATCH | `/v0/sandboxes/{sbx}` | S, A, P | `sandboxes.start`/`stop` for `status`; `sandboxes.update` for settings; `sandboxes.update` and `sandboxes.exec` for `hooks`, `stop_grace`, `scrub` | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md), [sandboxes/hooks](sandboxes/hooks.md#changing-hooks) |
+| PATCH | `/v0/sandboxes/{sbx}` | S, A, P | `sandboxes.update` for settings (metadata, timers; not `status`, which is `422 validation_failed`: use operations); `sandboxes.update` and `sandboxes.exec` for `hooks`, `stop_grace`, `scrub` | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md), [sandboxes/hooks](sandboxes/hooks.md#changing-hooks) |
 | DELETE | `/v0/sandboxes/{sbx}` | S, A, P | `sandboxes.delete` | M1 | [sandboxes/lifecycle](sandboxes/lifecycle.md): runs `on_stop` on a running sandbox unless `?hooks=false` |
 | POST | `/v0/sandboxes/{sbx}/touch` | S, A, P, K | any of `sandboxes.exec`, `sandboxes.ports.view`, `sandboxes.agents` | M2 | [sandboxes/timers-and-activity](sandboxes/timers-and-activity.md#api): counts as activity, re-arming the idle timer |
 | GET | `/v0/sandboxes/{sbx}/operations` | S, A, P, K | — | M1 | [sandboxes](sandboxes.md): new; newest first |
-| POST | `/v0/sandboxes/{sbx}/operations` | S, A, P | `sandboxes.start` and/or `sandboxes.stop` | M1 | [sandboxes](sandboxes.md): `kind` start, stop, restart |
+| POST | `/v0/sandboxes/{sbx}/operations` | S, A, P | `sandboxes.start` and/or `sandboxes.stop` | M1 | [sandboxes](sandboxes.md): `kind` start, stop, restart; the only way to start, stop or restart a sandbox |
 | GET | `/v0/sandboxes/{sbx}/operations/{op}` | S, A, P, K | — | M1 | [sandboxes](sandboxes.md) |
 | POST | `/v0/sandboxes/{sbx}/keys` | S, A, P | — (the key gets a subset of the caller's permissions) | M2 | [sandboxes](sandboxes.md), [authentication](api/authentication.md#sandbox-keys) |
 | GET | `/v0/sandboxes/{sbx}/git` | S, A, P, K | — | M3 | [git/tokens](git/tokens.md#the-sandboxs-git-setting): repositories, permissions, tokens written |
@@ -473,7 +473,7 @@ Tasks, M0: router and metadata; middleware chain; errors and the code registry; 
 
 1. ~~**`/v0` stability during the alpha.**~~ Decided (2026-10-29): the API is `/v0` and isn't stable; breaking changes are allowed, with a changelog, until `/v1` ([conventions](api/conventions.md#versioning-and-deprecation)).
 2. ~~**Admin keys acting inside sandboxes.**~~ Decided (2026-10-29): admins are admins. Admin keys act inside every sandbox in their project ([A3](#decisions)); profiles can't opt out. A key without `sandboxes.exec` and `sandboxes.agents` can't read customers' files.
-3. **Instance keys.** Do self-hosters need an instance-level API key for automation (`lbx_`), e.g. to create projects from Terraform? (Proposed: Later.)
-4. **Custom domains.** One instance serving several projects' branded API hosts: in scope for Beta or Later?
-5. **`project=` on top-level lists for sessions.** Alternatively, the dashboard could call the project-scoped mirror `/v0/projects/{prj}/sandboxes`. (Proposed: the query parameter; one path per resource.)
-6. **GitHub repository lists as cursors.** GitHub's own pagination is page-numbered; our cursor would wrap a page number. Acceptable?
+3. **Instance keys** (`lbx_`, for automation such as creating projects from Terraform). Deferred (Later).
+4. **Custom domains** (one instance serving several projects' branded API hosts). Deferred (Later).
+5. ~~**`project=` on top-level lists for sessions.**~~ Decided (2026-10-29): the query parameter; one path per resource.
+6. ~~**Git repository lists as cursors.**~~ Decided (2026-10-29): yes. The cursor is opaque, so it can wrap a Git provider's page number.

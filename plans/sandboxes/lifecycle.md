@@ -48,7 +48,7 @@ A sandbox is created, runs, may be stopped and started again, and is finally del
 |---|---|
 | **Keep** | Statuses and their meaning. Fields of a create. Cluster choice order. Asking for more than a limit is refused, not lowered. `persist` fixed at create. The `201` / `202` wait. One operation at a time. Metering ends when a stop is *asked for*. Deleted sandboxes stay readable. Metadata rules. `env` write-only |
 | **Change** | One `Transition` function. One way to start and stop (`POST …/operations`). Admin keys and the dashboard create through `POST /v0/sandboxes` with `profile`. Long-poll on operations. `cpu` stored as millicores, shown as a number. Template resolved by the latest ready build, recorded on the sandbox *and* the operation |
-| **Drop** | `PATCH /v0/sandboxes/{sbx}` with `status` (open question). The dashboard's separate reserve path. Model-hook side effects |
+| **Drop** | `PATCH /v0/sandboxes/{sbx}` with `status` (decided 2026-10-29: start, stop and restart are operations only; `PATCH` changes settings). The dashboard's separate reserve path. Model-hook side effects |
 
 ## Design
 
@@ -59,11 +59,11 @@ A sandbox is created, runs, may be stopped and started again, and is finally del
 | `creating` | Its `create` is under way | No | `create` | No |
 | `running` | Running on a node | Yes | None, `apply_setup`, or the first half of none | Yes |
 | `stopping` | A stop (or the first half of a restart) is under way | No | `stop`, `restart` | No |
-| `stopped` | Stopped. A sandbox that persists only | No | None, or `restart` mid-way | No |
+| `stopped` | Stopped. A sandbox that persists only; also one lost with its node that has a snapshot to resume from (`status_reason: node_lost`) | No | None, or `restart` mid-way | No |
 | `starting` | A start is under way | No (until `running`) | `start` | No |
 | `deleting` | A delete is under way | No | `delete` | No |
 | `deleted` | Gone for good. Row kept, listed only with `status=deleted` | No | None | No |
-| `failed` | A create failed, a stop failed before it stopped, a delete failed, or it was lost with its node. Can only be deleted | No | None | No |
+| `failed` | A create failed, a stop failed before it stopped, a delete failed, or it was lost with its node and has no snapshot to resume from. Can only be deleted | No | None | No |
 
 `status` is a Postgres enum (`sandbox_status`). The row also has `status_reason` (`{code, message}` or null), e.g. `{code: "idle_timeout"}` on a stop AerolVM made, `{code: "credits_exhausted"}` on one Lewbox asked for.
 
@@ -90,7 +90,8 @@ Allowed transitions:
 | `running` → `stopping` | Stop or restart asked for |
 | `running` → `deleting` | Delete asked for; a stop of a sandbox that doesn't persist |
 | `running` → `stopped` | Reconciler: AerolVM stopped it on its own (then a `stop` op offloads it, which goes back to `stopping` and on to `stopped`; see [reconciler](reconciler.md)) |
-| `running` → `failed` | Reconciler: lost with its node, or AerolVM reports `error` |
+| `running` → `stopped` | Reconciler: lost with its node (`node_lost`), when it persists and has a snapshot from an earlier stop. A start resumes from that snapshot; what changed since it is lost, and `status_reason.message` says so |
+| `running` → `failed` | Reconciler: lost with its node with no snapshot to resume from, or AerolVM reports `error` |
 | `stopping` → `stopped` | `stop` op (after offload), `restart` op (midway) |
 | `stopping` → `running` | `restart` op failed before AerolVM stopped it, and it's still running |
 | `stopping` → `failed` | `stop` op failed before AerolVM stopped it |
@@ -453,8 +454,8 @@ Admin keys use the same endpoints, reaching every sandbox in their project. Ther
 
 ## Open questions
 
-1. **Drop `PATCH status`?** Proposed: yes. Start, stop and restart only through `POST …/operations`, which answers with the operation. If kept, it's an alias.
-2. **Admin keys creating sandboxes.** Proposed: yes, naming `profile`. That lets Lewagent's backend use one key. But Lewagent's browser still needs sandbox keys, and Lewagent today keeps a profile key per user; should it keep doing so? ([migration/lewagent](../migration/lewagent.md))
-3. **`ports` on create.** New, to save Lewagent a call per port after create. Worth it, or leave ports to templates and the ports API?
-4. **Resizing** a stopped persisted sandbox (`cpu`, `memory_mb`; `disk_gb` only up): the next start would use the new size. Cheap to add once offload exists. Later?
-5. **Image registries with credentials** (private `image`s). Later, as a project or profile setting.
+1. ~~**Drop `PATCH status`?**~~ Decided (2026-10-29): yes. Start, stop and restart only through `POST /v0/sandboxes/{sbx}/operations`, which answers with the operation; there's no alias. `PATCH` changes settings only.
+2. ~~**Admin keys creating sandboxes.**~~ Decided (2026-10-29): yes, naming `profile`; the sandbox belongs to that profile and counts against its limits. Lewagent keeps one profile per user; whether its backend uses its admin key or each user's profile key is Lewagent's call, as both work ([migration/lewagent](../migration/lewagent.md#open-questions)).
+3. ~~**`ports` on create.**~~ Decided (2026-10-29): keep it, as designed above: it saves a call per port after create, and exposes them as template ports are.
+4. **Resizing** a stopped persisted sandbox (`cpu`, `memory_mb`; `disk_gb` only up). Deferred (Beta): the next start would use the new size; cheap once offload exists.
+5. **Image registries with credentials** (private `image`s). Deferred (Later): a project or profile setting.

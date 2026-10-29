@@ -198,6 +198,6 @@ Legacy data is encrypted under Laravel's format and `APP_KEY`. The migration rea
 
 ## Open questions
 
-1. KMS support in the alpha, or later? (Later recommended; config keys first.)
-2. XChaCha20-Poly1305 or AES-256-GCM (with random 96-bit nonces, fine at our volumes)? Either works; XChaCha's larger nonce removes any doubt.
-3. Should project admins be able to bring their own key for their project's secrets? (Later, if hosted customers ask.)
+1. **KMS support.** Deferred (Later): keys from configuration first.
+2. ~~**XChaCha20-Poly1305 or AES-256-GCM?**~~ Decided (2026-10-29): XChaCha20-Poly1305; its 192-bit nonce removes any doubt about random nonces.
+3. **Bring your own key** for a project's secrets. Deferred (Later): if hosted customers ask.

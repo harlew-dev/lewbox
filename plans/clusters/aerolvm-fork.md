@@ -52,7 +52,8 @@ Lewbox runs sandboxes on [AerolVM](https://github.com/aerol-ai/microvm) (`aerol-
 
 ### The repository
 
-- **Name:** `github.com/harlew-dev/aerolvm` (open question 1), a GitHub fork of `aerol-ai/microvm`, MIT, keeping upstream's copyright and adding ours for our changes.
+- **Name:** `github.com/harlew-dev/aerolvm`, a GitHub fork of `aerol-ai/microvm`, MIT, keeping upstream's copyright and adding ours for our changes. Its **Go module path is `github.com/harlew-dev/aerolvm`**, so it can be imported alongside upstream.
+- **Lewbox imports the fork's own Go client** (`github.com/harlew-dev/aerolvm/pkg/client`, with the API types it already has under `pkg/api`) rather than keeping its own copy, as the legacy gateway did. Where upstream has no client package, the fork adds one and offers it upstream. Lewbox's `internal/aerolvm` shrinks to a thin layer: the table of releases and the minimum ([Versions in Lewbox](#versions-in-lewbox)), mapping the fork's coded errors to Lewbox's, and the dialer that reaches a node (direct now, the tunnel in the beta).
 - **Branches:**
 
 | Branch | What |
@@ -84,7 +85,16 @@ Target: a rebased release within 7 days of upstream's, or a note in the tracking
 - A PR goes upstream when the fix is in a fork release and has run on a live cluster for at least a few days, so we don't send fixes that are wrong.
 - Fixes that only Lewbox needs, such as a Caddy DNS provider that asks Lewbox to set DNS-01 records, are proposed upstream as extension points (a pluggable DNS provider), not as Lewbox code.
 - Security fixes are reported privately to the maintainer first, then fixed in the fork, and released once upstream agrees or after 14 days.
-- One person owns the fork's upstream relationship. The maintainer has asked to be told when we test pre-releases (#785).
+- One person owns the fork's upstream relationship (to be named). The maintainer has asked to be told when we test pre-releases (#785).
+
+### Schedule and checkpoint
+
+Decided 2026-10-29. The alpha needs every P0 below, which is a lot of fork work before 2026-12-21, so:
+
+1. **Talk to the maintainer now.** They've been responsive on #785. Share the backlog, and propose the two biggest changes, the **event stream (F35)** and **notify-mode timers (F50)**, upstream as features *before* building them, so they're designed with upstream and we don't carry large patches for long. The rest go upstream as each fix proves itself ([Upstreaming](#upstreaming)).
+2. **Work the P0s in the order the milestones need them:** M1's fixes first (sessions, readiness, coded errors, resume command, snapshots, capacity codes, `install.sh`, release assets), then M2's (events, notify timers, pre-stop, scrub and config reset, port traffic, touch).
+3. **Checkpoint at the end of M1 (2026-11-23).** Any alpha feature whose fork fix isn't done (in a fork release, passing the contract suite) by then **moves to the beta**, with its plan and the README updated. There are no workarounds to fall back on ([No workarounds in Lewbox](#no-workarounds-in-lewbox)): if F50 slips, Lewbox-owned idle stops and `on_stop` hooks on timer stops move together; if F46/F47 slip, persistence ships without credential scrubbing only if the feature is cut, never with credentials left in snapshots.
+4. **The checkpoint is written down** as a dated note in this plan: what made it, what moved, and the new fork targets for the beta.
 
 ### Release assets
 
@@ -271,7 +281,8 @@ None of Lewbox's own. The fork's API is AerolVM's, plus the additions above, eac
 ## Build plan
 
 1. **M0:**
-   - Create `harlew-dev/aerolvm`, with the upstream mirror, the CI pipeline, release assets and signing, and `LEWBOX_PATCHES.md` (F25).
+   - Create `harlew-dev/aerolvm` (module `github.com/harlew-dev/aerolvm`), with the upstream mirror, the CI pipeline, release assets and signing, and `LEWBOX_PATCHES.md` (F25); its `pkg/client` Go package, which Lewbox imports.
+   - Contact the maintainer with the backlog; propose F35 and F50 upstream.
    - Release `v0.6.8-lewbox.1` (or upstream's newest) with no patches, to prove the pipeline.
    - `internal/aerolvm/versions.go` with `MinimumRelease`; nodes report versions; nodes below it are refused.
    - First fixes, as they're small or urgent: F18 (AOCR default, security), F11 (lowercase path), F23 (`file` in `install.sh`), F6 and F34 (coded errors, capacity codes).
@@ -285,8 +296,8 @@ None of Lewbox's own. The fork's API is AerolVM's, plus the additions above, eac
 
 ## Open questions
 
-1. **The fork's name and home:** `harlew-dev/aerolvm` (as the README suggests), or keep upstream's `microvm`? Does the fork's Go module path change (it must, to be importable alongside upstream), and does Lewbox import the fork's `pkg/api` types, or keep its own client types?
+1. ~~**The fork's name and home.**~~ Decided (2026-10-29): `harlew-dev/aerolvm`, Go module `github.com/harlew-dev/aerolvm`. Lewbox imports the fork's own Go client (`pkg/client`, `pkg/api`) rather than keeping its own copy ([The repository](#the-repository)).
 2. **Signing:** cosign keyless (GitHub OIDC, verifiable without our key) or minisign (small, no transparency log)? The node agent needs one of them compiled in.
-3. **How far ahead of upstream do we go?** Events (F35) and async builds (F32) are big changes. Should we propose them upstream *before* building, so we don't carry large patches for long?
-4. **Who owns the upstream relationship**, and should we ask the maintainer about a shared roadmap (they've been responsive on #785)?
+3. ~~**How far ahead of upstream do we go?**~~ Decided (2026-10-29): propose the event stream (F35) and notify-mode timers (F50) upstream before building them; checkpoint at the end of M1, where any alpha feature whose fix isn't done moves to the beta ([Schedule and checkpoint](#schedule-and-checkpoint)).
+4. ~~**Who owns the upstream relationship.**~~ Decided (2026-10-29): one owner, still to be named; the action is to contact the maintainer now about a shared roadmap (#785) ([Schedule and checkpoint](#schedule-and-checkpoint)).
 5. ~~**Firecracker's timeline.**~~ Decided (2026-10-29): not in the alpha, as upstream hasn't released it. Clusters offer `microvm` once a fork release runs Firecracker with upstream's snapshot support (#785) ([runtimes](runtimes.md#firecracker-microvm-later)). gVisor isn't in the alpha either: it comes in the beta, once the fork handles it properly.

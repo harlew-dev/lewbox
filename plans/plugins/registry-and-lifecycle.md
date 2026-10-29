@@ -232,5 +232,5 @@ A plugin **removed from the build** while its data exists: start-up warns, namin
 
 ## Open questions
 
-1. **`Uses` vs optional interfaces.** Should a plugin find another (say, `credits` reading `limits`' kinds) through the host by name, or only through core extension points? Proposed: only through the core; `Uses` only affects order.
-2. **A plugin's own goroutines.** `Starter` allows them; should we forbid them for first-party plugins, so all background work is jobs (visible, retried, leader-aware)? Proposed: yes, `Starter` only loads state.
+1. ~~**`Uses` vs optional interfaces.**~~ Decided (2026-10-29): plugins find each other only through core extension points; `Uses` only affects order.
+2. ~~**A plugin's own goroutines.**~~ Decided (2026-10-29): forbidden for first-party plugins; `Starter` only loads state, and all background work is jobs (visible, retried, leader-aware).

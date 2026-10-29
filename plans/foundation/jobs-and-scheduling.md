@@ -50,7 +50,7 @@ Two ways to build the queue.
 
 **Our own** (~1,000 lines): a `jobs` table, `SELECT … FOR UPDATE SKIP LOCKED`, heartbeat leases, `NOTIFY`, backoff, a leader lock, periodic schedule. We'd own every line, and would rebuild what River already has and has tested.
 
-**Recommendation: River for the queue, plus our own leases on operations.**
+**Decided (2026-10-29): River for the queue, plus our own leases on operations.** River's MPL-2.0 licence is fine alongside MIT: its copyleft covers only River's own files, and only if we modify them.
 
 - Operations already have their own rows with domain state (`step`, `steps`, `claimed_by`, `lease_expires_at`, `attempts`), because the API reads them. Keep the heartbeat lease *there*.
 - A River job `operation.run{operation_id}` runs an operation: it takes the operation's lease (`UPDATE operations SET claimed_by = $me, lease_expires_at = now() + 60s WHERE id = $1 AND (claimed_by IS NULL OR lease_expires_at < now())`), renews it every 20 s and with every recorded step, and finishes it.
@@ -256,6 +256,6 @@ Full design in [sandboxes/operations](../sandboxes/operations.md).
 
 ## Open questions
 
-1. River (MPL-2.0) or our own queue? Recommended River, with leases on operations.
-2. Should the reconciler and session watcher become event-driven through callbacks from the AerolVM fork, keeping the periodic jobs only as backstops?
-3. Do we mount River UI for instance admins, or build our own small view in the dashboard?
+1. ~~**River or our own queue?**~~ Decided (2026-10-29): River, with leases on operations ([above](#river-or-our-own)).
+2. ~~**Event-driven reconciler and session watcher?**~~ Decided (2026-10-29): yes. They follow the fork's event stream (F35, a P0 for the alpha, [clusters/aerolvm-fork](../clusters/aerolvm-fork.md)); the periodic jobs stay only as backstops.
+3. ~~**River UI or our own view?**~~ Decided (2026-10-29): our own small view in the dashboard (counts by state, failed jobs, retry and cancel), behind the dashboard's own sign-in; River UI isn't mounted.

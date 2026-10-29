@@ -267,7 +267,7 @@ Git (connection, identity, repositories) is in [git](git.md); credits are in [cr
 
 ## Open questions
 
-1. **Lewagent's mapping.** One profile per user (today) or per workspace? It changes whose subscriptions and GitHub a computer gets ([README](README.md#open-questions)).
-2. **Profile-scoped webhooks.** Should a profile's own key be able to register webhook endpoints for its own sandboxes (a project's customer integrating directly)?
-3. **Names unique?** Legacy made names unique per tenant. Proposed: not unique, `external_id` is the handle. Agreed?
-4. **Deleting with `force`.** Is deleting a profile's sandboxes from one call too dangerous for an admin key, or useful for offboarding?
+1. ~~**Lewagent's mapping.**~~ Decided (2026-10-29): one profile per user, as today; a computer gets its user's subscriptions and GitHub.
+2. **Profile-scoped webhooks.** Deferred (Later): webhook endpoints belong to the project in the alpha; profile endpoints if a project's customers ask to integrate directly.
+3. ~~**Names unique?**~~ Decided (2026-10-29): no; names are for display, and `external_id` (unique per project) is the handle.
+4. ~~**Deleting with `force`.**~~ Decided (2026-10-29): allowed, as the API above describes: owners, admins, or an admin key with `sandboxes.delete` and `profiles.write`; `DELETE …?force=true` deletes the profile's sandboxes first, each as a normal delete operation, and is recorded in the audit log.

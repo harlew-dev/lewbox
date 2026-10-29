@@ -153,6 +153,6 @@ Two requests with the same key at the same moment: the unique index serialises t
 
 ## Open questions
 
-1. Should `GET`-after-`POST` races be documented (a client that replays immediately may see a resource still `creating`)? (It's the documented behaviour; just make sure the examples show it.)
-2. Do we keep refusals for a short time (say 60 s) so a client hammering a `429` with the same key gets the same answer cheaply? (Proposed: no; rate limits handle hammering.)
-3. 24 hours is short for queued jobs that retry over days. Configurable per project, up to 7 days? (Proposed: Later, if asked.)
+1. ~~**`GET`-after-`POST` races.**~~ Decided (2026-10-29): documented; the examples show a replayed create answering with a resource still `creating`.
+2. ~~**Keep refusals briefly?**~~ Decided (2026-10-29): no; rate limits handle hammering.
+3. **Longer than 24 hours** (configurable per project, up to 7 days). Deferred (Later): if asked.

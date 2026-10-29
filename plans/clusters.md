@@ -105,6 +105,8 @@ Notifications use the project's notifications table ([projects](projects.md)).
 
 The **Admin API**, project-scoped; the path shape follows [api](api.md). The dashboard calls the same endpoints.
 
+**Who may manage clusters** (decided 2026-10-29): **owners and admins** create, change and delete clusters, their DNS and storage, installations, upgrades and node actions, and admin keys need `clusters.write`; **members and viewers read** them (`clusters.read`). Legacy let any member manage clusters.
+
 | Area | Endpoints |
 |---|---|
 | Clusters | `GET/POST /v0/projects/{prj}/clusters`; `GET/PATCH/DELETE …/clusters/{clu}` (by `clu_` id or slug) |
@@ -199,7 +201,7 @@ A cluster records which driver it uses (`cluster_dns.provider`, `cluster_storage
 
 1. **M0:**
    - the fork and its release pipeline, and its first fixes ([aerolvm-fork](clusters/aerolvm-fork.md#build-plan));
-   - `internal/aerolvm` (client, `Dialer`, versions and the minimum release);
+   - `internal/aerolvm`, a thin layer over the fork's own Go client (`github.com/harlew-dev/aerolvm/pkg/client`): versions and the minimum release, error mapping, `Dialer`;
    - the fake AerolVM cluster and toolbox, playing the minimum release ([foundation/testing](foundation/testing.md)).
 2. **M1 (alpha infrastructure, as today's):**
    - clusters (create, lock, status, secrets), offering `container` only;
@@ -230,9 +232,9 @@ A cluster records which driver it uses (`cluster_dns.provider`, `cluster_storage
 
 ## Open questions
 
-1. **`microvm` for Lewagent:** Lewagent promises a microVM per computer. Do its computers default to `microvm` once it's offered ([runtimes](clusters/runtimes.md#open-questions))? Until the beta they run at `container`.
-2. **Tunnel scaling (beta):** one tunnel per relay replica, or forwarding between replicas ([connectivity](clusters/connectivity.md#open-questions))? And can lewbox.com afford relaying desktop streams?
-3. **Instance-provided storage and shared clusters on lewbox.com** (README open question 1): may a project use Harlew's bucket, or Harlew's clusters, rather than its own?
-4. **How far ahead of upstream to take the fork:** events (F35) and async builds (F32) are big. Propose them upstream before building ([aerolvm-fork](clusters/aerolvm-fork.md#open-questions))?
-5. **AerolVM's `install.sh`:** keep using the fork's for host dependencies, or port it into the node agent ([installation](clusters/installation.md#aerolvms-own-installer))?
-6. **Who in a project may manage clusters:** admins only ([projects](projects.md))? Legacy let any member.
+1. **`microvm` for Lewagent.** Deferred (Later): decided once `microvm` is offered; until then Lewagent's computers run at `container` (gVisor in the beta).
+2. **Tunnel scaling.** Deferred (Beta): one tunnel per relay replica is proposed; whether lewbox.com can afford relaying desktop streams is measured when tunnels ship ([connectivity](clusters/connectivity.md#open-questions)).
+3. ~~**Instance-provided storage and shared clusters on lewbox.com.**~~ Decided (2026-10-29): not in the alpha or the beta. Every project brings its own servers and bucket; Lewagent's computers run on clusters its own project owns. Shared clusters and instance storage are Later.
+4. ~~**How far ahead of upstream to take the fork.**~~ Decided (2026-10-29): propose F35 and F50 upstream before building them, with a checkpoint at the end of M1 ([aerolvm-fork](clusters/aerolvm-fork.md#schedule-and-checkpoint)).
+5. ~~**AerolVM's `install.sh`.**~~ Decided (2026-10-29): keep running the fork's (fixed) `install.sh` for host dependencies in the alpha; port it into the node agent later if its patches grow ([installation](clusters/installation.md#aerolvms-own-installer)).
+6. ~~**Who in a project may manage clusters.**~~ Decided (2026-10-29): owners and admins; members and viewers read ([API](#api)).

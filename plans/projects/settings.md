@@ -46,7 +46,7 @@ create table project_branding (
 
 create table project_activity_settings (
   project_id                        bigint primary key references projects(id) on delete cascade,
-  retention_days                    int not null default 30,   -- 1..instance max (90)
+  retention_days                    int not null default 30,   -- 1..the instance's activity_retention_days_max
   succeeded_command_retention_days  int not null default 3,
   record_command_stderr             boolean not null default true,
   audit_retention_days              int not null default 365
@@ -213,6 +213,6 @@ Package `internal/projects/settings` for the tables and endpoints, including `pr
 
 ## Open questions
 
-1. **Retention bounds.** Legacy capped activity at 90 days. Should the instance set the cap (lewbox.com 90, self-hosted unlimited)?
-2. **Digest timing.** Daily at a fixed UTC hour, or the user's timezone?
-3. **Branding on emails.** Should emails Lewbox sends to a project's customers (none yet) carry the project's branding and reply-to?
+1. ~~**Retention bounds.**~~ Decided (2026-10-29): the instance sets the cap (`activity_retention_days_max` in [instance settings](instance-administration.md#policies)): 90 days on lewbox.com, unlimited on self-hosted by default; a project chooses within it.
+2. ~~**Digest timing.**~~ Decided (2026-10-29): daily at a fixed UTC hour (08:00) in the alpha; per-user timezones Later.
+3. **Branding on emails.** Deferred (Later): Lewbox sends no email to a project's customers yet; branding and reply-to come with the first that does.

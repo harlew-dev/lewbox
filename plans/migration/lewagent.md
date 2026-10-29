@@ -32,7 +32,7 @@ All paths are under `lewagent-legacy/`.
 |---|---|---|---|
 | `Actions/Computers/CreateComputer.php` | `POST /sandboxes` (`template`, `cluster`, `cpu`, `memoryMb`, `diskGb`, `idleTimeout`, `env: {SELKIES_FRAME_ANCESTORS}`, `metadata: {computer}`, `persist: true`, `repositories`, `wait: false`, idempotency key = the computer's public id) | `POST /v0/sandboxes` | Same fields. `SELKIES_FRAME_ANCESTORS` stays the app's business |
 | `Jobs/Computers/RefreshComputerStatus.php`, `Jobs/Computers/SetUpComputer.php`, `Http/Controllers/Computer/SetupController.php` | `GET /sandboxes/{id}` | `GET /v0/sandboxes/{sbx}` | |
-| `Actions/Computers/StopComputer.php`, `StartComputer.php` | `PATCH /sandboxes/{id}` `status` | `PATCH /v0/sandboxes/{sbx}` | |
+| `Actions/Computers/StopComputer.php`, `StartComputer.php` | `PATCH /sandboxes/{id}` `status` | `POST /v0/sandboxes/{sbx}/operations` with `kind: stop` or `start` | `PATCH` no longer starts or stops ([sandboxes/lifecycle](../sandboxes/lifecycle.md#open-questions)) |
 | `Actions/Computers/RestartComputer.php` | `POST …/operations {kind: restart}` | `POST /v0/sandboxes/{sbx}/operations` | |
 | `Actions/Computers/DeleteComputer.php` | `DELETE` via `kill(wait: false)` | `DELETE /v0/sandboxes/{sbx}` | Lewagent's `small-todo.md` wants a "deleting" status until it's gone: follow the delete operation, or the `sandbox.deleted` webhook |
 | (all lifecycle) | `GET …/operations/{op}` | `GET /v0/sandboxes/{sbx}/operations/{op}` | |
@@ -172,7 +172,7 @@ Lewagent uses two auth paths for one feature today: a profile key for commands a
 
 ## Open questions
 
-1. **One key or two** for Lewagent's backend? Admin key for everything, or keep per-user profile keys? (Affects activity attribution and per-user limits.)
-2. **Profile per user or per workspace?** The config says workspace, the code does per user. The migration keeps per user; changing it is a Lewagent decision that's easier before cutover than after.
+1. ~~**One key or two**~~ for Lewagent's backend. Decided (2026-10-29): Lewagent's call; both work. An admin key can create sandboxes naming `profile` and act inside any of them; per-user profile keys keep activity attributed to the user and limits per user.
+2. ~~**Profile per user or per workspace?**~~ Decided (2026-10-29): one profile per user, as today; the migration keeps it.
 3. **Bundle or keep `receivePack`?** Lewagent can move legacy's push code as it is (a PHP `git-receive-pack` client) or switch to the bundle recipe, which needs `git` on its servers ([git/integrating](../git/integrating.md#pushing-from-your-servers)). Proposed: move it as it is, switch later if it's a burden.
 4. **Template build context:** do we add one (a tarball upload) so Lewagent can stop inlining files? ([templates](../templates.md))

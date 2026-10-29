@@ -332,8 +332,8 @@ Errors keep the [API's shape](../api/errors.md):
 
 ## Open questions
 
-1. **Retry rules:** which failures can safely be retried in place, especially on the seed after `cluster-init.sh`?
-2. **Moving sandboxes on removal:** restart running persisted sandboxes elsewhere automatically (the consumer sees a restart), or only stop them and leave the start to the consumer?
-3. **Minimum hardware:** 4 GB RAM and 40 GB disk as the preflight floor, or no floor beyond AerolVM's own?
-4. **Distros:** add RHEL-family later? AerolVM's installer is apt-based today.
-5. **AerolVM's `install.sh`:** keep using the fork's, or port its steps into the node agent now, while we're writing Go anyway?
+1. **Retry rules.** Spike (M1): on a real seed and joiner, rerun each step after a failure (especially after `cluster-init.sh`) and record which are idempotent; the steps that aren't become *cancel and reinstall*.
+2. ~~**Moving sandboxes on removal.**~~ Decided (2026-10-29): the project chooses per removal, `mode: move` (running persisted sandboxes restart elsewhere, and consumers see a restart) or `wait` (until they stop), as the removal API has.
+3. ~~**Minimum hardware.**~~ Decided (2026-10-29): 4 GB RAM and 40 GB under `/var/lib` as the preflight floor, configurable (`LEWBOX_NODE_MIN_MEMORY_MB`, `LEWBOX_NODE_MIN_DISK_GB`).
+4. **Distros.** Deferred (Later): RHEL-family once AerolVM's installer supports it; Debian and Ubuntu for the alpha.
+5. ~~**AerolVM's `install.sh`.**~~ Decided (2026-10-29): keep running the fork's, fixed in the fork ([AerolVM's own installer](#aerolvms-own-installer)).

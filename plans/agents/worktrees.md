@@ -132,14 +132,14 @@ POST /v0/sandboxes/sbx_…/conversations {agent: "claude-code", prompt: "…", d
 | `404` | `not_found` | No such worktree or sandbox the key sees |
 | `409` | `sandbox_not_running` | |
 | `409` | `worktree_failed` | git couldn't make it (branch exists, `from` unknown); message is git's |
-| `409` | `name_taken` | Another worktree has the name and isn't on the branch this request would make |
+| `409` | `already_exists` | Another worktree has the name and isn't on the branch this request would make |
 | `409` | `worktree_in_use` | Removing one conversations work in |
 | `409` | `worktree_dirty` | Uncommitted changes |
 | `409` | `worktree_removed` | Starting or prompting a conversation in a removed worktree |
 | `422` | `not_a_repository` | `directory` isn't in a git repository |
 | `422` | `validation_failed` | A bad name, more than 20 `copy` paths, `branch`/`from`/`copy` beside `id` |
 
-(`name_taken` replaces legacy's `worktree_failed` for a taken name, so clients can tell them apart.)
+(`already_exists` replaces legacy's `worktree_failed` for a taken name, so clients can tell them apart; it's the one code for a taken name across the API, [api/errors](../api/errors.md).)
 
 ## Security
 

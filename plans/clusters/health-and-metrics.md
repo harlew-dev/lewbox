@@ -161,7 +161,8 @@ When a node becomes `offline` or `unreachable`:
   - the survivors get an `apply_setup`, so a profile change made meanwhile (an SSH key removed, a credential rotated) reaches them.
 - **Metering** (Beta, the `credits` plugin, [credits/metering](../credits/metering.md)): metering pauses from `last_seen_at`, never before the run started, and resumes when the node is back.
 - **After a long absence** (`LEWBOX_NODE_LOST_AFTER`, 24 h), the project is offered *Mark lost*:
-  - its sandboxes become `failed` (reason `node_lost`), and persisted ones can be started again from their last snapshot on another node, losing what they wrote since their last stop;
+  - **persisted sandboxes with a snapshot become `stopped`** with `status_reason: node_lost` (decided 2026-10-29), and start again from their last snapshot on another node. What they wrote since that snapshot is lost, and the API says so: the sandbox carries `status_reason: node_lost` and `last_snapshot_at`, and its `sandbox.stopped` webhook and activity event say the node was lost;
+  - sandboxes that don't persist, or persist but have no snapshot yet, become `failed` with `status_reason: node_lost`, and can only be deleted;
   - never automatic, as the node may come back.
 
 ### Metrics storage
@@ -299,7 +300,7 @@ This plan is the observability for nodes. Its own health:
 
 ## Open questions
 
-1. **Thresholds:** 30 s heartbeats and 90 s offline. Tighter means faster detection but more noise for nodes on flaky links (homelabs). Should these be per cluster?
-2. **Refusing creates on `no_quorum`:** right for consumers, or should a create wait (up to the 60 s create wait) in case quorum returns?
-3. **Sandbox stats retention:** is 7 days of 5-minute history per sandbox enough? It's the largest table here with many sandboxes.
-4. **gVisor stats (beta):** does the fork's F39 report the sandbox's cgroup (Sentry plus gofer) as is, or scale it?
+1. ~~**Thresholds.**~~ Decided (2026-10-29): 30 s heartbeats and 90 s offline, instance-wide settings for the alpha; per-cluster thresholds Later, if homelab nodes on flaky links need them.
+2. ~~**Refusing creates on `no_quorum`.**~~ Decided (2026-10-29): refuse at once with `503 cluster_unavailable` (`reason: no_quorum`); the SDKs' retries cover a brief loss.
+3. **Sandbox stats retention.** Deferred (Beta): with sandbox stats (F39); 7 days of 5-minute history is the starting point.
+4. **gVisor stats.** Deferred (Beta): with gVisor.

@@ -232,7 +232,7 @@ Core: `internal/signins` (state machine, the `Flow` interface, the job, refresh 
 
 ## Open questions
 
-1. **Hosted instance:** confirm with Anthropic and OpenAI before lewbox.com offers subscription sign-ins. Self-hosted instances ship with them in the alpha ([Legal](#legal)).
-2. **A shared "agents" helper per project** instead of one sandbox per sign-in? Faster (seconds instead of a create), but a helper would hold several customers' logins in turn. Proposed: no, keep one per sign-in.
-3. **Version drift.** If `claude` or `codex` change their sign-in output, every sign-in breaks. Pin CLI versions in `agents` and run a nightly canary sign-in up to the link?
-4. **Other subscriptions** (SuperGrok, Cursor) after the alpha?
+1. **Hosted instance.** Deferred (Beta): confirm with Anthropic and OpenAI before lewbox.com offers subscription sign-ins; self-hosted instances ship them in the alpha, with logins on the owner's own machines ([Legal](#legal)).
+2. ~~**A shared "agents" helper per project.**~~ Decided (2026-10-29): no; one helper sandbox per sign-in, so a helper never holds two customers' logins.
+3. ~~**Version drift.**~~ Decided (2026-10-29): pin the `claude` and `codex` versions in the `agents` template, and run a nightly canary sign-in up to the link, alerting when the output changes.
+4. **Other subscriptions.** Deferred (Later): SuperGrok, Cursor and others, each through its agent plugin.

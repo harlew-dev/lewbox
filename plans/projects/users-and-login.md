@@ -219,7 +219,7 @@ Package `internal/users` (users, codes, sessions, email changes), `internal/auth
 
 ## Open questions
 
-1. **Magic links as well as codes?** Codes work across devices (sign in on a laptop from a phone's mail); links are one click. The plan sends both, with the link only pre-filling. Is that enough, or should a link sign in directly (risking mail scanners)?
-2. **Name at sign-up.** Ask for a name on first sign-in, or derive it from the email until set?
-3. **OAuth first?** GitHub sign-in would be the most natural for Lewbox's users. Pull it into the alpha?
-4. **Sessions for the CLI.** Should `lewbox login` open a browser and mint an admin key or a personal token, or should the CLI only ever use keys ([sdks-and-cli](../sdks-and-cli.md))?
+1. ~~**Magic links as well as codes?**~~ Decided (2026-10-29): as planned: the email carries the code and a link that only pre-fills it, so a mail scanner opening the link can't sign anyone in.
+2. ~~**Name at sign-up.**~~ Decided (2026-10-29): derive a display name from the email until the user sets one; don't ask on first sign-in.
+3. ~~**OAuth first?**~~ Decided (2026-10-29): no. The alpha signs in by emailed code only; GitHub OAuth and passkeys come in the Beta.
+4. **Sessions for the CLI.** Deferred (Beta): `lewbox login` opening a browser and minting a personal token comes with personal tokens ([admin-keys](admin-keys.md#open-questions)); in the alpha the CLI uses keys only.

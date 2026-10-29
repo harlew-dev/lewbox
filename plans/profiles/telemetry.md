@@ -165,7 +165,7 @@ The **`telemetry` plugin**, `plugins/telemetry/` ([plugins](../plugins.md)), on 
 
 ## Open questions
 
-1. **Lewbox's spans in the alpha?** Useful for debugging slow turns; needs the ACP `_meta` spike.
-2. **Project-level default telemetry.** Should a project set one endpoint that all its profiles use (its own observability), with profiles able to override?
-3. **A collector** to keep headers out of sandboxes: worth the moving part?
-4. **Codex's `[otel]` through `CODEX_CONFIG`.** Instructions already reach Codex this way; confirm `codex-acp` applies an `otel` table from it too (a spike before M3). If it can't, fall back to legacy's block in `config.toml`, with the headers' file scrubbed from snapshots like any other path.
+1. **Lewbox's spans in the alpha?** Spike (M3): test whether ACP's `_meta` can carry a `traceparent` to both adapters; if it can, Lewbox's turn spans ship in the alpha, else in the Beta.
+2. **Project-level default telemetry.** Deferred (Beta): one endpoint a project sets for all its profiles, with profiles able to override.
+3. **A collector.** Deferred (Later): a Lewbox-run collector that keeps provider headers out of sandboxes.
+4. **Codex's `[otel]` through `CODEX_CONFIG`.** Spike (M3): check that `codex-acp` applies an `otel` table from `CODEX_CONFIG`; if it doesn't, write legacy's block in `config.toml` and add the headers' file to the scrub manifest.

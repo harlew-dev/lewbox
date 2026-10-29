@@ -294,8 +294,8 @@ Consumers see the effects only through `persistence_unsupported`, `template_unav
 
 ## Open questions
 
-1. **Instance-provided storage on lewbox.com:** may a project use Harlew's bucket (billed by usage) instead of bringing its own?
-2. **Moving a cluster to another bucket:** support a copy-and-switch, or require a new cluster?
+1. ~~**Instance-provided storage on lewbox.com.**~~ Decided (2026-10-29): not in the alpha or the beta; every project brings its own bucket. Later.
+2. ~~**Moving a cluster to another bucket.**~~ Decided (2026-10-29): not supported: changing a bucket in use is refused (`409 cluster_has_snapshots`), so a new bucket means a new cluster. Copy-and-switch is Later.
 3. ~~**Flattening before F14.**~~ Decided (2026-10-29): no Lewbox-side flatten; wait for the fork ([D15](../README.md#decisions)).
-4. **`storage_gb`:** keep counting declared `disk_gb` of persisted sandboxes (predictable), or switch to real snapshot bytes (accurate, but it changes after every stop)?
-5. **Warm images:** which template builds to keep pre-pulled on each node, and how much node disk to give them?
+4. ~~**`storage_gb`.**~~ Decided (2026-10-29): keep counting declared `disk_gb` of persisted sandboxes, which is predictable; revisit with real snapshot bytes once F14 reports them.
+5. **Warm images.** Deferred (Beta): which builds to keep pre-pulled, and how much node disk to give them.

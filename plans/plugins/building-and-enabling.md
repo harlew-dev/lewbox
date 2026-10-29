@@ -187,5 +187,5 @@ Errors: `404 not_found` for a plugin not in the build; `409 plugin_disabled` (of
 
 ## Open questions
 
-1. **Distributing third-party plugins.** A list on lewbox.com of known plugins with their module paths? Later.
-2. **Pre-built custom images.** Should `lewbox build` also produce a container image? Proposed: document a two-line Dockerfile instead.
+1. **Distributing third-party plugins** (a list on lewbox.com of known plugins with their module paths). Deferred (Later).
+2. ~~**Pre-built custom images?**~~ Decided (2026-10-29): no; the docs give a two-line Dockerfile instead.

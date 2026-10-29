@@ -59,7 +59,7 @@ create table setup_sessions (
 );
 ```
 
-Token: `lbl_` + 64 hex. Sections: `agents`, `git`, `ssh_keys`, `telemetry`.
+Token: `lbl_` + 58 hex + a 6-character checksum ([foundation/ids-and-keys](../foundation/ids-and-keys.md)). Sections: `agents`, `git`, `ssh_keys`, `telemetry`.
 
 ### The flow
 
@@ -170,6 +170,6 @@ In `internal/profiles/setuplinks`; the principal in `internal/auth`; pages in `w
 
 ## Open questions
 
-1. **Admin-API sign-ins instead of links.** With [Admin API sign-ins](agent-sign-ins.md#from-the-management-api), a project can build its own setup UI. Do we still need embedding, or is "build your own or open ours in a tab" enough?
-2. **Re-usable links.** Some projects want a permanent "manage your agents" link per customer. Allow `reusable: true` links that open a fresh session each click, until revoked?
-3. **Session length.** Is an hour enough for a customer who wanders off mid sign-in?
+1. ~~**Admin-API sign-ins instead of links.**~~ Decided (2026-10-29): keep both: hosted setup links (open in a tab or embedded) for projects that want a ready page, and Admin-API sign-ins for projects that build their own.
+2. **Re-usable links.** Deferred (Beta): `reusable: true` links that open a fresh session per click until revoked.
+3. ~~**Session length.**~~ Decided (2026-10-29): an hour by default, configurable up to 4; a sign-in under way when the session ends still completes (step 6 above).

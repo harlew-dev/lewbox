@@ -184,7 +184,7 @@ plugins/
 ## Open questions
 
 1. ~~**Instance enablement at run time.**~~ Decided (2026-10-29): configuration only. Predictable, reviewable, fits infrastructure as code; instance admins see it read-only. Projects still turn allowed plugins on and off for themselves at run time.
-2. **The API package's path.** `plugin/` at the module root (proposed), or `pkg/plugin`? It must be outside `internal/`.
-3. **First-party table names.** New plugins prefix their tables with their name; should existing first-party tables be renamed to match (`profile_limits` → `limits_profile_limits`), or keep their names and be declared owned (proposed: keep and declare)?
+2. ~~**The API package's path.**~~ Decided (2026-10-29): `plugin/` at the module root, outside `internal/`.
+3. ~~**First-party table names.**~~ Decided (2026-10-29): existing first-party tables keep their names and are declared owned by their plugin; new plugins prefix their tables with their name.
 4. ~~**Which more DNS providers ship, and how.**~~ Decided (2026-10-29): one `dns/libdns` plugin; its providers are listed in `config.json`, and AerolVM needs none of them thanks to the DNS-01 relay ([plugins/dns-providers](plugins/dns-providers.md)).
-5. **Should a project be able to disable a core-adjacent plugin** like `limits` for itself, or only the instance (proposed: the instance decides; `limits` is `all` by default so projects can't opt out of the limits their operator set)?
+5. ~~**Can a project disable `limits` for itself?**~~ Decided (2026-10-29): no; the instance decides. `limits` is enabled for `all` projects by default, so projects can't opt out of the limits their operator set.

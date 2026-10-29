@@ -39,8 +39,9 @@ Two sources, combined:
 
 When `lewbox serve` starts with an empty database (after migrations):
 
-- If `LEWBOX_INSTANCE_ADMINS` is set, those emails can sign in and are admins; nothing else is needed.
-- Otherwise it logs, once, a **setup link**: `https://{host}/setup/instance/{token}` (a 64-hex token, single use, valid 24 hours, stored hashed), and `lewbox instance setup-link` prints a new one at any time. Opening it asks for an email, sends a code, and makes that user the first instance admin and owner of a first project named after the instance.
+- **The first admin is created with `lewbox admin create <email>`** (decided 2026-10-29), run on the server with database access: it creates the user as an instance admin, and with `--project <name>` a first project they own. They then sign in with an emailed code (or `lewbox users code <email>` prints one when mail isn't set up yet).
+- `LEWBOX_INSTANCE_ADMINS` also works: those emails can sign in and are admins.
+- Until either is done, the sign-in page says the instance has no admin and how to make one; nothing on a fresh instance is open to the internet. (A one-time setup link printed in the log was considered and dropped: a log line holding a credential is easy to leak, and the command is as quick.)
 - The sign-up policy starts as `invite_only` and project creation as `admins`, so nothing is open until an admin opens it.
 
 ### Policies
@@ -55,6 +56,7 @@ Instance settings, in the `instance_settings` table (one row), editable at `/v0/
 | `project_creation` | `anyone`, `admins` | `admins` | `anyone` | Who may create projects |
 | `projects_per_user` | integer or null | null | 3 | How many projects a user may own (not member of) |
 | `default_project_quotas` | object | none | see [Quotas](#quotas) | Copied to new projects |
+| `activity_retention_days_max` | integer or null | null (no cap) | 90 | The most a project may keep its activity log ([settings](settings.md)) |
 | `audit_retention_days` | integer | 365 | 365 | Instance audit log |
 | `support_email` | email | | `support@lewbox.com` | Shown in errors such as `project_suspended` |
 
@@ -115,7 +117,7 @@ The same `audit_events` table as projects ([projects](../projects.md#audit-log))
 Everything an operator needs without the dashboard, with database access:
 
 ```
-lewbox instance setup-link              print a first-run link
+lewbox admin create <email> [--project <name>]   make the first (or another) instance admin
 lewbox users list [--admins]
 lewbox users promote <email>            make an instance admin
 lewbox users demote <email>
@@ -174,7 +176,7 @@ Package `internal/instance` (settings, quotas, status), with users and projects 
 
 1. `instance_settings`, env seeding and overrides.
 2. Instance admin resolution (env plus column) in `/v0/me` and the auth middleware.
-3. First-run link and `lewbox instance setup-link`.
+3. First run: `lewbox admin create`, and the no-admin sign-in page.
 4. Policies applied to sign-up and project creation.
 5. Projects and users endpoints; suspension.
 6. Quotas.
@@ -182,6 +184,6 @@ Package `internal/instance` (settings, quotas, status), with users and projects 
 
 ## Open questions
 
-1. **Shared clusters.** If lewbox.com offers its own clusters to projects, instance admins would own those clusters, and projects would choose them. Is that in scope, and when ([README](../README.md#open-questions))?
-2. **Impersonation.** Is acting with the owner role inside a project enough for support, or do instance admins need to see the dashboard *as* a specific user?
-3. **Hosted plans.** Should quotas carry plan names (free, team) so lewbox.com can switch a project's plan in one call?
+1. ~~**Shared clusters.**~~ Decided (2026-10-29): not in the alpha or the beta, lewbox.com included; every project brings its own servers. Instance-owned clusters are Later.
+2. **Impersonation.** Deferred (Later): instance admins support a project by joining it with the owner role, which is audited; seeing the dashboard as a specific user waits until support needs it.
+3. **Hosted plans.** Deferred (Beta): quotas are plain numbers in the alpha; named plans that set them in one call come with lewbox.com's pricing.

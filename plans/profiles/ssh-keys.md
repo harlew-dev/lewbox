@@ -136,5 +136,5 @@ Changes to a stopped sandbox's keys aren't refused: they're stored and written w
 
 ## Open questions
 
-1. **SSH certificates.** A per-project SSH CA that signs short-lived certificates for members (`lewbox ssh sbx_…` in the CLI) would avoid managing keys at all. Later?
-2. **Members' own keys.** Should dashboard users have personal SSH keys, written into sandboxes they open, rather than adding them to profiles?
+1. **SSH certificates.** Deferred (Later): a per-project SSH CA with short-lived certificates and `lewbox ssh`.
+2. **Members' own keys.** Deferred (Later): personal SSH keys for dashboard users, written into the sandboxes they open.

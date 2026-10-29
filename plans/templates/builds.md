@@ -275,12 +275,7 @@ These map to the fork backlog: B1 is F30 and B3 is F29 (both P2), B2 is F32/F33 
 
 ## Open questions
 
-1. **Updating Lewagent's computers to a new build.** Options:
-   1. an "upgrade" that creates a fresh sandbox from the new build and copies `/root/workspace` and chosen home directories over (a new operation kind);
-   2. leaving it to Lewagent, by making a new computer and cloning;
-   3. not at all.
-
-   Proposed: (2) for the alpha, (1) considered for beta.
-2. **Where contexts live** when they're large: Postgres is fine up to tens of MiB. Add instance object storage (S3-compatible) as an optional setting, and move contexts there when it's set?
-3. **Reattaching to a running build** after a control-plane crash, instead of starting again: worth asking the fork for?
-4. **Build isolation (B4)**: rootless BuildKit vs a gVisor builder. Which is practical with AerolVM's build path?
+1. ~~**Updating Lewagent's computers to a new build.**~~ Decided (2026-10-29): in the alpha, Lewagent makes a new computer and clones; an `upgrade` operation (a fresh sandbox from the new build, with `/root/workspace` and chosen home directories copied over) is planned for the Beta.
+2. **Where contexts live** when they're large. Deferred (with contexts, after the alpha): Postgres up to tens of MiB; optional instance object storage when it's set.
+3. **Reattaching to a running build** after a control-plane crash. Deferred (Later): ask the fork once builds are asynchronous.
+4. **Build isolation (B4).** Spike (before profile templates, M4 or Beta): try rootless BuildKit and a gVisor builder on AerolVM's build path; whichever runs a hostile Dockerfile without reaching the node decides.

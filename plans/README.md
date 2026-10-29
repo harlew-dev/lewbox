@@ -186,6 +186,9 @@ Proposed. Each is argued in its plan, and open to change until it's built.
 | Secrets | Envelope encryption (XChaCha20-Poly1305) with a rotatable keyring | [foundation/secrets-and-encryption](foundation/secrets-and-encryption.md) |
 | Logs, metrics, traces | `log/slog` (JSON), Prometheus `/metrics`, OpenTelemetry traces | [foundation/observability](foundation/observability.md) |
 | Dashboard | React 19, TypeScript, Vite, Tailwind 4, Base UI, TanStack Router and Query, xterm.js; built into `web/dist` and embedded with `go:embed` | [dashboard/stack-and-structure](dashboard/stack-and-structure.md) |
+| D17 | **The fork's schedule has a checkpoint.** We talk to AerolVM's maintainer now and propose the event stream (F35) and notify-mode timers (F50) upstream before building them. At the end of M1 (2026-11-23), any alpha feature whose fork fix isn't done moves to the beta: with no workarounds, that's the honest way to keep the date | 23 must-have fork fixes is the biggest risk to the alpha | [clusters/aerolvm-fork](clusters/aerolvm-fork.md) |
+| D18 | **Foundation choices:** River for jobs (operations keep their own leases); TOML for the configuration file (`plugins/config.json` stays JSON); checksummed tokens; the fork lives at `harlew-dev/aerolvm` (module `github.com/harlew-dev/aerolvm`) and Lewbox imports its Go client | Settled in the M0 triage | [foundation](foundation.md), [clusters/aerolvm-fork](clusters/aerolvm-fork.md) |
+| D19 | **Product choices for the alpha:** every project brings its own servers (no shared clusters or instance storage on lewbox.com before the beta is out); Lewagent keeps a profile per user; self-hosted sign-up is `invite_only`, with the first admin made by `lewbox admin create`; sign-in by email code only (GitHub OAuth and passkeys in the beta); start, stop and restart only through `POST …/operations`; a persisted sandbox whose node died is `stopped` with `status_reason: node_lost`, resumable from its last snapshot; only owners and admins manage clusters | Settled in the M1 triage | [projects](projects.md), [sandboxes](sandboxes.md) |
 | Runtime | AerolVM fork (`sandboxd`, `toolboxd`), Docker, gVisor, Firecracker | [clusters/aerolvm-fork](clusters/aerolvm-fork.md) |
 | Agents | ACP adapters `claude-agent-acp` and `codex-acp`, driven by `lewbox agentd` | [agents/agentd](agents/agentd.md) |
 | Email | SMTP, for sign-in codes and notifications | [projects/users-and-login](projects/users-and-login.md) |
@@ -233,7 +236,7 @@ plans/                   these plans
 
 ## Ids, keys and tokens
 
-Every resource has a public id: a prefix and 14 base62 characters, e.g. `sbx_Qm4pL0sX2bN8cV`. Ids never reveal order or count. Secrets are a prefix and 64 lowercase hex characters; Lewbox keeps only their SHA-256 hash and last four characters. Full list in [foundation/ids-and-keys](foundation/ids-and-keys.md).
+Every resource has a public id: a prefix and 14 base62 characters, e.g. `sbx_Qm4pL0sX2bN8cV`. Ids never reveal order or count. Secrets are a prefix, 58 lowercase hex characters and a 6-character base62 checksum (`lbp_<58 hex><6 base62>`, as GitHub's tokens carry), so secret scanners can recognise them offline; they're registered with GitHub secret scanning. Lewbox keeps only their SHA-256 hash and last four characters. Full list in [foundation/ids-and-keys](foundation/ids-and-keys.md).
 
 | Token | Prefix | Reaches | Was |
 |---|---|---|---|
@@ -257,7 +260,7 @@ Today is 2026-10-29. Dates are targets.
 | Milestone | Target | Contents |
 |---|---|---|
 | **M0: Foundation** | 2026-11-09 | Binary and subcommands, the plugin registry and extension points, configuration, Postgres and migrations, jobs, API skeleton (errors, pagination, idempotency, request ids), authentication and permissions, ids, secrets, observability, test fakes, CI and release builds. AerolVM fork set up, with its release pipeline and its first P0 fixes (coded errors, capacity codes, lowercase paths, `install.sh`, the AOCR default) |
-| **M1: Projects, clusters, sandboxes** | 2026-11-23 | Users and sign-in, projects and members, admin keys, profiles, profile keys and limits; clusters (`container` only), installation, node agent, PKI, Cloudflare DNS, S3/R2 storage, direct connectivity; sandbox lifecycle, operations, persistence, timers, reconciler; templates and builds. The fork's P0 fixes for the sandbox lifecycle (resume command, snapshots on `/v1`, scrub, events, notify-mode timers) in the release that becomes Lewbox's minimum |
+| **M1: Projects, clusters, sandboxes** | 2026-11-23 (fork checkpoint, [D17](#decisions)) | Users and sign-in, projects and members, admin keys, profiles, profile keys and limits; clusters (`container` only), installation, node agent, PKI, Cloudflare DNS, S3/R2 storage, direct connectivity; sandbox lifecycle, operations, persistence, timers, reconciler; templates and builds. The fork's P0 fixes for the sandbox lifecycle (resume command, snapshots on `/v1`, scrub, events, notify-mode timers) in the release that becomes Lewbox's minimum |
 | **M2: Inside a sandbox** | 2026-11-30 | Toolbox client, commands (whole, streamed, interactive), sessions, files, ports, private ports, SSH keys, sandbox keys; hooks and scrub paths, notify-mode timers and the backstop. The fork's P0 fixes inside a sandbox (unique sessions, stream activity, session events) |
 | **M3: Agents and profile setup** | 2026-12-11 | agentd and its agent channel, conversations, turns and events, approvals and questions, models and modes, worktrees, background tasks; profile setup, agent credentials, agent sign-ins, telemetry; GitHub App connection, sandbox Git tokens and the token API |
 | **M4: Alpha** | 2026-12-21 | Activity log, webhooks, the React dashboard, the CLI, a TypeScript SDK, docs, hardening, a public release |
@@ -350,12 +353,28 @@ Leave out a section that doesn't apply. Write for someone who knows Go and Postg
 
 ## Open questions
 
-Questions that cut across plans. Each plan keeps its own.
+Questions that cut across plans. Each plan keeps its own; the M0 and M1 plans' questions were triaged on 2026-10-29 into decided, deferred (with their milestone) and spikes.
 
-1. **Hosted shape.** On lewbox.com, does every project bring its own servers, or does the instance also offer shared clusters that many projects use? The blog says the hosted control plane "reaches your servers through a secure tunnel or exposed ports" ([clusters/connectivity](clusters/connectivity.md)).
-2. **Project ↔ profile ↔ Lewagent.** Lewagent today makes one profile per user. Should a Lewagent workspace map to a profile instead?
-3. **Name of the fork.** `harlew-dev/aerolvm`? And do we vendor its client package, or import it as a module ([clusters/aerolvm-fork](clusters/aerolvm-fork.md))?
-4. **Dashboard and API.** Does the dashboard call the same Admin API as admin keys do, with a session cookie? (Proposed: yes, [api](api.md).)
-5. **Subscription logins on lewbox.com.** Settled for self-hosting, where logins stay on the user's own machines. Revisit with Anthropic and OpenAI before the hosted service stores them ([profiles/agent-sign-ins](profiles/agent-sign-ins.md)).
-6. **Job queue.** River (MPL-2.0) for jobs, with operations keeping their own leases, or our own small queue on `SKIP LOCKED` ([foundation/jobs-and-scheduling](foundation/jobs-and-scheduling.md))?
-7. **Token checksums.** Add checksum characters to `lba_`/`lbp_`/`lbs_` and register them with GitHub secret scanning? This changes the 64-hex format above ([foundation/ids-and-keys](foundation/ids-and-keys.md)).
+1. **Subscription logins on lewbox.com.** Settled for self-hosting, where logins stay on the user's own machines. Revisit with Anthropic and OpenAI before the hosted service stores them ([profiles/agent-sign-ins](profiles/agent-sign-ins.md)).
+
+Decided on 2026-10-29: hosted shape and Lewagent's profile mapping ([D19](#decisions)), the fork's name, the job queue and token checksums ([D18](#decisions)), and the dashboard calling the same API as admin keys, with a session cookie ([api](api.md)).
+
+## Spikes
+
+Questions only testing can answer, each with the milestone it blocks. Each plan describes its own; this is the list to schedule.
+
+| Milestone | Spike | Decides | Plan |
+|---|---|---|---|
+| M0 | Generate Go types from the OpenAPI document with `oapi-codegen`, `ogen`, or write them by hand; pick the reference docs renderer (Scalar or Redoc) | The API code generator | [api/openapi-and-codegen](api/openapi-and-codegen.md) |
+| M0 | `kin-openapi` vs `libopenapi-validator` against our OpenAPI 3.1 document | The conformance test library | [foundation/testing](foundation/testing.md) |
+| M1 | Does `docker commit` copy the container's `Env` into the snapshot's image config, on a live node? | How fork fix F47 resets the config | [clusters/aerolvm-fork](clusters/aerolvm-fork.md) |
+| M1 | Do running sandboxes survive a `sandboxd` restart on Docker? | Whether the node agent may restart it for config changes | [clusters/node-agent](clusters/node-agent.md) |
+| M1 | Which install steps can be retried in place on a real seed node | Installation's retry rules | [clusters/installation](clusters/installation.md) |
+| M1 | Stop and start times against snapshot layer depth on live Docker | `LEWBOX_SNAPSHOT_MAX_LAYERS` (32 is a guess) | [sandboxes/persistence](sandboxes/persistence.md) |
+| M1 | Does a partial clone (`--filter=blob:none`) still fetch after a stop and start, with a fresh token? | Partial or full clones | [sandboxes/repositories](sandboxes/repositories.md) |
+| M1 | The 250 ms admission budget under the profile's row lock, with `limits` | The admission budget | [plugins/extension-points](plugins/extension-points.md) |
+| M3 | Does Codex rewrite `auth.json` in place or by rename? | Whether `CODEX_HOME` moves onto `/run/lewbox` | [sandboxes/profile-setup](sandboxes/profile-setup.md) |
+| M3 | Does Codex's own sandbox (bubblewrap) work in a Docker sandbox? | Whether Codex can leave full-access mode | [agents/models-and-modes](agents/models-and-modes.md) |
+| M3 | Can ACP's `_meta` carry a `traceparent` to both adapters? | Lewbox's own spans in the alpha or the beta | [profiles/telemetry](profiles/telemetry.md) |
+| M3 | Does `codex-acp` apply an `otel` table from `CODEX_CONFIG`? | Codex telemetry config, and whether a headers file joins the scrub list | [profiles/telemetry](profiles/telemetry.md) |
+| M4 or Beta | Rootless BuildKit vs a gVisor builder | Build isolation, before profile templates ship | [templates/builds](templates/builds.md) |

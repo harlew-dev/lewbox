@@ -347,6 +347,6 @@ Two nullable foreign keys with a `CHECK` replace the polymorphic `subject_type` 
 
 ## Open questions
 
-1. **Operation history retention.** Keep operations as long as their sandbox, or prune finished ones after N days (activity keeps a summary)? Proposed: keep for the sandbox's life plus the activity retention.
-2. **Per-cluster concurrency.** Should a cluster's operations be capped, so a burst of creates on one cluster can't starve another's? The job system's per-queue limits may need per-key fairness.
-3. **Resuming mid-wait** for a snapshot upload: after a crash, a resumed stop re-polls the snapshot; is that enough, or should the node agent report upload completion ([clusters/node-agent](../clusters/node-agent.md))?
+1. ~~**Operation history retention.**~~ Decided (2026-10-29): keep operations for the sandbox's life plus the activity retention; activity keeps a summary.
+2. **Per-cluster concurrency.** Deferred (Beta): the alpha uses the job system's per-queue limits; per-cluster fairness is added if a burst on one cluster is seen to starve another.
+3. ~~**Resuming mid-wait**~~ for a snapshot upload. Decided (2026-10-29): the fork's event stream reports snapshot pushes (F35, a P0 for the alpha), which the node agent forwards; a resumed stop waits for that event, and re-polls the snapshot only as the safety net.

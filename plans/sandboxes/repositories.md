@@ -172,6 +172,6 @@ To let users choose what to clone, profiles list their repositories and branches
 
 ## Open questions
 
-1. **LFS.** Clone with `GIT_LFS_SKIP_SMUDGE=1` to stay fast, and document `git lfs pull`? Or run it when the repository has `.gitattributes` with `filter=lfs`? Proposed: skip by default, with `lfs: true` per entry later.
-2. **Submodules.** `--recurse-submodules` by default? GitHub submodules work through the helper; others fail. Proposed: off, with `submodules: true` per entry.
-3. **Partial clones and agents.** `--filter=blob:none` makes later `git log -p` and `blame` fetch lazily, which needs the token to still work. That's fine while the sandbox runs, but a stopped and started sandbox gets a fresh token. Measure whether it's a problem; fall back to full clones if so.
+1. ~~**LFS.**~~ Decided (2026-10-29): clone with `GIT_LFS_SKIP_SMUDGE=1` and document `git lfs pull`; an `lfs: true` per entry comes later.
+2. ~~**Submodules.**~~ Decided (2026-10-29): off by default, with `submodules: true` per entry.
+3. **Partial clones and agents.** Spike (M1): clone with `--filter=blob:none`, stop and start the sandbox, then run `git log -p` and `git blame` with the fresh token; if lazy fetches fail or are slow, fall back to full clones.

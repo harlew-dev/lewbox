@@ -263,6 +263,6 @@ Run a hook again by hand? Not an endpoint: it's a [command](../inside-a-sandbox/
 
 1. ~~**`on_create` as a third hook.**~~ Decided (2026-10-29): kept, beside `on_start` and `on_stop`.
 2. ~~**`required` on start hooks.**~~ Decided (2026-10-29): kept, and **`true` by default** for `on_create` and `on_start`: a failing hook fails its operation unless it's marked `required: false`. `on_stop` hooks never block a stop; their failures are reported.
-3. **Glob scrub paths** (`~/workspace/*/.env`). Useful; needs the fork to match against every layer, not just the top one. Later?
-4. **Hooks on profile level.** Should a profile (or project) have default hooks for all its sandboxes, as it has setup? (Proposed: Later; templates cover the common case.)
+3. **Glob scrub paths** (`~/workspace/*/.env`). Deferred (Later): needs the fork to match against every layer, not just the top one.
+4. **Hooks on profile level.** Deferred (Later): templates cover the common case.
 5. ~~**Name.**~~ Decided (2026-10-29): `hooks`, with `on_create`/`on_start`/`on_stop` (`onCreate`/`onStart`/`onStop` in the TypeScript SDK).

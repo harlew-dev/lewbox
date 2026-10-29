@@ -231,7 +231,7 @@ Full list: [configuration](configuration.md).
 
 ## Open questions
 
-1. **cobra or `flag`?** Decided with the CLI.
-2. **Do we ship the `cli`-only build** (recommended), and under what name?
-3. **Should `worker` processes serve in-sandbox requests too**, so a big instance can scale stream relays separately from the management API? Not needed for the alpha.
-4. **Helper retention in sandboxes:** keep the last two builds, or only the running ones?
+1. ~~**cobra or `flag`?**~~ Decided (2026-10-29): the server commands use the standard `flag` package with a small dispatcher; the CLI's framework is decided in [sdks-and-cli/cli](../sdks-and-cli/cli.md#open-questions).
+2. ~~**Do we ship the `cli`-only build?**~~ Decided (2026-10-29): yes, named `lewbox-cli` (`-tags cli`), for npm (`@lewbox/cli`) and Homebrew.
+3. **Should `worker` processes serve in-sandbox requests too**, so a big instance can scale stream relays separately from the management API? Deferred (Later): not needed for the alpha.
+4. ~~**Helper retention in sandboxes.**~~ Decided (2026-10-29): keep the last two builds, as [step 5](#upload-and-install) says; older ones are removed after a successful install.

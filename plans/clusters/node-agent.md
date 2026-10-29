@@ -345,8 +345,8 @@ Per cluster:
 
 ## Open questions
 
-1. **WebSocket or gRPC** for the agent's connection? WebSocket goes through more proxies and matches the rest of Lewbox; gRPC gives typed streams.
-2. **Restarting sandboxd for env changes:** confirm on Docker that running sandboxes survive it, and on gVisor and Firecracker when they come.
-3. **Upgrade windows:** per cluster only, or also a "do it now" for security releases that skips windows?
-4. **Who may trigger `collect_diagnostics`:** project admins only? It can include hostnames and IPs, but no secrets.
-5. **Should the agent also run on non-AerolVM hosts** (e.g. a relay host for the tunnel)? See [connectivity](connectivity.md#open-questions).
+1. ~~**WebSocket or gRPC.**~~ Decided (2026-10-29): WebSocket, with HTTPS long-polling as the fallback, as designed above.
+2. **Restarting sandboxd for env changes.** Spike (M1): on Docker, restart sandboxd with running sandboxes and check they survive with their sessions and ports; gVisor and Firecracker are checked when they come.
+3. ~~**Upgrade windows.**~~ Decided (2026-10-29): per-cluster windows, plus the `upgrade_aerolvm` action to upgrade now, outside the window, for security releases (owners and admins).
+4. ~~**Who may trigger `collect_diagnostics`.**~~ Decided (2026-10-29): owners and admins, as with every cluster change.
+5. **The agent on non-AerolVM hosts.** Deferred (Beta): with tunnels and relay hosts.

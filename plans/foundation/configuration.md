@@ -49,7 +49,7 @@ smtp_url = "smtp://user:pass@smtp.example.com:587"
 from = "Lewbox <lewbox@example.com>"
 ```
 
-Format: **TOML** recommended (comments, no indentation traps, `BurntSushi/toml` or `pelletier/go-toml/v2`). YAML is the alternative. Unknown keys are errors, so typos aren't silently ignored.
+Format: **TOML** (decided 2026-10-29: comments, no indentation traps, `BurntSushi/toml` or `pelletier/go-toml/v2`). Unknown keys are errors, so typos aren't silently ignored.
 
 ### Implementation
 
@@ -92,7 +92,7 @@ Some groups belong to plugins: `LEWBOX_GITHUB_*` to `git/github`, the agents' ad
 | `LEWBOX_REPLICA_ID` | hostname + random | Names this process in leases and logs. Must be unique per process | `GATEWAY_REPLICA_ID` |
 | `LEWBOX_CONFIG` | none | Path to a configuration file | |
 | `LEWBOX_INSTANCE_ADMINS` | none | Comma-separated emails who are instance admins, in addition to those marked in the database ([projects/instance-administration](../projects/instance-administration.md)) | |
-| `LEWBOX_SIGN_UP` | `open` | Who may sign up: `open`, `invite_only` (invited emails only) or `allowlist` (emails in `LEWBOX_SIGN_UP_DOMAINS`). Instance admins can override it in the dashboard ([projects/instance-administration](../projects/instance-administration.md)) | |
+| `LEWBOX_SIGN_UP` | `invite_only` | Who may sign up: `open`, `invite_only` (invited emails only) or `allowlist` (emails in `LEWBOX_SIGN_UP_DOMAINS`). Instance admins can override it in the dashboard ([projects/instance-administration](../projects/instance-administration.md)) | |
 | `LEWBOX_SIGN_UP_DOMAINS` | none | Email domains allowed to sign up, for `allowlist` | |
 | `LEWBOX_PROJECT_CREATION` | `anyone` | Who may create projects: `anyone` or `admins` (instance admins, and users they allow); overridable like `LEWBOX_SIGN_UP` | |
 | `LEWBOX_INSTANCE_NAME` | `Lewbox` | Seeds the instance's display name, shown in emails and the dashboard | |
@@ -540,6 +540,6 @@ Stored in `projects.settings`, validated by a Go struct, edited at `PATCH /v0/pr
 
 ## Open questions
 
-1. TOML or YAML for the file?
-2. Should `LEWBOX_SIGN_UP` default to `invite_only` for self-hosted installs, so a fresh instance on the internet isn't open to sign-ups?
-3. Are any of the node settings worth making per-cluster rather than instance-wide (e.g. the TCP port range, for clusters behind different firewalls)?
+1. ~~**TOML or YAML for the file?**~~ Decided (2026-10-29): TOML.
+2. ~~**`LEWBOX_SIGN_UP` default.**~~ Decided (2026-10-29): `invite_only`, so a fresh instance on the internet isn't open to sign-ups. The first instance admin is made from a shell with `lewbox admin users create --email … --instance-admin` ([binary-and-commands](binary-and-commands.md)).
+3. **Per-cluster node settings** (e.g. the TCP port range, for clusters behind different firewalls). Deferred (Later): instance-wide for the alpha; per cluster when a project needs it.

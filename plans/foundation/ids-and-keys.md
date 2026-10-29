@@ -81,7 +81,7 @@ Not public, so no prefix: memberships' internal rows, chunks (agents give their 
 ### Secret tokens
 
 ```
-lbp_8c1f…(64 lowercase hex)…e09a
+lbp_8c1f…(58 lowercase hex)…3fK9aQ
 └┬┘ └──────────┬──────────┘
 kind      32 bytes from crypto/rand
 ```
@@ -113,7 +113,7 @@ Legacy `lbt_` tenant keys become `lba_`. Since the API is new (D4), no legacy to
 At the edge, before any lookup:
 
 1. Missing `Authorization: Bearer` → `401 unauthenticated`.
-2. Not `<known prefix>_` + 64 lowercase hex → `401 invalid_key`.
+2. Not `<known prefix>_` + 58 lowercase hex + a 6-character base62 checksum that matches → `401 invalid_key`, without a database lookup.
 3. A known prefix for another API (e.g. a profile key on the management API) → `401 wrong_key_kind`, with a message naming what the route takes.
 4. Look up by hash. Unknown, revoked, expired, or its project or profile deleted → `401 invalid_key`. Suspended → `403 profile_suspended` / `project_suspended`.
 
@@ -128,12 +128,12 @@ Legacy cached lookups for 60 s in the gateway, so a revoked key kept working for
 
 #### Checksums
 
-Now that the format can change, consider GitHub's approach: append a 6-character base62 CRC32 of the random part, e.g. `lbp_<64 hex>_<6 base62>`. Benefits:
+**Decided (2026-10-29): checksummed tokens, before the alpha.** As GitHub does, a token is `<prefix>_<58 lowercase hex><6 base62>`: 232 random bits, then a base62 CRC32 of the prefix and the random part. Benefits:
 
 - Secret scanners (GitHub's partner programme, gitleaks, trufflehog) can tell a real token from a random string, with few false positives, and report leaks to us.
 - The edge can reject typos without a database lookup.
 
-Costs: a slightly longer token, and nothing else. **Recommended**, decided in M0. Then register `lba_`, `lbp_` and `lbs_` with GitHub secret scanning, with a revocation endpoint that revokes reported keys and notifies the project.
+Costs: none worth having (232 random bits is still far beyond guessing). Register `lba_`, `lbp_` and `lbs_` with GitHub secret scanning, with a revocation endpoint that revokes reported keys and notifies the project.
 
 ### Signed tokens
 
@@ -189,6 +189,6 @@ base64url(json claims) "." base64url(Ed25519 signature over the first part)
 
 ## Open questions
 
-1. **Checksummed tokens**? Recommended.
-2. **Separate prefixes for admin and profile key ids** (`akey_` / `pkey_`), or keep `key_` for both with the actor's `type` disambiguating? Separate is clearer in logs; `key_` matches the docs.
-3. **Project slugs** for dashboard URLs (`/projects/acme`) as well as `prj_` ids?
+1. ~~**Checksummed tokens?**~~ Decided (2026-10-29): yes, [as above](#checksums).
+2. ~~**Separate prefixes for admin and profile key ids?**~~ Decided (2026-10-29): keep `key_` for every key id. All keys live in one `api_keys` table, the actor's `type` says which kind, and `key_` matches the docs.
+3. ~~**Project slugs for dashboard URLs?**~~ Decided (2026-10-29): URLs use the `prj_` id; a project's slug only redirects to it, so renaming never breaks a link ([dashboard/navigation-and-layout](../dashboard/navigation-and-layout.md)).

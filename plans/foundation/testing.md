@@ -162,5 +162,5 @@ Nightly, and before every release:
 ## Open questions
 
 1. Real-cluster infrastructure: whose cloud account, what budget, and which arm64 provider?
-2. Real agent turns nightly cost money: a capped key per provider, or record and replay ACP sessions from real runs?
-3. `kin-openapi` or `libopenapi-validator` (better 3.1 support) for conformance?
+2. ~~**Real agent turns nightly.**~~ Decided (2026-10-29): both. CI replays ACP sessions recorded from real runs; the nightly job runs one real turn per provider with a capped key.
+3. **`kin-openapi` or `libopenapi-validator`** for conformance. Spike (M0): run both against the OpenAPI 3.1 document in the generator spike; the one that validates every request and response the conformance tests make, with 3.1 features, wins.

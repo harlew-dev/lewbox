@@ -54,7 +54,7 @@ A sandbox is an isolated Linux machine that a profile creates on one of its proj
 | Lease of 60 s renewed every 20 s by HTTP `PATCH operations/{op}` | The job system's heartbeat on the job row |
 | Reconciler and session watcher run on every replica; duplicates refused by the app's preconditions | Run once, on the leader. Preconditions kept, as a defence, not the mechanism |
 | Status changes raised webhooks from Eloquent model hooks (`saving`/`saved`) | One `Transition` function, which writes the event rows in the same transaction |
-| Start and stop as `PATCH status`, and also as `POST …/operations` | One way: `POST /v0/sandboxes/{sbx}/operations` with `kind` ([lifecycle](sandboxes/lifecycle.md#api); open question) |
+| Start and stop as `PATCH status`, and also as `POST …/operations` | One way: `POST /v0/sandboxes/{sbx}/operations` with `kind` ([lifecycle](sandboxes/lifecycle.md#api); decided 2026-10-29) |
 | Admin API couldn't create sandboxes; the dashboard reserved them through its own path (`ReserveSandbox::forProfile`) | One create. A profile key creates for its profile; an admin key or the dashboard names the `profile` |
 | Workarounds for AerolVM in the gateway: `container_command`, exit-status traps, phrase-matched capacity errors | Fixed in [our fork](clusters/aerolvm-fork.md); Lewbox requires the fork release with the fixes and carries no workarounds ([D15](README.md#decisions)) |
 | Snapshots never flattened; layers stack up to overlayfs's ~127 limit | Flattened when a sandbox's snapshot passes a layer threshold ([persistence](sandboxes/persistence.md#layers)) |
@@ -104,7 +104,7 @@ All of it is in the alpha. M1 builds lifecycle, operations, persistence, the set
 
 ## Open questions
 
-1. **Start and stop as `PATCH status`, or only `POST …/operations`?** The public docs show both. Proposed: only operations, as one way is simpler for SDKs and docs ([lifecycle](sandboxes/lifecycle.md#open-questions)).
-2. **Moving a sandbox to another cluster.** Lewagent asked for it later. A stopped, persisted sandbox is a snapshot in a cluster's registry; moving it means copying layers between buckets. Later.
+1. ~~**Start and stop as `PATCH status`, or only `POST …/operations`?**~~ Decided (2026-10-29): only `POST /v0/sandboxes/{sbx}/operations` (`start`, `stop`, `restart`); `PATCH` with `status` is dropped, and `PATCH` changes settings only ([lifecycle](sandboxes/lifecycle.md#open-questions)).
+2. **Moving a sandbox to another cluster.** Deferred (Later): copying a persisted sandbox's snapshot layers between clusters' buckets; Lewagent asked for it later.
 3. ~~**Memory snapshots.**~~ Decided (2026-10-29): no; memory can't be scrubbed of credentials ([persistence](sandboxes/persistence.md#open-questions)).
-4. **Upgrading a sandbox to a newer template build.** Sandboxes keep their build for life; Lewagent's computers never get template updates ([templates/builds](templates/builds.md#open-questions)).
+4. **Upgrading a sandbox to a newer template build.** Deferred (Beta): an `upgrade` operation that makes a fresh sandbox from the new build and copies the workspace over. In the alpha, sandboxes keep their build for life, and Lewagent makes a new computer to pick up a new build ([templates/builds](templates/builds.md#open-questions)).

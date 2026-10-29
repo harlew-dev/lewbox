@@ -99,7 +99,7 @@ create unique index on project_invitations (project_id, email) where accepted_at
 ### Invitations
 
 1. An owner or admin invites by email and role (`POST /v0/projects/{prj}/invitations`). Admins can't invite owners. Inviting someone already a member is `409 already_member`; re-inviting a pending email replaces the old invitation (new token, new expiry).
-2. Lewbox emails a link, `{instance}/invitations/{token}`, naming the project and who invited them. The token (`lbv_` + 64 hex) is stored hashed.
+2. Lewbox emails a link, `{instance}/invitations/{token}`, naming the project and who invited them. The token (`lbv_` + 58 hex + 6-character checksum, [foundation/ids-and-keys](../foundation/ids-and-keys.md)) is stored hashed.
 3. Opening the link shows the project and the role, and a button to accept. If the person isn't signed in, they sign in (or sign up) with a code **to the invited address**; sign-up is allowed for an invited email even on an `invite_only` instance ([instance-administration](instance-administration.md#policies)).
 4. Accepting checks the signed-in user's email matches the invitation's (case-insensitively), then makes them a member with the role, in one transaction with the audit event. A different signed-in email is refused with `403 invitation_email_mismatch`, saying which address it was for.
 5. Signed-in users also see pending invitations to their address in the dashboard (`GET /v0/me/invitations`), and can accept there without the link (`POST /v0/me/invitations/{inv}/acceptance`) or decline.
@@ -181,6 +181,6 @@ Package `internal/members`; the action map in `internal/auth/roles.go`.
 
 ## Open questions
 
-1. **Viewer in the alpha?** Or ship owner, admin and member, and add viewer when someone needs it?
-2. **Restricting members to profiles.** An agency might want a contractor to see one customer's profile only. Per-profile membership is a big change to every query; defer?
-3. **Admin keys acting for a member.** Should an admin key's audit entries name a member (e.g. Lewagent's user) via a header, so the audit log shows the person behind it?
+1. ~~**Viewer in the alpha?**~~ Decided (2026-10-29): yes, ship owner, admin, member and viewer. Only owners and admins manage clusters and nodes; members and viewers read them (the table above).
+2. **Restricting members to profiles.** Deferred (Later): per-profile membership touches every query; a project per customer covers it today.
+3. **Admin keys acting for a member.** Deferred (Beta): an optional `Lewbox-On-Behalf-Of` header naming a member, recorded in audit entries beside the admin key, once Lewagent wants it.

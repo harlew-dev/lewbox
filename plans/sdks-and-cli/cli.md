@@ -47,7 +47,7 @@ AerolVM ships a CLI and an MCP server in one binary; legacy's `docs/sdks.md` (op
 | `sandboxes list [--status] [--cluster] [--metadata K=V]… [--limit N]` | | `GET /v0/sandboxes` |
 | `sandboxes get SBX` | | `GET /v0/sandboxes/{sbx}` |
 | `sandboxes update SBX [--metadata K=V]… [--unset-metadata K]… [--idle-timeout S|none] [--lifetime S|none]` | | `PATCH` |
-| `sandboxes start|stop|restart SBX [--no-wait]` | Waits for the operation | `PATCH` / `POST …/operations` |
+| `sandboxes start|stop|restart SBX [--no-wait]` | Waits for the operation | `POST …/operations` |
 | `sandboxes delete SBX [--no-wait] [--yes]` | Asks to confirm on a terminal | `DELETE` |
 | `sandboxes keys create SBX [--permission P]…` | Makes a sandbox key; prints the token | `POST …/keys` |
 | `operations get SBX OP` | | `GET …/operations/{op}` |

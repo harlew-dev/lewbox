@@ -143,6 +143,8 @@ A **partial apply** runs the same script for named steps only, without the globa
 | Before a stop that Lewbox or a user asks for | Harvest, then cleanup | Steps `harvested`, `setup_cleaned` ([operations](operations.md#stop)) |
 | Before any snapshot, whatever stopped it | Scrub on the node, and verify | Step `scrubbed` ([below](#credentials-never-enter-a-snapshot)) |
 
+Steps' **checks** (`claude auth status`, `codex login status`) run on create and when the step's credentials change, not on every start, since they add seconds to each (decided 2026-10-29); a start reports the step's last check.
+
 ### Cleanup
 
 - Runs before every stop that's asked for (not before a restart, which takes no snapshot, nor a delete), after the [harvest](#harvest-first), and clears `/run/lewbox/`.
@@ -309,13 +311,9 @@ No endpoints of its own: `setup` on the sandbox object, the `sandbox.setup_appli
 
 ## Open questions
 
-1. **JSON merge without tools.** The script needs to merge into `~/.claude.json`, and `sh`+`awk` merging of arbitrary JSON is fragile. Options:
-   - upload `lewbox agentd` (already a static binary we put in sandboxes for agents) and run `lewbox agentd json-merge`;
-   - do the merge in the control plane: read the file, merge, write it back. That's two toolbox calls, and races with the CLI writing it.
-
-   Proposed: the agentd binary, installed at the start of setup if missing ([agents/agentd](../agents/agentd.md)).
-2. **Profile env variables.** Should profiles have their own env that every sandbox gets (beside the sandbox's create-time `env`)? Lewagent writes `.env` files itself; a profile-wide env would cover API tokens for tools. Later?
-3. **Per-conversation setup** (Lewagent's ask: `env`, skills, MCP servers, allowed tools per conversation) belongs to [agents](../agents.md), not here, but may reuse the file-writing machinery.
-4. **Check cost.** `claude auth status` and `codex login status` add a few seconds to every start. Run checks only on create and when credentials change, not on every start?
-5. **Codex and the symlink.** Does Codex write `auth.json` in place (keeping the link) or by renaming a new file over it? Either is handled, but in place is better: a refreshed login then never touches disk. A spike before M3; if it renames, consider `CODEX_HOME` on `/run/lewbox` with its sessions directory linked back to disk, as conversations resume from those transcripts ([agents/agentd](../agents/agentd.md#files-on-disk)).
-6. **Codex API keys as a file.** Writing `{"OPENAI_API_KEY": …}` ourselves instead of `codex login --with-api-key` depends on Codex's `auth.json` shape, which isn't a public contract. Pin it with a check in the adapter-version tests.
+1. ~~**JSON merge without tools.**~~ Decided (2026-10-29): `lewbox agentd json-merge`, using the agentd binary already put in sandboxes, installed at the start of setup if missing ([agents/agentd](../agents/agentd.md)). No `sh`+`awk` merging, and no read-merge-write from the control plane.
+2. **Profile env variables.** Deferred (Later): a profile-wide `env` every sandbox gets, beside the create-time `env`.
+3. ~~**Per-conversation setup**~~ (`env`, skills, MCP servers, allowed tools per conversation). Decided (2026-10-29): owned by [agents](../agents.md), reusing this plan's file-writing machinery.
+4. ~~**Check cost.**~~ Decided (2026-10-29): run `claude auth status` and `codex login status` only on create and when credentials change, not on every start.
+5. **Codex and the symlink.** Spike (M3, before agent setup is built): does Codex write `auth.json` in place (keeping the link into `/run/lewbox`) or rename a new file over it? In place: nothing changes. Renamed: put `CODEX_HOME` on `/run/lewbox` with its sessions directory linked back to disk ([agents/agentd](../agents/agentd.md#files-on-disk)).
+6. ~~**Codex API keys as a file.**~~ Decided (2026-10-29): write `{"OPENAI_API_KEY": …}` ourselves, and pin `auth.json`'s shape with a check in the adapter-version tests, which fail an adapter upgrade that changes it.

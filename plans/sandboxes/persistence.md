@@ -262,8 +262,8 @@ AerolVM settings on nodes (written by the node agent): `SB_SNAPSHOT_PUSH_ENABLED
 
 ## Open questions
 
-1. **Recoverable deletes.** Keep a deleted sandbox's latest snapshot for the grace period so an instance admin can undelete it? Proposed: yes for admins only, no API for it.
+1. ~~**Recoverable deletes.**~~ Decided (2026-10-29): keep a deleted sandbox's latest snapshot for the grace period so an instance admin can undelete it; admins only, no API for it.
 2. ~~**Pause with memory.**~~ Decided (2026-10-29): no. Memory can't be scrubbed of credentials, so it's never snapshotted ([profile-setup](profile-setup.md#memory-is-never-snapshotted)).
-3. **Squash threshold.** 32 is a guess. Measure stop and start times against layer depth on a live cluster.
-4. **Credits for stopped storage.** Charge credits for snapshot size while stopped ([credits](../credits.md))? That needs `size_bytes`, which F14 gives.
-5. **Changing `persist`** after create: from `false` to `true` is cheap (it changes the timers and the storage check). Allow it?
+3. **Squash threshold.** Spike (M1): measure stop and start times against layer depth on a live Docker cluster; the knee of the curve sets `LEWBOX_SNAPSHOT_MAX_LAYERS` (32 until then).
+4. **Credits for stopped storage.** Deferred (Beta, with the `credits` plugin): charge for snapshot size while stopped, using `size_bytes` from the fork.
+5. **Changing `persist`** after create. Deferred (Beta): allow `false` → `true` only (it changes the timers and the storage check); `true` → `false` stays refused.

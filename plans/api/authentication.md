@@ -24,7 +24,7 @@ How Lewbox knows who is calling: the five principals of the API (user sessions, 
 
 | | |
 |---|---|
-| **Keep** | Prefixed tokens of 64 lowercase hex characters, stored as SHA-256 with their last four; shown once. Bearer header; `lewbox.bearer` WebSocket subprotocol. Sandbox keys for browsers, 15 minutes, a subset of their maker's permissions. Expiry on keys. Passwordless sign-in by emailed code |
+| **Change** | Prefixed tokens, now `<prefix>_<58 lowercase hex><6 base62 checksum>` (was 64 hex), stored as SHA-256 with their last four; shown once. Bearer header; `lewbox.bearer` WebSocket subprotocol. Sandbox keys for browsers, 15 minutes, a subset of their maker's permissions. Expiry on keys. Passwordless sign-in by emailed code |
 | **Change** | `lbt_` tenant keys → `lba_` admin keys, which also reach sandboxes ([api](../api.md#decisions)) |
 | **Change** | Key lookup from the database, cached a few seconds and invalidated by `NOTIFY`, instead of 60 s over HTTP |
 | **Change** | Separate signing keys for port links and agentd tokens, each with a key id for rotation |
@@ -40,13 +40,13 @@ How Lewbox knows who is calling: the five principals of the API (user sessions, 
 | Principal | Credential | Format | Stored as | Lifetime | Made by |
 |---|---|---|---|---|---|
 | User session | Cookie `__Host-lewbox_session` | 32 random bytes, base64url | SHA-256, in `user_sessions` | 30 days, sliding; 7 days idle | Signing in ([projects/users-and-login](../projects/users-and-login.md)) |
-| Admin key | `Authorization: Bearer lba_…` | `lba_` + 64 lowercase hex | SHA-256 + last four, in `api_keys` | Until revoked, or its `expires_at` | A project owner or admin, in the dashboard only |
-| Profile key | `Authorization: Bearer lbp_…` | `lbp_` + 64 hex | as above | as above | Sessions and admin keys, `POST …/profiles/{prf}/keys` |
-| Sandbox key | `Authorization: Bearer lbs_…` | `lbs_` + 64 hex | as above | 15 minutes (`LEWBOX_SANDBOX_KEY_TTL`) | Sessions, admin keys, profile keys: `POST /v0/sandboxes/{sbx}/keys` |
-| Setup link | In the URL: `https://<instance>/setup#lbl_…` | `lbl_` + 64 hex | SHA-256, in `profile_setup_links` | 7 days, until first used | Sessions, admin keys |
+| Admin key | `Authorization: Bearer lba_…` | `lba_` + 58 hex + 6-character checksum | SHA-256 + last four, in `api_keys` | Until revoked, or its `expires_at` | A project owner or admin, in the dashboard only |
+| Profile key | `Authorization: Bearer lbp_…` | `lbp_` + 58 hex + 6-character checksum | as above | as above | Sessions and admin keys, `POST …/profiles/{prf}/keys` |
+| Sandbox key | `Authorization: Bearer lbs_…` | `lbs_` + 58 hex + 6-character checksum | as above | 15 minutes (`LEWBOX_SANDBOX_KEY_TTL`) | Sessions, admin keys, profile keys: `POST /v0/sandboxes/{sbx}/keys` |
+| Setup link | In the URL: `https://<instance>/setup#lbl_…` | `lbl_` + 58 hex + 6-character checksum | SHA-256, in `profile_setup_links` | 7 days, until first used | Sessions, admin keys |
 | Setup session | Cookie `__Host-lewbox_setup` | 32 random bytes | SHA-256 | 1 hour from the link's use, not sliding | Exchanging a setup link, `POST /v0/setup-sessions` |
-| Install token | `Authorization: Bearer lbi_…` on `/node/v0` | `lbi_` + 64 hex | SHA-256, and encrypted so the command can be shown again | Until the installation finishes, is cancelled, or 7 days | Creating a cluster installation |
-| Node token | `Authorization: Bearer lbn_…` on `/node/v0` | `lbn_` + 64 hex | SHA-256 | Until the node is removed; rotatable | Enrollment |
+| Install token | `Authorization: Bearer lbi_…` on `/node/v0` | `lbi_` + 58 hex + 6-character checksum | SHA-256, and encrypted so the command can be shown again | Until the installation finishes, is cancelled, or 7 days | Creating a cluster installation |
+| Node token | `Authorization: Bearer lbn_…` on `/node/v0` | `lbn_` + 58 hex + 6-character checksum | SHA-256 | Until the node is removed; rotatable | Enrollment |
 | agentd token | `Authorization: Bearer <token>` on `/agentd/v0` | `v1.<base64url claims>.<base64url Ed25519 sig>` | Not stored: verified by signature | 24 hours, renewed with each prompt | The control plane, when it prompts agentd |
 | Port link | In the link URL | as agentd tokens, audience `portd` | Not stored | 60 seconds to open; its browser session 12 hours | `POST …/ports/{port}/links` ([inside-a-sandbox](../inside-a-sandbox.md)) |
 
@@ -91,7 +91,7 @@ If a request carries both a bearer token and a cookie, the bearer token wins and
 `internal/auth.Authenticate(r) (Principal, error)`:
 
 1. **Find the credential**: the `Authorization` header, else the `lewbox.bearer` subprotocol on a WebSocket, else the surface's cookie. None: `401 unauthenticated`.
-2. **Check the shape** without touching the database: a known prefix and 64 lowercase hex. Anything else: `401 invalid_key`. The surface decides which prefixes it accepts: `/node/v0` only `lbi_`/`lbn_`; `/agentd/v0` only agentd tokens; `/v0` only `lba_`, `lbp_`, `lbs_` and cookies. A node token on `/v0` is `401 invalid_key` (not `wrong_key_kind`; it's not an API credential at all).
+2. **Check the shape** without touching the database: a known prefix, 58 lowercase hex and a matching 6-character checksum ([foundation/ids-and-keys](../foundation/ids-and-keys.md#checksums)). Anything else: `401 invalid_key`. The surface decides which prefixes it accepts: `/node/v0` only `lbi_`/`lbn_`; `/agentd/v0` only agentd tokens; `/v0` only `lba_`, `lbp_`, `lbs_` and cookies. A node token on `/v0` is `401 invalid_key` (not `wrong_key_kind`; it's not an API credential at all).
 3. **Hash** with SHA-256. From here only the hash is used.
 4. **Look it up** in the [cache](#the-cache), else in Postgres, with its project, profile, sandbox and their statuses in one query.
 5. **Decide**:
@@ -248,7 +248,7 @@ Tasks, M0: tokens and `api_keys`; principal and middleware; cache and invalidati
 
 ## Open questions
 
-1. **Token checksums.** GitHub's tokens end in a CRC32 so scanners can reject false positives offline. Add 6 checksum characters (`lbp_<58 hex><6 base62>`)? It changes the format the README fixes. (Proposed: yes, before the alpha, since formats are hard to change later.)
-2. **The dashboard inside sandboxes**: use the session cookie directly on inside-sandbox routes (simpler, one fewer mint) or keep minting sandbox keys (same path as embedders)? (Proposed: session directly, sandbox keys only for WebSockets to other origins.)
-3. **Re-authentication** for dangerous actions: worth the friction in the alpha? (Proposed: yes for admin keys and project deletion only.)
-4. **Passkeys / OIDC** for sign-in: Later, or Beta for self-hosters who want SSO?
+1. ~~**Token checksums.**~~ Decided (2026-10-29): yes, before the alpha: `<prefix>_<58 lowercase hex><6 base62>`, registered with GitHub secret scanning ([foundation/ids-and-keys](../foundation/ids-and-keys.md#checksums)).
+2. ~~**The dashboard inside sandboxes.**~~ Decided (2026-10-29): the session cookie works directly on inside-sandbox routes; sandbox keys only for WebSockets to other origins.
+3. ~~**Re-authentication for dangerous actions.**~~ Decided (2026-10-29): yes, for making admin keys and deleting projects only.
+4. ~~**Sign-in methods.**~~ Decided (2026-10-29): the alpha signs in by emailed code only. GitHub OAuth and passkeys come in the Beta; generic OIDC (SSO for self-hosters) is Later.

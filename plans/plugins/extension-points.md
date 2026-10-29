@@ -358,6 +358,6 @@ Optional checks `/ready` runs ([foundation/observability](../foundation/observab
 
 ## Open questions
 
-1. **Admission budget.** 250 ms with the profile row locked: enough for `credits`' balance check (one indexed read and an insert)? Measure in M1 with `limits`.
-2. **Lifecycle ordering across kinds.** Per-sandbox order is guaranteed; does any handler need per-profile order (credits' exhaustion across several sandboxes)? Proposed: no, credits recomputes from the ledger.
-3. **Profile-level plugin settings.** Needed by any first-party plugin in the alpha? `telemetry` has its own routes. Proposed: build the scope, use it when a plugin needs it.
+1. **Admission budget.** Spike (M1): measure the create transaction with `limits`' checks under the profile row lock; 250 ms stands if `credits`' balance check (one indexed read and an insert) fits with room to spare.
+2. ~~**Lifecycle ordering across kinds.**~~ Decided (2026-10-29): per-sandbox order only; `credits` recomputes from its ledger, so no handler needs per-profile order.
+3. ~~**Profile-level plugin settings.**~~ Decided (2026-10-29): the scope is built in M0 and used when a plugin needs it; no first-party plugin needs it in the alpha (`telemetry` has its own routes).
