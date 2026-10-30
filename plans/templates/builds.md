@@ -1,6 +1,6 @@
 # Builds
 
-> Status: Draft · Milestone: Alpha (M1, Dockerfile builds as legacy); build contexts and BuildKit after the alpha (fork F30, F29); Firecracker templates later · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1, Dockerfile builds as legacy); build contexts and BuildKit after the alpha (fork F30, F29); Firecracker templates later · Updated: 2026-10-30
 
 A build is one template built on one cluster: its Dockerfile, with its build context, built by AerolVM on one of the cluster's nodes and pushed to the cluster's registry. Each template has a build per cluster it's for, and a new one there each time it's rebuilt. This plan covers when builds happen, the `build_template` operation, build contexts, the registry path, sizes, logs, failures, which build a sandbox uses, and the Firecracker conversion for clusters offering `microvm`.
 
@@ -55,9 +55,15 @@ A build is one template built on one cluster: its Dockerfile, with its build con
 | A cluster becomes ready (first node online with cloud storage) | Every template meant for it that has no build of its current definition there |
 | A built-in template's definition changes (on startup) | Where it's needed ([provided-templates](provided-templates.md)) |
 
-A cluster is **ready for builds** when it has cloud storage, at least one online node with the `docker` runtime, and isn't suspended.
+For object-backed templates, a cluster is **ready for builds** when it has cloud storage, at least one online node with the `docker` runtime, and isn't suspended.
 
 `templates.QueueBuilds(template, clusters, rebuild)` runs in a transaction holding the template row. It inserts a `template_builds` row (`pending`) with the definition snapshot (Dockerfile, context digest, build args), plus its `build_template` operation and job ([sandboxes/operations](../sandboxes/operations.md)).
+
+### Cached builds
+
+For [admin-controlled `cached` templates](../templates.md#local-template-storage), cloud storage is optional. Build on an online Docker node with enough disk using `push: false`; retain and pin the complete local artifact before marking it ready. Record the storage mode on the build when queued, plus artifact digest, retained disk bytes and holder nodes. Measure size locally rather than from the bucket. The no-cloud-storage failure in the operation below applies only to object-backed builds.
+
+Reconcile holder inventory after restarts and node loss. Placement requires a healthy holder of the selected build, including the converted artifact for Firecracker. With no holder, report `template_unavailable` / `cache_unavailable`. Local copies follow the same live-reference and grace-period rules as registry builds; cleanup unpins and deletes them only when no longer needed. Sandbox snapshot offload remains governed by the sandbox's persistence policy.
 
 ### Build contexts
 
@@ -115,7 +121,9 @@ A resumed build (after a crash) **starts again**. The cache makes that cheap whe
 | `status` | string | `pending`, `building`, `ready`, `failed` |
 | `dockerfile_digest` | string | **New.** sha256 of the Dockerfile it built |
 | `context` | string or null | **New.** The context digest |
-| `size_bytes` | integer or null | Compressed size in the registry (was `size_mb`) |
+| `cached` | boolean | Storage mode captured when queued |
+| `cache_nodes` | array | Healthy verified holders; empty for object-backed builds |
+| `size_bytes` | integer or null | Registry bytes or retained local artifact bytes |
 | `error` | string or null | |
 | `error_code` | string or null | `build_failed`, `cluster_capacity_exceeded`, `cluster_unavailable`, `operation_failed` |
 | `operation` | string | `op_…` |
@@ -182,6 +190,7 @@ CREATE TABLE template_builds (
   context_digest    text REFERENCES template_contexts (digest),
   build_args        jsonb NOT NULL DEFAULT '{}',
   buildkit          boolean NOT NULL,
+  cached            boolean NOT NULL DEFAULT false, -- captured when queued
   image             text,                          -- registry reference
   image_digest      text,
   size_bytes        bigint,
@@ -192,6 +201,14 @@ CREATE TABLE template_builds (
   created_at        timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ON template_builds (template_id, cluster_id, status, finished_at DESC);
+
+CREATE TABLE template_build_cache_nodes (
+  build_id bigint NOT NULL REFERENCES template_builds ON DELETE CASCADE,
+  node_id bigint NOT NULL REFERENCES nodes,
+  size_bytes bigint NOT NULL,
+  verified_at timestamptz NOT NULL,
+  PRIMARY KEY (build_id, node_id)
+);
 
 CREATE TABLE template_build_logs (
   build_id  bigint NOT NULL REFERENCES template_builds ON DELETE CASCADE,
@@ -252,6 +269,7 @@ Rebuilding a built-in template is for instance admins only (`403` otherwise).
 | B2 | Build API streams logs (NDJSON), ending with a result object with `error_code` (`build_failed`, `push_failed`, `capacity_exceeded`), `image_digest` and `size_bytes` | Logs; codes instead of phrases; sizes without reading the bucket |
 | B3 | `buildkit: true` (Docker's `/build?version=2`, or a BuildKit daemon) and `no_cache` | Modern Dockerfiles; skipping the cache |
 | B4 | Builds isolated from the host: rootless BuildKit, or builds inside a gVisor sandbox | Profile templates on shared nodes |
+| B6 | Local builds without registry push; durable pin/unpin, artifact inventory and placement restricted to holders, including Firecracker artifacts | `cached` templates; fork F56 |
 | B5 | Firecracker template from a pushed image, per cluster | Templates on Firecracker clusters |
 
 These map to the fork backlog: B1 is F30 and B3 is F29 (both P2), B2 is F32/F33 (P1), B5 is F26/F27 (Firecracker, later). **Contexts and BuildKit come after the alpha:** until B1 and B3 are in Lewbox's minimum fork release, they're refused for the whole instance (`validation_failed`: "Build contexts aren't available on this instance yet."), and builds work as legacy's do: a Dockerfile alone, the classic builder. There's no per-cluster detection ([clusters/aerolvm-fork](../clusters/aerolvm-fork.md#versions-in-lewbox)).
@@ -262,6 +280,7 @@ These map to the fork backlog: B1 is F30 and B3 is F29 (both P2), B2 is F32/F33 
 - **Queueing:** creates, rebuilds (skipping in-progress clusters), new clusters, cluster access changes, and concurrency (two saves).
 - **Contexts:** upload limits, traversal, dedupe, scoping, garbage collection.
 - **Logs:** replay plus follow across two replicas; truncation keeping start and end.
+- **Cached builds:** no bucket or push, admin permissions, pinning through restart and cleanup, holder-only placement, disk-full failure, node loss, storage-mode changes, and safe unpin after retention.
 - **Resolution:** latest ready wins, and each `template_unavailable` reason.
 - **Live:** build Lewagent's `lewagent-computer` with its directory as context (no inlining) on a gVisor cluster, and time it.
 

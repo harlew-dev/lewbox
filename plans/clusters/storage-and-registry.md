@@ -206,6 +206,8 @@ The bucket's size is the project's cost, so Lewbox shows it:
 
 ### Without storage
 
+**Planned exception:** admin-controlled [`cached` templates](../templates.md#local-template-storage) retain artifacts on node disk without a bucket once fork F56 is supported. The template restrictions below apply to object-backed builds. Local retention requires holder-aware placement and pinning; it does not enable sandbox persistence without storage.
+
 A cluster without a bucket:
 
 - refuses `persist: true` (`422 persistence_unsupported`, with `reason: no_cloud_storage`): stopping a sandbox deletes it;

@@ -1,6 +1,6 @@
 # Templates
 
-> Status: Draft · Milestone: Alpha (M1) for project and built-in templates; profile templates M4 if time allows, else Beta · Core · Updated: 2026-10-29
+> Status: Draft · Milestone: Alpha (M1) for project and built-in templates; profile templates M4 if time allows, else Beta · Core · Updated: 2026-10-30
 
 A template is a container image built from a Dockerfile, so sandboxes start with their tools installed: Claude Code, a desktop, a language toolchain. A template is built separately on each cluster it's for, into that cluster's registry, and a sandbox created from it runs its **latest ready build** there, keeping that build for life. This plan covers the kinds of template, their fields, which a profile can use, and how they're managed. The parts cover builds, the Dockerfile rules, and the templates Lewbox defines itself.
 
@@ -68,6 +68,7 @@ The project's templates plus its own, on the clusters the key reaches. A create 
 | `profile` | string or null | For `profile` templates, the `prf_` id (shown to admin keys) |
 | `dockerfile` | string or null | Null to profile keys for project templates |
 | `context` | object or null | **New.** `{digest, size_bytes}` of the build context, or null |
+| `cached` | boolean | Default `false`; admin-controlled local storage for the template artifact ([below](#local-template-storage)) |
 | `build_args` | object | **New.** `ARG` values passed to builds (not secret; shown) |
 | `ports` | array | `{port, protocol, access}`, up to 20; none from 61000 to 61999 |
 | `cpu`, `memory_mb`, `disk_gb` | number or null | Defaults for its sandboxes; null for Lewbox's |
@@ -78,6 +79,16 @@ The project's templates plus its own, on the clusters the key reaches. A create 
 | `clusters` | object | `{access: "all" \| "restricted", list: [{id, name}]}` |
 | `builds` | array | Its builds on the clusters the key reaches, newest first per cluster ([builds](templates/builds.md#the-build-object)) |
 | `created_at`, `updated_at` | string | |
+
+## Local template storage
+
+- **`cached: false` (default):** push builds to the cluster's S3/R2-backed registry; nodes pull them when needed.
+- **`cached: true`:** store the built template image or Firecracker template snapshot on node disk instead of offloading it to object storage. Pin the complete artifact against image cleanup. These builds do not require a bucket. This setting covers template artifacts; snapshots of sandboxes created from them still follow the sandbox's persistence policy.
+- **Control:** project admins in the dashboard and admin keys can set it for project and profile templates. Built-ins remain instance-admin controlled. Include it in template responses and JSON export/import, enforcing the same write permissions on import.
+- **Placement:** record healthy holder nodes per build and place new sandboxes only on nodes with the selected build's complete artifact. Additional nodes need a build or explicit artifact replication before becoming eligible. If no holder is available, return `template_unavailable` with `reason: cache_unavailable`; do not silently fall back to S3/R2 or a different build.
+- **Changes and retention:** changing the setting queues replacement builds that capture the new storage mode. Keep the previous ready build usable while its replacement builds. Existing sandboxes keep their original build. Unpin and delete local artifacts only when the normal live-build and grace-period rules permit it. Disk pressure refuses new cache work rather than evicting artifacts still needed. Show retained bytes, holder nodes and failures on the template page.
+- **Durability:** retained artifacts survive service restarts. Losing a disk can lose its template artifacts; mark those copies unavailable and rebuild from the definition. Sandboxes relying on lost artifacts may be unable to resume. Explain this tradeoff beside the dashboard setting.
+- **Delivery:** depends on fork support for local builds, artifact inventory, pinning and placement (B6 / F56). Until it is in the minimum supported fork release, reject `cached: true` with `422 validation_failed`. This is separate from Docker's build cache and the rebuild option `no_cache`.
 
 ## Data model
 
@@ -93,6 +104,7 @@ CREATE TABLE templates (
   name            text NOT NULL,
   dockerfile      text NOT NULL,
   context_digest  text REFERENCES template_contexts (digest),
+  cached          boolean NOT NULL DEFAULT false,
   build_args      jsonb NOT NULL DEFAULT '{}',
   ports           jsonb NOT NULL DEFAULT '[]',
   cpu_millis      integer,
@@ -128,14 +140,14 @@ One API for both kinds of key. What a key sees and makes depends on its kind:
 | `GET /v0/templates` | The project's templates and its own. Filter `cluster` | All the project's templates and every profile's. Filters: `kind`, `profile`, `cluster` |
 | `GET /v0/templates/{tpl}` | One it can use | Any in the project |
 | `POST /v0/templates` | Makes a `profile` template (`templates.create`) | Makes a `project` template, or a `profile` one by naming `profile` |
-| `PATCH /v0/templates/{tpl}` | Its own: `name`, `ports`, defaults, `env`, `hooks`, `stop_grace`, `scrub` | Any: also `clusters` (adding a cluster builds there) |
+| `PATCH /v0/templates/{tpl}` | Its own: `name`, `ports`, defaults, `env`, `hooks`, `stop_grace`, `scrub` | Any: also `cached` and `clusters` (adding a cluster builds there) |
 | `DELETE /v0/templates/{tpl}` | Its own (`templates.delete`) | Any |
 | `POST /v0/templates/{tpl}/builds` | Rebuild its own (`templates.create`) | Rebuild any |
 | `GET /v0/templates/{tpl}/builds/{bld}` | | |
 | `GET /v0/templates/{tpl}/builds/{bld}/log` | Text, or SSE with `Accept: text/event-stream` to follow ([builds](templates/builds.md#logs)) | |
 | `POST /v0/template-contexts` | Upload a context tarball; answers its digest ([builds](templates/builds.md#build-contexts)) | |
 
-`POST /v0/templates` fields: `id`, `name`, `dockerfile`, `context` (a digest), `build_args`, `ports`, `cpu`, `memory_mb`, `disk_gb`, `env`, `hooks`, `stop_grace`, `scrub`, `clusters` (`"all"` or a list). Setting `hooks` or `scrub` needs `sandboxes.exec` beside `templates.create`, as on a sandbox. It also accepts `Idempotency-Key`. It answers `202` with the template and its `pending` builds.
+`POST /v0/templates` fields: `id`, `name`, `dockerfile`, `context` (a digest), `build_args`, `ports`, `cpu`, `memory_mb`, `disk_gb`, `env`, `hooks`, `stop_grace`, `scrub`, `clusters` (`"all"` or a list). Setting `hooks` or `scrub` needs `sandboxes.exec` beside `templates.create`, as on a sandbox. Admin creates also accept `cached`. Profile keys cannot set or change it, even on their own templates (`403 permission_denied`). It also accepts `Idempotency-Key`. It answers `202` with the template and its `pending` builds.
 
 Errors:
 - `422 validation_failed`: the id is taken or reserved, Dockerfile problems (with the line), a cluster the key doesn't reach or without storage.
@@ -170,7 +182,7 @@ Covered in [builds](templates/builds.md#observability). Webhooks: `template.buil
 
 ## Testing
 
-Per part. Plus: the visibility matrix (which keys see and use which kinds), id uniqueness across project and profile templates, and reserved ids.
+Per part. Plus: admin-only `cached` writes (including import), default `false`, mode changes preserving live builds, and the visibility matrix (which keys see and use which kinds), id uniqueness across project and profile templates, and reserved ids.
 
 ## Build plan
 
