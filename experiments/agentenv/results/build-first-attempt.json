@@ -1,0 +1,15 @@
+{
+  "release": "v0.2.4",
+  "builds": [
+    {
+      "label": "initial",
+      "elapsed_seconds": 31.0702,
+      "exit_code": 0
+    },
+    {
+      "label": "cached",
+      "elapsed_seconds": 0.0679,
+      "exit_code": 1
+    }
+  ]
+}

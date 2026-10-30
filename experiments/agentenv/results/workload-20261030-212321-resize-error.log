@@ -1,0 +1,21 @@
+overlaybd-resize failed (status=exit status: 1): stdout=2026/10/30 21:33:14.731681|INFO |th=000076A7B3AF8BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll
+2026/10/30 21:33:14.731740|INFO |th=000076A7B3AF8BB0|signal.cpp:265|sync_signal_init:signalfd initialized
+2026/10/30 21:33:14.731805|INFO |th=000076A7B3AF8BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll
+2026/10/30 21:33:14.731982|INFO |th=000076A7B3AF8BB0|image_service.cpp:253|read_global_config_and_set:using config /home/homelab/.local/share/lewbox-agentenv-lab/n/p/overlaybd/resize-overlaybd-global.json
+2026/10/30 21:33:14.732314|INFO |th=000076A7B3AF8BB0|image_service.cpp:274|read_global_config_and_set:audit disabled
+2026/10/30 21:33:14.732332|INFO |th=000076A7B3AF8BB0|image_service.cpp:279|read_global_config_and_set:[global_conf.logConfig().logPath()=/home/homelab/.local/share/lewbox-agentenv-lab/n/p/overlaybd/overlaybd.log]
+2026/10/30 21:33:14.732450|INFO |th=000076A7B3AF8BB0|image_service.cpp:293|read_global_config_and_set:set log_level: 1
+2026/10/30 21:33:14.732453|INFO |th=000076A7B3AF8BB0|image_service.cpp:296|read_global_config_and_set:set log_path: /home/homelab/.local/share/lewbox-agentenv-lab/n/p/overlaybd/overlaybd.log, log_size: 10485760, log_num: 3 stderr=failed to open overlaybd image template_builder=false sandbox_id=01a18ebb-2fa7-75a0-b540-a9b341471ccf
+2026-10-30T21:33:14.774958Z  INFO agentenv: received SIGTERM, starting graceful shutdown
+2026-10-30T21:33:14.775051Z  INFO agentenv: stopping sandboxes before process exit
+2026-10-30T21:33:14.775089Z  INFO shutdown: agentenv::orchestrator::service: orchestrator shutdown requested; stopping all sandboxes
+2026-10-30T21:33:14.776552Z  WARN netlink_packet_route::link::buffer_tool: Specified IFLA_INET6_CONF NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 236, got 240
+2026-10-30T21:33:14.789757Z  WARN netlink_packet_route::link::buffer_tool: Specified IFLA_INET6_CONF NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 236, got 240
+2026-10-30T21:33:14.879247Z  INFO shutdown: agentenv::orchestrator::service: orchestrator shutdown completed
+2026-10-30T21:33:14.879308Z  INFO agentenv: shutting down firecracker pool
+2026-10-30T21:33:14.884181Z  WARN netlink_packet_route::link::buffer_tool: Specified IFLA_INET6_CONF NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 236, got 240
+2026-10-30T21:33:14.904990Z  WARN netlink_packet_route::link::buffer_tool: Specified IFLA_INET6_CONF NLA attribute holds more(most likely new kernel) data which is unknown to netlink-packet-route crate, expecting 236, got 240
+2026-10-30T21:33:14.920926Z  INFO agentenv: shutting down ublk daemon
+2026-10-30T21:33:15.004571Z  INFO uvm_ublk_daemon::client: ublk daemon stopped (expected shutdown) reason=ublk daemon exited: exit status: 0
+2026-10-30T21:33:15.004611Z  INFO agentenv: shutting down overlaybd p2p runtime
+2026-10-30T21:33:15.004616Z  INFO agentenv: shutting down p2p transport

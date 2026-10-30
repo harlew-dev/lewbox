@@ -1,0 +1,171 @@
+{
+  "release": "v0.2.4",
+  "tests": [
+    {
+      "name": "cached_oci_cold_start",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e68-5e61-7c91-b6a8-02afec8ab2c9",
+        "api_seconds": 2.3889
+      },
+      "elapsed_seconds": 2.389
+    },
+    {
+      "name": "guest_resources_and_egress",
+      "passed": true,
+      "detail": {
+        "stdout": "1\nMemTotal:         493284 kB\nMemFree:          460192 kB\nMemAvailable:     464368 kB\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              66043796      8796  62663176   0% /\n134217728\negress-ok\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.1909
+    },
+    {
+      "name": "resource_override_2cpu_768m_65g",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e68-6780-77a2-95ae-359af8db72fb",
+        "api_seconds": 2.4572
+      },
+      "elapsed_seconds": 2.4573
+    },
+    {
+      "name": "larger_guest_resources",
+      "passed": true,
+      "detail": {
+        "stdout": "2\nMemTotal:         750384 kB\n136314880\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              67075924      8796  63642876   0% /\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.0532
+    },
+    {
+      "name": "stdout_stderr_exit42",
+      "passed": true,
+      "detail": {
+        "stdout": "stdout-marker\n",
+        "stderr": "stderr-marker\n",
+        "exit_code": 42
+      },
+      "elapsed_seconds": 0.0552
+    },
+    {
+      "name": "pty_attach_geometry",
+      "passed": true,
+      "detail": {
+        "rows": 40,
+        "columns": 100,
+        "shell_command_observed": true
+      },
+      "elapsed_seconds": 2.0868
+    },
+    {
+      "name": "file_metadata_and_background_process",
+      "passed": true,
+      "detail": {
+        "stdout": "0c130528-ce55-4dab-bc4e-4aad8215e4b1\n1234:2345:640\nowned\n2a1912c367168e584d480d8826b4227af4e321a9bdf11640de11f9d67524d986  /workspace/owned\nsynthetic-lab-canary-no-real-credentials\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.0501
+    },
+    {
+      "name": "upload_download_roundtrip",
+      "passed": true,
+      "detail": {
+        "bytes": 1048576,
+        "sha256": "4f0854cc09261ea3197304b549358dde7bfd03505fa717c715c932c39c68877e"
+      },
+      "elapsed_seconds": 0.1175
+    },
+    {
+      "name": "pause",
+      "passed": true,
+      "detail": {
+        "api_seconds": 0.1204
+      },
+      "elapsed_seconds": 0.1204
+    },
+    {
+      "name": "resume",
+      "passed": true,
+      "detail": {
+        "api_seconds": 0.1526
+      },
+      "elapsed_seconds": 0.1527
+    },
+    {
+      "name": "resume_retains_kernel_process_files",
+      "passed": true,
+      "detail": {
+        "identity": "0c130528-ce55-4dab-bc4e-4aad8215e4b1\nsleep\n1234:2345:640\nowned\n2a1912c367168e584d480d8826b4227af4e321a9bdf11640de11f9d67524d986  /workspace/owned\n"
+      },
+      "elapsed_seconds": 0.0617
+    },
+    {
+      "name": "snapshot_baseline",
+      "passed": true,
+      "detail": {
+        "snapshot_id": "01a18e68-7727-78d3-929d-9fffc5649448",
+        "api_seconds": 1.0009
+      },
+      "elapsed_seconds": 1.001
+    },
+    {
+      "name": "fork_from_hot_snapshot",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e68-7aff-7461-a4f9-48e823870994",
+        "api_seconds": 0.1729
+      },
+      "elapsed_seconds": 0.1731
+    },
+    {
+      "name": "fork_preserves_metadata_process_and_cow",
+      "passed": true,
+      "detail": {
+        "identity": "0c130528-ce55-4dab-bc4e-4aad8215e4b1\nsleep\n1234:2345:640\nowned\n2a1912c367168e584d480d8826b4227af4e321a9bdf11640de11f9d67524d986  /workspace/owned\n",
+        "child_write_isolated": true
+      },
+      "elapsed_seconds": 0.1568
+    },
+    {
+      "name": "write_8m_random_delta",
+      "passed": true,
+      "detail": {
+        "stdout": "e2c578d1c85d140a603a3ef28ea9d725dc585d2aee402289ae8759a838616026  /workspace/random.bin\n",
+        "stderr": "8+0 records in\n8+0 records out\n8388608 bytes (8.0MB) copied, 0.053209 seconds, 150.3MB/s\n",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.1728
+    },
+    {
+      "name": "snapshot_after_8m_delta",
+      "passed": true,
+      "detail": {
+        "snapshot_id": "01a18e68-7d71-7452-a87b-32afab1f609a",
+        "api_seconds": 0.9631
+      },
+      "elapsed_seconds": 0.9632
+    },
+    {
+      "name": "leave_paused_for_restart",
+      "passed": true,
+      "detail": {
+        "api_seconds": 0.1204
+      },
+      "elapsed_seconds": 0.1205
+    }
+  ],
+  "disk_1g_rejection": {
+    "response": {
+      "code": 400,
+      "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/state/firecracker-work/agentenv-fc-aDjaix/overlaybd: requested overlaybd runtime virtual size 1073741824 is smaller than base virtual size 68719476736; shrinking is disabled"
+    },
+    "api_seconds": 1.283
+  },
+  "primary_sandbox_id": "01a18e68-5e61-7c91-b6a8-02afec8ab2c9",
+  "baseline_snapshot_id": "01a18e68-7727-78d3-929d-9fffc5649448",
+  "delta_snapshot_id": "01a18e68-7d71-7452-a87b-32afab1f609a",
+  "passed": true
+}

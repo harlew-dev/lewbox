@@ -1,0 +1,76 @@
+{
+  "release": "v0.2.4",
+  "node_backing_bytes": 75000000000,
+  "allow_shrink": true,
+  "tests": [
+    {
+      "name": "native_s3_failure_keeps_live_data_and_layers",
+      "outcome": "passed",
+      "detail": {
+        "capture_response": {
+          "http_status": 500,
+          "state": null,
+          "message": "backend error: read 'catalog/records/01a18ea7-e125-7d53-be1a-5e456f6ddac4.json'",
+          "elapsed_seconds": 7.8047
+        },
+        "runtime_after_error": {
+          "http_status": 200,
+          "state": "running",
+          "message": null,
+          "elapsed_seconds": 0.0023
+        },
+        "both_files_readable_after_s3_returns": true,
+        "missing_live_layers": []
+      }
+    },
+    {
+      "name": "failed_upload_does_not_commit_new_checkpoint",
+      "outcome": "passed",
+      "detail": {
+        "catalog_records_unchanged": true
+      }
+    },
+    {
+      "name": "native_retry_restores_latest_files",
+      "outcome": "passed",
+      "detail": {
+        "snapshot_id": "01a18ea8-017b-7820-8555-ea33a015a90d",
+        "both_files_verified": true
+      }
+    },
+    {
+      "name": "known_durable_checkpoint_survives_s3_outage",
+      "outcome": "passed",
+      "detail": {
+        "snapshot_id": "01a18ea7-d134-7723-9e0a-5bd8553dc355",
+        "checksum_verified": true
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    }
+  ],
+  "prefix": "faults-20261030-211157/",
+  "scope": "Native checkpoint API while local S3 fixture is unavailable",
+  "real_r2_tested": false,
+  "snapshots": [
+    "01a18ea7-d134-7723-9e0a-5bd8553dc355",
+    "01a18ea8-017b-7820-8555-ea33a015a90d"
+  ],
+  "execution_passed": true,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

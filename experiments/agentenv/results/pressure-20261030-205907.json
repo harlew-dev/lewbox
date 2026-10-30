@@ -1,0 +1,83 @@
+{
+  "release": "v0.2.4",
+  "node_backing_bytes": 75000000000,
+  "disk_bytes_per_guest": 21474836480,
+  "allow_shrink": true,
+  "real_r2_tested": false,
+  "prefix": "pressure-20261030-205907/",
+  "tests": [
+    {
+      "name": "three_concurrent_20g_devices",
+      "outcome": "passed",
+      "detail": {
+        "guests": [
+          {
+            "slot": 0,
+            "sandbox_id": "01a18e9c-1045-7901-9db8-2efd45c25b22",
+            "create_seconds": 4.9352
+          },
+          {
+            "slot": 1,
+            "sandbox_id": "01a18e9c-1a2f-7b53-9dfc-06e6e573e178",
+            "create_seconds": 2.4141
+          },
+          {
+            "slot": 2,
+            "sandbox_id": "01a18e9c-23e9-7613-baaf-9df5fc483331",
+            "create_seconds": 2.417
+          }
+        ]
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    },
+    {
+      "stage": "three_20g_server_ready",
+      "filesystem_used_bytes": 2351104,
+      "filesystem_available_bytes": 74379780096,
+      "all_node_files_allocated_bytes": 245760,
+      "image_cache_allocated_bytes": 57344,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 4096,
+      "backing_file_host_allocated_bytes": 548859904
+    }
+  ],
+  "scope": "Node state/runtime/temp files on 75 GB raw ext4; OS, binaries and S3 fixture outside",
+  "guests": [
+    {
+      "slot": 0,
+      "sandbox_id": "01a18e9c-1045-7901-9db8-2efd45c25b22",
+      "create_seconds": 4.9352
+    },
+    {
+      "slot": 1,
+      "sandbox_id": "01a18e9c-1a2f-7b53-9dfc-06e6e573e178",
+      "create_seconds": 2.4141
+    },
+    {
+      "slot": 2,
+      "sandbox_id": "01a18e9c-23e9-7613-baaf-9df5fc483331",
+      "create_seconds": 2.417
+    }
+  ],
+  "execution_passed": false,
+  "interrupted": true,
+  "error": "Tool session crashed during guest fill; no capacity or failure-recovery verdict. Three concurrent 20 GiB devices were verified before interruption.",
+  "cleanup": {
+    "passed": true,
+    "recovered_after_interruption": true,
+    "stale_namespace_mounts_removed": 6,
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

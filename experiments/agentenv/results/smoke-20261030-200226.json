@@ -1,0 +1,104 @@
+{
+  "release": "v0.2.4",
+  "tests": [
+    {
+      "name": "cached_oci_cold_start",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e68-1ac5-7131-ae1a-c2df5a0a56fd",
+        "api_seconds": 2.1892
+      },
+      "elapsed_seconds": 2.1894
+    },
+    {
+      "name": "guest_resources_and_egress",
+      "passed": true,
+      "detail": {
+        "stdout": "1\nMemTotal:         493284 kB\nMemFree:          460064 kB\nMemAvailable:     464268 kB\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              66043796      8796  62663176   0% /\n134217728\negress-ok\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.1818
+    },
+    {
+      "name": "resource_override_2cpu_768m_65g",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e68-23f6-75d1-b2f4-362c8d591084",
+        "api_seconds": 2.4794
+      },
+      "elapsed_seconds": 2.4796
+    },
+    {
+      "name": "larger_guest_resources",
+      "passed": true,
+      "detail": {
+        "stdout": "2\nMemTotal:         750384 kB\n136314880\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              67075924      8796  63642876   0% /\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.0515
+    },
+    {
+      "name": "stdout_stderr_exit42",
+      "passed": true,
+      "detail": {
+        "stdout": "stdout-marker\n",
+        "stderr": "stderr-marker\n",
+        "exit_code": 42
+      },
+      "elapsed_seconds": 0.0563
+    },
+    {
+      "name": "pty_attach_geometry",
+      "passed": true,
+      "detail": {
+        "rows": 40,
+        "columns": 100,
+        "shell_command_observed": true
+      },
+      "elapsed_seconds": 2.0998
+    },
+    {
+      "name": "file_metadata_and_background_process",
+      "passed": true,
+      "detail": {
+        "stdout": "e6107fd6-05f0-4fc7-b9bf-144bd96811d1\n1234:2345:640\nowned\n2a1912c367168e584d480d8826b4227af4e321a9bdf11640de11f9d67524d986  /workspace/owned\nsynthetic-lab-canary-no-real-credentials\n",
+        "stderr": "",
+        "exit_code": 0
+      },
+      "elapsed_seconds": 0.0578
+    },
+    {
+      "name": "upload_download_roundtrip",
+      "passed": true,
+      "detail": {
+        "bytes": 1048576,
+        "sha256": "9d224116ca3123b9eb6e1a5a1a902c0fe2a92743fa794782018da2c59e36faa9"
+      },
+      "elapsed_seconds": 0.114
+    },
+    {
+      "name": "pause",
+      "passed": true,
+      "detail": {
+        "api_seconds": 0.1267
+      },
+      "elapsed_seconds": 0.1268
+    },
+    {
+      "name": "resume",
+      "passed": false,
+      "error": "Harness expected HTTP 200; API correctly returned HTTP 201. Response omitted.",
+      "elapsed_seconds": 0.222
+    }
+  ],
+  "disk_1g_rejection": {
+    "response": {
+      "code": 400,
+      "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/state/firecracker-work/agentenv-fc-w9JCnf/overlaybd: requested overlaybd runtime virtual size 1073741824 is smaller than base virtual size 68719476736; shrinking is disabled"
+    },
+    "api_seconds": 1.4574
+  },
+  "primary_sandbox_id": "01a18e68-1ac5-7131-ae1a-c2df5a0a56fd"
+}

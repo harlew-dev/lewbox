@@ -1,0 +1,8 @@
+{
+  "passed": true,
+  "sandbox_id": "01a18e6e-6c87-7781-b040-38ca20a84fd7",
+  "resume_api_seconds": 0.3669,
+  "kernel_process_metadata_retained": true,
+  "snapshot_fork_after_restart_verified": true,
+  "fork_api_seconds": 0.1431
+}

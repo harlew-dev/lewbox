@@ -1,0 +1,18 @@
+2026/10/30 21:34:35.533356|INFO |th=0000757653196BB0|image_service.cpp:303|read_global_config_and_set:log config: [log_level=1][log_path=/home/homelab/.local/share/lewbox-agentenv-lab/n/p/overlaybd/overlaybd.log][log_size=10485760][log_num=3]
+2026/10/30 21:34:35.533511|INFO |th=0000757653196BB0|image_service.cpp:425|init:cache config: [cache_type=file][cache_dir=/home/homelab/.local/share/lewbox-agentenv-lab/n/p/image-cache/resize-blocks][cache_size_GB=4][refill_size=262144]
+2026/10/30 21:34:35.533606|INFO |th=0000757653196BB0|image_service.cpp:59|create_dir:dir /home/homelab/.local/share/lewbox-agentenv-lab/n/p/image-cache/resize-blocks doesn't exist. create succ.
+2026/10/30 21:34:35.533622|INFO |th=0000757653196BB0|image_service.cpp:440|init:create registryfs with cafile:/etc/ssl/certs/ca-certificates.crt, version:v2
+2026/10/30 21:34:35.536591|INFO |th=0000757653196BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll
+2026/10/30 21:34:35.536662|INFO |th=0000757653196BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll
+2026/10/30 21:34:35.536726|INFO |th=0000757653196BB0|registryfs_v2.cpp:297|refresh_client:set user agent: overlaybd/v1.0.18-aenv.1
+2026/10/30 21:34:35.537192|INFO |th=0000757653196BB0|image_service.cpp:591|create_image_file:use cache
+2026/10/30 21:34:35.537661|ERROR|th=000075764C6E8680|image_file.cpp:157|__open_ro_remote:empty repoBlobUrl for remote layer
+2026/10/30 21:34:35.537666|ERROR|th=000075764C6E8680|image_file.cpp:262|do_parallel_open_files:failed to open files
+2026/10/30 21:34:35.537841|ERROR|th=0000757653196BB0|image_file.cpp:357|open_lowers:layer index 0 open failed, exit.
+2026/10/30 21:34:35.537846|ERROR|th=0000757653196BB0|image_file.cpp:483|init_image_file:open lower layer failed.
+2026/10/30 21:34:35.538214|INFO |th=0000757653196BB0|epoll.cpp:75|~EventEngineEPoll:Finish event engine: epoll
+2026/10/30 21:34:35.538260|INFO |th=0000757653196BB0|epoll.cpp:75|~EventEngineEPoll:Finish event engine: epoll
+2026/10/30 21:34:35.538373|INFO |th=0000757653196BB0|image_service.cpp:644|~ImageService:image service is fully stopped
+2026/10/30 21:34:35.566291|INFO |th=0000757653196BB0|epoll.cpp:75|~EventEngineEPoll:Finish event engine: epoll
+2026/10/30 21:34:35.566372|INFO |th=0000757653196BB0|signal.cpp:301|sync_signal_fini:signalfd finished
+2026/10/30 21:34:35.566378|INFO |th=0000757653196BB0|epoll.cpp:75|~EventEngineEPoll:Finish event engine: epoll

@@ -1,0 +1,13 @@
+{
+  "release": "v0.2.4",
+  "prototype_uses_internal_interfaces": true,
+  "upstream_source_modified": false,
+  "prefix": "disk-only-20261030-205514/",
+  "tests": [],
+  "execution_passed": false,
+  "error": "[Errno 2] No such file or directory: '../../../image-cache/commits/sha256-a0cd516906d27e7111342d612412d4e928a755c20e6c060eb7331a3a3d167eb6/overlaybd.commit'",
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

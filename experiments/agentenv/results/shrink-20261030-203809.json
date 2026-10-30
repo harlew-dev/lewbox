@@ -1,0 +1,49 @@
+{
+  "release": "v0.2.4",
+  "allow_shrink": true,
+  "upstream_source_modified": false,
+  "tests": [
+    {
+      "name": "cold_create_20g_with_allow_shrink",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e88-d4d8-75f1-b466-0eeda6d0a79d",
+        "api_seconds": 4.9736,
+        "device_bytes": 21474836480,
+        "filesystem_total_kib": 20630224,
+        "guest_output": "41943040\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              20630224      8796  19556472   0% /\n"
+      }
+    },
+    {
+      "name": "write_and_metadata_after_shrink",
+      "passed": true,
+      "detail": {
+        "fingerprint": "d824a59332c82fe5f4844c595e8e99b44ed70bfa53db1d17d74bbff0b6f74d0a  /workspace/data.bin\n1234:2345:640\nowned\nshrunk-fixture\n"
+      }
+    },
+    {
+      "name": "capture_20g_snapshot",
+      "passed": true,
+      "detail": {
+        "snapshot_id": "01a18e88-dc60-7953-8c79-f8be84aa1c7f",
+        "api_seconds": 2.2358
+      }
+    },
+    {
+      "name": "warm_restore_retains_20g_and_files",
+      "passed": true,
+      "detail": {
+        "sandbox_id": "01a18e88-e50b-7152-ad7e-5c1234b43bb7",
+        "api_seconds": 0.2169,
+        "device_bytes": 21474836480,
+        "filesystem_total_kib": 20630224,
+        "guest_output": "41943040\nFilesystem           1K-blocks      Used Available Use% Mounted on\n/dev/vdb              20630224     41580  19523688   0% /\n"
+      }
+    }
+  ],
+  "execution_passed": true,
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "release": "v0.2.4",
+  "prototype_uses_internal_interfaces": true,
+  "upstream_source_modified": false,
+  "prefix": "disk-only-20261030-205706/",
+  "tests": [
+    {
+      "name": "full_root_disk_only_publication",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:22150e18868cebfc890859dbf45e9201a74543797e76a2dde84fe65f9531b7c4",
+        "layers": [
+          {
+            "Managed": {
+              "digest": "sha256:a0cd516906d27e7111342d612412d4e928a755c20e6c060eb7331a3a3d167eb6",
+              "size": 80563200
+            }
+          },
+          {
+            "Managed": {
+              "digest": "sha256:bdc0157a1b1c3989acaecd8bbcbeb905c7f1a01278ebec2b0d25901d4d5b2bf2",
+              "size": 81653760
+            }
+          }
+        ],
+        "published_bytes": 162217394,
+        "memory_artifacts": [],
+        "synthetic_canary_excluded_from_disk_layers_and_manifest": true,
+        "fixture_paths": [
+          "/etc/lewbox-owned",
+          "/root/customer-config",
+          "/workspace/data.bin"
+        ],
+        "note": "Internal seal + repository image publication, not the public snapshot endpoint"
+      }
+    },
+    {
+      "name": "source_runtime_and_local_disk_data_removed",
+      "outcome": "passed",
+      "detail": {
+        "publisher_state_removed": true,
+        "capture_layers_removed": true
+      }
+    }
+  ],
+  "execution_passed": false,
+  "error": "aenv exec exited 2: cat: can't open '/workspace/startup-marker': No such file or directory\nsh: startup-ran: unknown operand\n",
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

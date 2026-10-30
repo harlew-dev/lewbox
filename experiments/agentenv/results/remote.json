@@ -1,0 +1,180 @@
+{
+  "fixture": "Silo RELEASE.2026-09-16T00-00-00Z, loopback, path addressing",
+  "real_r2_tested": false,
+  "sandbox_id": "01a18e6c-28db-7532-b61c-1c72cc83e0c8",
+  "baseline": {
+    "snapshot_id": "01a18e6c-2dab-7002-8ff2-80625bfc1199",
+    "api_seconds": 0.8738,
+    "disk_layers": [
+      {
+        "Managed": {
+          "digest": "sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+          "size": 6108118
+        }
+      },
+      {
+        "Managed": {
+          "digest": "sha256:ff3040cf4738919b606c020246b00e4e4438248b1b616eb679b212a32b86bdef",
+          "size": 1742
+        }
+      }
+    ],
+    "memory_layers": [
+      {
+        "digest": "sha256:f0a02e176852e154769b94403c4673b3cecbd7c1fee2edfb55477637624857bc",
+        "size": 24585401
+      }
+    ]
+  },
+  "delta": {
+    "snapshot_id": "01a18e6c-31f1-7c42-bfe5-746fcf54fcaa",
+    "api_seconds": 1.1721,
+    "disk_layers": [
+      {
+        "Managed": {
+          "digest": "sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+          "size": 6108118
+        }
+      },
+      {
+        "Managed": {
+          "digest": "sha256:ff3040cf4738919b606c020246b00e4e4438248b1b616eb679b212a32b86bdef",
+          "size": 1742
+        }
+      },
+      {
+        "Managed": {
+          "digest": "sha256:ee35a72d6033a712b18518cfeb8eaa347aef2b1288d3afa8ae1804c45dc0a303",
+          "size": 8449258
+        }
+      }
+    ],
+    "memory_layers": [
+      {
+        "digest": "sha256:954d1f9ae55cbfc0a364e2ba8b3c6ed1c9da30e5e8c3ccfd179ceeab710fd747",
+        "size": 34178288
+      }
+    ]
+  },
+  "expected_identity": "3253a2b9-d939-4fe8-b120-c82375bb3547\nsleep\n1234:2345:640\nowned\n2a1912c367168e584d480d8826b4227af4e321a9bdf11640de11f9d67524d986  /workspace/owned\n",
+  "expected_checksum": "4b979647859afeee10bd75bf3f8fc93d1c1b058d8557dc76b2375290858e8ba9  /workspace/remote-random.bin\n",
+  "baseline_objects": [
+    {
+      "key": "lab/artifacts/01a18e6c-2dab-7002-8ff2-80625bfc1199/firecracker-manifest.json",
+      "bytes": 242
+    },
+    {
+      "key": "lab/artifacts/01a18e6c-2dab-7002-8ff2-80625bfc1199/vm_state.bin",
+      "bytes": 14922
+    },
+    {
+      "key": "lab/catalog/aliases/lewbox-lab-smoke-20261030-200651-remote-baseline.json",
+      "bytes": 38
+    },
+    {
+      "key": "lab/catalog/records/01a18e6c-2dab-7002-8ff2-80625bfc1199.json",
+      "bytes": 1747
+    },
+    {
+      "key": "lab/managed-layers/sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+      "bytes": 6108118
+    },
+    {
+      "key": "lab/managed-layers/sha256:f0a02e176852e154769b94403c4673b3cecbd7c1fee2edfb55477637624857bc",
+      "bytes": 24585401
+    },
+    {
+      "key": "lab/managed-layers/sha256:ff3040cf4738919b606c020246b00e4e4438248b1b616eb679b212a32b86bdef",
+      "bytes": 1742
+    }
+  ],
+  "delta_objects": [
+    {
+      "key": "lab/artifacts/01a18e6c-2dab-7002-8ff2-80625bfc1199/firecracker-manifest.json",
+      "bytes": 242
+    },
+    {
+      "key": "lab/artifacts/01a18e6c-2dab-7002-8ff2-80625bfc1199/vm_state.bin",
+      "bytes": 14922
+    },
+    {
+      "key": "lab/artifacts/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa/firecracker-manifest.json",
+      "bytes": 242
+    },
+    {
+      "key": "lab/artifacts/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa/vm_state.bin",
+      "bytes": 14922
+    },
+    {
+      "key": "lab/catalog/aliases/lewbox-lab-smoke-20261030-200651-remote-baseline.json",
+      "bytes": 38
+    },
+    {
+      "key": "lab/catalog/aliases/lewbox-lab-smoke-20261030-200651-remote-delta.json",
+      "bytes": 38
+    },
+    {
+      "key": "lab/catalog/records/01a18e6c-2dab-7002-8ff2-80625bfc1199.json",
+      "bytes": 1747
+    },
+    {
+      "key": "lab/catalog/records/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa.json",
+      "bytes": 1913
+    },
+    {
+      "key": "lab/managed-layers/sha256:954d1f9ae55cbfc0a364e2ba8b3c6ed1c9da30e5e8c3ccfd179ceeab710fd747",
+      "bytes": 34178288
+    },
+    {
+      "key": "lab/managed-layers/sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+      "bytes": 6108118
+    },
+    {
+      "key": "lab/managed-layers/sha256:ee35a72d6033a712b18518cfeb8eaa347aef2b1288d3afa8ae1804c45dc0a303",
+      "bytes": 8449258
+    },
+    {
+      "key": "lab/managed-layers/sha256:f0a02e176852e154769b94403c4673b3cecbd7c1fee2edfb55477637624857bc",
+      "bytes": 24585401
+    },
+    {
+      "key": "lab/managed-layers/sha256:ff3040cf4738919b606c020246b00e4e4438248b1b616eb679b212a32b86bdef",
+      "bytes": 1742
+    }
+  ],
+  "local_pause_uploaded_new_objects": false,
+  "new_objects_after_delta": [
+    {
+      "key": "lab/artifacts/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa/firecracker-manifest.json",
+      "bytes": 242
+    },
+    {
+      "key": "lab/artifacts/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa/vm_state.bin",
+      "bytes": 14922
+    },
+    {
+      "key": "lab/catalog/aliases/lewbox-lab-smoke-20261030-200651-remote-delta.json",
+      "bytes": 38
+    },
+    {
+      "key": "lab/catalog/records/01a18e6c-31f1-7c42-bfe5-746fcf54fcaa.json",
+      "bytes": 1913
+    },
+    {
+      "key": "lab/managed-layers/sha256:954d1f9ae55cbfc0a364e2ba8b3c6ed1c9da30e5e8c3ccfd179ceeab710fd747",
+      "bytes": 34178288
+    },
+    {
+      "key": "lab/managed-layers/sha256:ee35a72d6033a712b18518cfeb8eaa347aef2b1288d3afa8ae1804c45dc0a303",
+      "bytes": 8449258
+    }
+  ],
+  "baseline_object_bytes": 30712210,
+  "new_object_bytes_after_delta": 42644661,
+  "fresh_state_restore": {
+    "passed": true,
+    "api_seconds": 0.5189,
+    "metadata_background_process_and_checksum_retained": true
+  },
+  "passed": true
+}

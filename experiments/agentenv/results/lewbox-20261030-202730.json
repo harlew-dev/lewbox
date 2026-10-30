@@ -1,0 +1,496 @@
+{
+  "release": "v0.2.4",
+  "node_backing_bytes": 75000000000,
+  "requested_sandbox_bytes": 20000000000,
+  "requested_api_disk_mib": 20480,
+  "requested_api_disk_bytes": 21474836480,
+  "payload_bytes_per_sandbox": 134217728,
+  "real_r2_tested": false,
+  "prefix": "lewbox-20261030-202730/",
+  "tests": [
+    {
+      "name": "three_20g_guest_disks",
+      "outcome": "blocked",
+      "detail": {
+        "attempts": [
+          {
+            "slot": 0,
+            "http_status": 400,
+            "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/n/p/firecracker-work/agentenv-fc-Zt0tLc/overlaybd: requested overlaybd runtime virtual size 21474836480 is smaller than base virtual size 68719476736; shrinking is disabled",
+            "seconds": 3.8469
+          },
+          {
+            "slot": 1,
+            "http_status": 400,
+            "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/n/p/firecracker-work/agentenv-fc-mroFNo/overlaybd: requested overlaybd runtime virtual size 21474836480 is smaller than base virtual size 68719476736; shrinking is disabled",
+            "seconds": 1.2454
+          },
+          {
+            "slot": 2,
+            "http_status": 400,
+            "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/n/p/firecracker-work/agentenv-fc-XtfdIF/overlaybd: requested overlaybd runtime virtual size 21474836480 is smaller than base virtual size 68719476736; shrinking is disabled",
+            "seconds": 1.3321
+          }
+        ],
+        "note": "20480 MiB = 20 GiB, greater than 20 decimal GB; both fall below the 64 GiB floor"
+      }
+    },
+    {
+      "name": "three_sparse_fallback_vms",
+      "outcome": "passed",
+      "detail": {
+        "actual_allocated_node_bytes": 484233216,
+        "guest_logical_bytes": 206158430208,
+        "note": "Fallback 64 GiB disks, not a successful three-by-20 GB capacity qualification"
+      }
+    },
+    {
+      "name": "stop_publish_verify_then_delete",
+      "outcome": "passed",
+      "detail": {
+        "sources": [
+          {
+            "sandbox_id": "01a18e7f-2654-7ca0-87b0-bc519277f7ab",
+            "snapshot_id": "01a18e7f-5e29-70c0-a9d9-51e68eaab518",
+            "remote_verified_before_delete": true,
+            "delete_api_seconds": 0.1758
+          },
+          {
+            "sandbox_id": "01a18e7f-36f0-7f22-a235-58462cf47b69",
+            "snapshot_id": "01a18e7f-7922-75a3-9dc6-f65effe64c08",
+            "remote_verified_before_delete": true,
+            "delete_api_seconds": 0.0963
+          },
+          {
+            "sandbox_id": "01a18e7f-480b-7131-a36f-d884a3f919d8",
+            "snapshot_id": "01a18e7f-928b-7323-ba94-eb0260e6bae2",
+            "remote_verified_before_delete": true,
+            "delete_api_seconds": 0.135
+          }
+        ],
+        "remaining_runtime_records": 0
+      }
+    },
+    {
+      "name": "disk_only_stop",
+      "outcome": "blocked",
+      "detail": {
+        "published_memory_layer_bytes": 96100261,
+        "note": "No pause calls; the explicit snapshot publication still includes RAM"
+      }
+    },
+    {
+      "name": "immediate_local_space_reclamation",
+      "outcome": "passed",
+      "detail": {
+        "live_node_allocated_bytes": 484233216,
+        "after_delete_node_allocated_bytes": 81018880,
+        "net_bytes_reclaimed": 403214336,
+        "remaining_image_cache_bytes": 80777216,
+        "remaining_snapshot_cache_bytes": 4096,
+        "note": "Counts actual physical blocks, not 20 GB reservations; cached data is reported separately"
+      }
+    },
+    {
+      "name": "start_after_runtime_delete",
+      "outcome": "passed",
+      "detail": {
+        "files_and_metadata_preserved": true,
+        "start_api_seconds": 0.4695,
+        "new_runtime_id": "01a18e7f-a992-7271-bf86-e80ecc95b653"
+      }
+    },
+    {
+      "name": "start_is_a_cold_boot",
+      "outcome": "blocked",
+      "detail": {
+        "same_boot_id_and_live_process": true,
+        "note": "Snapshot restore kept RAM/processes; not a disk-only cold boot"
+      }
+    },
+    {
+      "name": "snapshot_based_restart_retains_files",
+      "outcome": "passed",
+      "detail": {
+        "restart_start_api_seconds": 0.4209,
+        "cold_reboot": false,
+        "note": "Emulated publish/delete/restore cycle, not a native reboot API"
+      }
+    },
+    {
+      "name": "offline_whole_node_eviction",
+      "outcome": "passed",
+      "detail": {
+        "reclaimed_allocated_bytes": 282591232,
+        "remaining_node_file_allocated_bytes": 0,
+        "note": "Disposable stopped node state removed by this harness; not an AgentENV per-sandbox eviction API"
+      }
+    },
+    {
+      "name": "restore_all_three_after_complete_local_eviction",
+      "outcome": "passed",
+      "detail": {
+        "restores": [
+          {
+            "slot": 0,
+            "start_api_seconds": 0.675
+          },
+          {
+            "slot": 1,
+            "start_api_seconds": 0.4815
+          },
+          {
+            "slot": 2,
+            "start_api_seconds": 0.4601
+          }
+        ],
+        "publisher_state_exists": false,
+        "same_physical_host": true
+      }
+    },
+    {
+      "name": "persistent_delete_preserves_other_sandboxes",
+      "outcome": "passed",
+      "detail": {
+        "deleted_snapshot_ids": [
+          "01a18e7f-5e29-70c0-a9d9-51e68eaab518",
+          "01a18e7f-b2b5-7610-8ae0-71fceeb38ca4"
+        ],
+        "removed_object_count": 8,
+        "remaining_managed_layer_count": 9,
+        "unreferenced_managed_layers_after_delete": [
+          {
+            "key": "lewbox-20261030-202730/managed-layers/sha256:325ad3bdc2942fd93e4197e22ada66e648f2ec7f0d2b6e42ab13449b26ae4c62",
+            "bytes": 13901
+          },
+          {
+            "key": "lewbox-20261030-202730/managed-layers/sha256:7fdf04d90c70386912fff373d3510de4ea4254ce4a943b20a119835e9f0b7e6f",
+            "bytes": 134952685
+          },
+          {
+            "key": "lewbox-20261030-202730/managed-layers/sha256:dd43ec93f0e599d20834e088262ccfb18d351056cea2e4cb5a6edd5e05af9b4c",
+            "bytes": 34233477
+          },
+          {
+            "key": "lewbox-20261030-202730/managed-layers/sha256:ee02c56888680ba5120fd991e6bb253d3094771f6bb8581c95a4c3d135012c2c",
+            "bytes": 30289506
+          }
+        ],
+        "unreferenced_managed_layer_bytes": 199489569,
+        "sibling_restore_verified": true,
+        "note": "Shared/unreferenced object GC is distinct from catalog deletion"
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    },
+    {
+      "stage": "server_ready",
+      "filesystem_used_bytes": 2347008,
+      "filesystem_available_bytes": 74379784192,
+      "all_node_files_allocated_bytes": 241664,
+      "image_cache_allocated_bytes": 57344,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 4096,
+      "backing_file_host_allocated_bytes": 548847616
+    },
+    {
+      "stage": "three_running_with_128m_each",
+      "filesystem_used_bytes": 486338560,
+      "filesystem_available_bytes": 73895792640,
+      "all_node_files_allocated_bytes": 484233216,
+      "image_cache_allocated_bytes": 80715776,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 403304448,
+      "backing_file_host_allocated_bytes": 1032855552
+    },
+    {
+      "stage": "slot_0_published_before_runtime_delete",
+      "filesystem_used_bytes": 693841920,
+      "filesystem_available_bytes": 73688289280,
+      "all_node_files_allocated_bytes": 691736576,
+      "image_cache_allocated_bytes": 80736256,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 610787328,
+      "backing_file_host_allocated_bytes": 1240387584
+    },
+    {
+      "stage": "slot_1_published_before_runtime_delete",
+      "filesystem_used_bytes": 562868224,
+      "filesystem_available_bytes": 73819262976,
+      "all_node_files_allocated_bytes": 560762880,
+      "image_cache_allocated_bytes": 80756736,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 479784960,
+      "backing_file_host_allocated_bytes": 1248681984
+    },
+    {
+      "stage": "slot_2_published_before_runtime_delete",
+      "filesystem_used_bytes": 422092800,
+      "filesystem_available_bytes": 73960038400,
+      "all_node_files_allocated_bytes": 419987456,
+      "image_cache_allocated_bytes": 80777216,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 338984960,
+      "backing_file_host_allocated_bytes": 1371660288
+    },
+    {
+      "stage": "all_three_published_and_runtime_deleted",
+      "filesystem_used_bytes": 83124224,
+      "filesystem_available_bytes": 74299006976,
+      "all_node_files_allocated_bytes": 81018880,
+      "image_cache_allocated_bytes": 80777216,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 8192,
+      "backing_file_host_allocated_bytes": 1371664384
+    },
+    {
+      "stage": "publisher_stopped_before_offline_eviction",
+      "filesystem_used_bytes": 284696576,
+      "filesystem_available_bytes": 74097434624,
+      "all_node_files_allocated_bytes": 282591232,
+      "image_cache_allocated_bytes": 282230784,
+      "snapshot_cache_allocated_bytes": 90112,
+      "workspaces_allocated_bytes": 4096,
+      "backing_file_host_allocated_bytes": 1379991552
+    },
+    {
+      "stage": "publisher_state_evicted_offline",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 1379991552
+    }
+  ],
+  "scope": "75 GB raw filesystem for node state/runtime; OS/binaries and S3 fixture outside it",
+  "pause_api_used": false,
+  "sources": [
+    {
+      "slot": 0,
+      "sandbox_id": "01a18e7f-2654-7ca0-87b0-bc519277f7ab",
+      "fingerprint": "ae1d797f-e39d-461a-a2eb-ddf12ad06ee2\nbd469e25e4b6fad1279020af93c3f08eef6a3726ba9d7ca4658f367fbee1be0f  /workspace/payload.bin\n1234:2345:640\nowned\nslot-0\nsleep\n",
+      "guest_disk_bytes": 68719476736,
+      "start_api_seconds": 2.1051,
+      "snapshot_id": "01a18e7f-5e29-70c0-a9d9-51e68eaab518",
+      "committed": {
+        "context": {
+          "env_vars": {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          },
+          "workdir": "/",
+          "cmd": [
+            "/bin/sh"
+          ]
+        },
+        "startup": null,
+        "runtime_versions": {
+          "kernel_version": "unknown",
+          "firecracker_version": "unknown",
+          "envd_version": "0.5.15",
+          "tools_drive_version": "0.1.1"
+        },
+        "virtualization_mode": "kvm",
+        "image_configs": [
+          {
+            "mountPath": "/",
+            "config": {
+              "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              ],
+              "Cmd": [
+                "/bin/sh"
+              ],
+              "WorkingDir": "/"
+            }
+          }
+        ],
+        "rootfs_layers": [
+          {
+            "Managed": {
+              "digest": "sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+              "size": 6108118
+            }
+          },
+          {
+            "Managed": {
+              "digest": "sha256:7fdf04d90c70386912fff373d3510de4ea4254ce4a943b20a119835e9f0b7e6f",
+              "size": 134952685
+            }
+          }
+        ],
+        "attached_drives": [],
+        "volume_snapshots": [],
+        "memory_layers": [
+          {
+            "digest": "sha256:ee02c56888680ba5120fd991e6bb253d3094771f6bb8581c95a4c3d135012c2c",
+            "size": 30289506
+          }
+        ],
+        "disk_publications": []
+      },
+      "snapshot_api_seconds": 4.2227,
+      "remote_verified_before_delete": true,
+      "delete_api_seconds": 0.1758
+    },
+    {
+      "slot": 1,
+      "sandbox_id": "01a18e7f-36f0-7f22-a235-58462cf47b69",
+      "fingerprint": "4a2a2a47-9d23-49d5-8166-d88160ca8f71\ne3ee9428c6baa9c64806a7e67f85f77b20b67f593b011c96fbe26f6475c691e5  /workspace/payload.bin\n1234:2345:640\nowned\nslot-1\nsleep\n",
+      "guest_disk_bytes": 68719476736,
+      "start_api_seconds": 2.3085,
+      "snapshot_id": "01a18e7f-7922-75a3-9dc6-f65effe64c08",
+      "committed": {
+        "context": {
+          "env_vars": {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          },
+          "workdir": "/",
+          "cmd": [
+            "/bin/sh"
+          ]
+        },
+        "startup": null,
+        "runtime_versions": {
+          "kernel_version": "unknown",
+          "firecracker_version": "unknown",
+          "envd_version": "0.5.15",
+          "tools_drive_version": "0.1.1"
+        },
+        "virtualization_mode": "kvm",
+        "image_configs": [
+          {
+            "mountPath": "/",
+            "config": {
+              "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              ],
+              "Cmd": [
+                "/bin/sh"
+              ],
+              "WorkingDir": "/"
+            }
+          }
+        ],
+        "rootfs_layers": [
+          {
+            "Managed": {
+              "digest": "sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+              "size": 6108118
+            }
+          },
+          {
+            "Managed": {
+              "digest": "sha256:876c03bacad9520ff7b28856179771f9ef50c2debd93d4f84a9cdd1a92bb9aa0",
+              "size": 134956287
+            }
+          }
+        ],
+        "attached_drives": [],
+        "volume_snapshots": [],
+        "memory_layers": [
+          {
+            "digest": "sha256:482e1899220456aa8a4eda9a44c56b68e5e49dfc4aae000b2b8840fa18f818cb",
+            "size": 32070461
+          }
+        ],
+        "disk_publications": []
+      },
+      "snapshot_api_seconds": 4.5281,
+      "remote_verified_before_delete": true,
+      "delete_api_seconds": 0.0963
+    },
+    {
+      "slot": 2,
+      "sandbox_id": "01a18e7f-480b-7131-a36f-d884a3f919d8",
+      "fingerprint": "e4162637-874a-432f-a9fa-57fd5e7a8981\n305308881a7a9beacb3d75e8c176f8e710996897cb3353c8f50209fac1970e94  /workspace/payload.bin\n1234:2345:640\nowned\nslot-2\nsleep\n",
+      "guest_disk_bytes": 68719476736,
+      "start_api_seconds": 2.4691,
+      "snapshot_id": "01a18e7f-928b-7323-ba94-eb0260e6bae2",
+      "committed": {
+        "context": {
+          "env_vars": {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          },
+          "workdir": "/",
+          "cmd": [
+            "/bin/sh"
+          ]
+        },
+        "startup": null,
+        "runtime_versions": {
+          "kernel_version": "unknown",
+          "firecracker_version": "unknown",
+          "envd_version": "0.5.15",
+          "tools_drive_version": "0.1.1"
+        },
+        "virtualization_mode": "kvm",
+        "image_configs": [
+          {
+            "mountPath": "/",
+            "config": {
+              "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              ],
+              "Cmd": [
+                "/bin/sh"
+              ],
+              "WorkingDir": "/"
+            }
+          }
+        ],
+        "rootfs_layers": [
+          {
+            "Managed": {
+              "digest": "sha256:ae47a068c7c54b7fe97a8b70037ae29d62c62282f61cfbe4be89556f027222cc",
+              "size": 6108118
+            }
+          },
+          {
+            "Managed": {
+              "digest": "sha256:6ad0acd1692e8df59fe044ab08547170ba85c98fee99d036599eb582ed5a0164",
+              "size": 134952726
+            }
+          }
+        ],
+        "attached_drives": [],
+        "volume_snapshots": [],
+        "memory_layers": [
+          {
+            "digest": "sha256:fdc14a07911badd681bfd721b5590ef8328c4a7d65c6606c46406ab36a22558c",
+            "size": 33740294
+          }
+        ],
+        "disk_publications": []
+      },
+      "snapshot_api_seconds": 4.1059,
+      "remote_verified_before_delete": true,
+      "delete_api_seconds": 0.135
+    }
+  ],
+  "snapshots": [
+    "01a18e7f-5e29-70c0-a9d9-51e68eaab518",
+    "01a18e7f-7922-75a3-9dc6-f65effe64c08",
+    "01a18e7f-928b-7323-ba94-eb0260e6bae2",
+    "01a18e7f-b2b5-7610-8ae0-71fceeb38ca4"
+  ],
+  "storage_baseline_used_bytes": 2347008,
+  "execution_passed": true,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

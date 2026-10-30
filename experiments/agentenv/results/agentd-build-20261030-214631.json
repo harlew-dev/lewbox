@@ -1,0 +1,46 @@
+{
+  "source": "/home/homelab/dev/legacy/lewbox-gateway",
+  "go_version": "go1.27.1",
+  "upstream_source_modified": false,
+  "gateway_commit": "c9f21ab2b14944a7e10d47cc1e935b7899abed8d",
+  "toolchain": {
+    "filename": "go1.27.1.linux-amd64.tar.gz",
+    "os": "linux",
+    "arch": "amd64",
+    "version": "go1.27.1",
+    "sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
+    "size": 70553950,
+    "kind": "archive",
+    "metadata_url": "https://go.dev/dl/?mode=json&include=all"
+  },
+  "compiler": "go version go1.27.1 linux/amd64",
+  "unit_tests": {
+    "exit_code": -15,
+    "log": "agentd-unit-20261030-214631.jsonl",
+    "passed_tests": 0,
+    "failed_tests": [
+      "TestPromptWritesTheTurnsEvents",
+      "TestPromptRefusesASecondTurn",
+      "TestCancelEndsTheTurn",
+      "TestAPromptWhileATurnRunsIsQueued",
+      "TestCancellingAQueuedPromptTakesItOutOfTheQueue",
+      "TestAPromptCanBeSteeredIntoTheRunningTurn",
+      "TestAQueuedPromptCanBeSteered",
+      "TestAPromptIsntSteeredIntoATurnWaitingOnAnApproval",
+      "TestQueuedPromptsRunAfterARestart",
+      "TestReplyAnswersAnApproval",
+      "TestUnansweredApprovalsGetTheDefault",
+      "TestReplyAnswersAQuestion",
+      "TestEachTurnCostsItsShareOfTheRunningTotal",
+      "TestTheAgentStartsATurnOfItsOwn",
+      "TestATurnThatAnsweredAnotherSessionEndsWithItsSender",
+      "TestAToolCallLeftOpenEndsUnreportedWithItsTurn",
+      "TestBackgroundWorkShowsInTheStatus",
+      "TestClaudeIsAskedForItsMessagesAboutTasks",
+      "TestBackgroundTasksAreListedAndReported"
+    ],
+    "elapsed_seconds": 123.6882
+  },
+  "passed": false,
+  "error": "Existing daemon tests failed; see agentd-unit-20261030-214631.jsonl"
+}

@@ -1,0 +1,140 @@
+{
+  "release": "v0.2.4",
+  "prefix": "workload-20261030-212321/",
+  "tests": [
+    {
+      "name": "real_binary_transfer_and_missing_daemon_exit",
+      "outcome": "passed",
+      "detail": {
+        "binary_hashes_match": true,
+        "missing_daemon_exit": 3
+      }
+    },
+    {
+      "name": "daemon_cli_events_and_duplicate_start",
+      "outcome": "passed",
+      "detail": {
+        "hello_chunks_verified": true,
+        "event_ids_ordered": true,
+        "after_cursor_verified": true,
+        "duplicate_start_preserves_daemon": true
+      }
+    },
+    {
+      "name": "approval_reply_through_real_cli",
+      "outcome": "passed",
+      "detail": {
+        "approval_and_finished_events_verified": true
+      }
+    },
+    {
+      "name": "queue_and_request_idempotency",
+      "outcome": "passed",
+      "detail": {
+        "one_queued_message": true,
+        "source_turn_running": true
+      }
+    },
+    {
+      "name": "agentd_disk_only_checkpoint",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:2d0ff0bbb91f5c0d59aeb4fc5d0cc2416a0b3a600c47968b9d6e1b86f02cbbea",
+        "new_layer_bytes": 21327872,
+        "no_guest_ram_snapshot": true,
+        "source_has_running_turn_and_queued_prompt": true
+      }
+    },
+    {
+      "name": "cold_restore_interrupts_old_turn_and_drains_queue",
+      "outcome": "passed",
+      "detail": {
+        "new_kernel_boot_id": true,
+        "old_turn_interrupted": true,
+        "queued_turn_completed_once": true,
+        "event_ids_continue_in_order": true,
+        "binary_preserved_without_reupload": true
+      }
+    },
+    {
+      "name": "pending_upload_replays_after_cold_restore",
+      "outcome": "passed",
+      "detail": {
+        "accepted_by_local_receiver": true,
+        "uploaded_through": 7,
+        "last_event": 7,
+        "synthetic_authorization_verified": true,
+        "real_gateway_tested": false
+      }
+    },
+    {
+      "name": "existing_conversation_accepts_prompt_after_cold_restore",
+      "outcome": "passed",
+      "detail": {
+        "second_turn_finished": true
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    }
+  ],
+  "node_backing_bytes": 75000000000,
+  "disk_bytes": 21474836480,
+  "scope": "Unchanged legacy agentd binary; repository fake ACP adapter; local upload receiver",
+  "real_agent_adapters_tested": false,
+  "authenticated_agent_calls_tested": false,
+  "real_gateway_tested": false,
+  "real_r2_tested": false,
+  "build": {
+    "source": "/home/homelab/dev/legacy/lewbox-gateway",
+    "go_version": "go1.27.1",
+    "upstream_source_modified": false,
+    "gateway_commit": "c9f21ab2b14944a7e10d47cc1e935b7899abed8d",
+    "toolchain": {
+      "filename": "go1.27.1.linux-amd64.tar.gz",
+      "os": "linux",
+      "arch": "amd64",
+      "version": "go1.27.1",
+      "sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445",
+      "size": 70553950,
+      "kind": "archive",
+      "metadata_url": "https://go.dev/dl/?mode=json&include=all"
+    },
+    "compiler": "go version go1.27.1 linux/amd64",
+    "unit_tests": {
+      "exit_code": 0,
+      "log": "agentd-unit-20261030-214955.jsonl",
+      "passed_tests": 91,
+      "failed_tests": [],
+      "elapsed_seconds": 6.0825
+    },
+    "binaries": {
+      "lewbox-agentd": {
+        "bytes": 7725216,
+        "sha256": "ebf91c2475cf854ea94f12b36c74e1378658aa69271085450c1689ea370bdd91"
+      },
+      "agentd.test": {
+        "bytes": 13193971,
+        "sha256": "56632502c94cea69956033e933687cf11445693a70bd099907c0844f94f7127e"
+      }
+    },
+    "passed": true
+  },
+  "synthetic_upload_token_persisted_in_metadata": true,
+  "execution_passed": true,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

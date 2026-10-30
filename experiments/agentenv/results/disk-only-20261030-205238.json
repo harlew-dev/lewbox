@@ -1,0 +1,13 @@
+{
+  "release": "v0.2.4",
+  "prototype_uses_internal_interfaces": true,
+  "upstream_source_modified": false,
+  "prefix": "disk-only-20261030-205238/",
+  "tests": [],
+  "execution_passed": false,
+  "error": "HTTP Error 503: Service Unavailable",
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

@@ -1,0 +1,95 @@
+[
+  {
+    "pid": 61200,
+    "root": "/",
+    "cgroup": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/snap.code.code-26287c1b-d716-4a41-833a-6fdebb0faddf.scope",
+    "threads": [
+      {
+        "Name": "firecracker",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      },
+      {
+        "Name": "fc_api",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      },
+      {
+        "Name": "fc_vcpu 0",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      },
+      {
+        "Name": "kvm-nx-lpage-re",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      }
+    ]
+  },
+  {
+    "pid": 61632,
+    "root": "/",
+    "cgroup": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/snap.code.code-26287c1b-d716-4a41-833a-6fdebb0faddf.scope",
+    "threads": [
+      {
+        "Name": "firecracker",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "0"
+      },
+      {
+        "Name": "fc_api",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      }
+    ]
+  },
+  {
+    "pid": 61633,
+    "root": "/",
+    "cgroup": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/snap.code.code-26287c1b-d716-4a41-833a-6fdebb0faddf.scope",
+    "threads": [
+      {
+        "Name": "firecracker",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "0"
+      },
+      {
+        "Name": "fc_api",
+        "Uid": "1000\t1000\t1000\t1000",
+        "Gid": "1000\t1000\t1000\t1000",
+        "CapEff": "0000000000000000",
+        "CapAmb": "0000000000000000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2"
+      }
+    ]
+  }
+]

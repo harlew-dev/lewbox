@@ -1,0 +1,35 @@
+Created template 01a18e69-a80d-7bf1-9d6c-3c084c582a70 (build 01a18e69-a80d-7bf1-9d6c-3c084c582a70)
+Preparing template builder...
+Building image...
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 389B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/alpine:3.22
+#2 DONE 0.7s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/3] FROM docker.io/library/alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
+#4 resolve docker.io/library/alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 31B done
+#5 DONE 0.0s
+
+#6 [2/3] COPY marker.txt /opt/lewbox/marker.txt
+#6 CACHED
+
+#7 [3/3] RUN printf '%s\n' "checked" > /opt/lewbox/build-arg.txt     && chown 1234:2345 /opt/lewbox/marker.txt     && chmod 0640 /opt/lewbox/marker.txt
+#7 CACHED
+
+#8 exporting to image
+#8 exporting layers done
+#8 exporting manifest sha256:75d39dce817de2b241e7015bc95c065dd22386384e8276f551ac7f5b76d655e9 done
+#8 exporting config sha256:3d1aec66537bb77226642bc1ed4a035988ccd8686ab79ac14862ecc09f053f16 done
+#8 DONE 0.0s
+Converting image and publishing template...
+Template 01a18e69-a80d-7bf1-9d6c-3c084c582a70 is ready.

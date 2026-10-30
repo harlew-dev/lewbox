@@ -1,0 +1,81 @@
+{
+  "baseline": {
+    "snapshot_id": "01a18e68-7727-78d3-929d-9fffc5649448",
+    "disk_layers": [
+      {
+        "digest": "sha256:a0cd516906d27e7111342d612412d4e928a755c20e6c060eb7331a3a3d167eb6",
+        "size": 80563200,
+        "uuid": "dec42710-cc9c-88cf-bb2d-538692a92246"
+      },
+      {
+        "digest": "sha256:f3be357cc0b013ec07a7d8e199d3561e59009d35b35f3480dc025f6bdff584f5",
+        "size": 1302528,
+        "uuid": "5d9dbec9-8945-4460-ac1f-3ea09f798d56"
+      },
+      {
+        "digest": "sha256:b067192559839b8ade119469d9273bccb5692d042e46b058baa35f341f11501f",
+        "size": 8192,
+        "uuid": "01b26470-d248-45fe-aa97-2666db28b64a"
+      }
+    ],
+    "memory_layers": [
+      {
+        "digest": "sha256:d36e49188b02afa72ff68fc54ef2f4a88efd950e84d6c28e44d993aa4b27789c",
+        "size": 76673024
+      },
+      {
+        "digest": "sha256:61c4f14d883ae1422730a3423bfc798b950a691b844df92ad3661c1c2cac278a",
+        "size": 6623232
+      }
+    ],
+    "disk_bytes": 81873920,
+    "memory_bytes": 83296256,
+    "synthetic_canary_found_in_memory_layers": [
+      true,
+      true
+    ]
+  },
+  "delta": {
+    "snapshot_id": "01a18e68-7d71-7452-a87b-32afab1f609a",
+    "disk_layers": [
+      {
+        "digest": "sha256:a0cd516906d27e7111342d612412d4e928a755c20e6c060eb7331a3a3d167eb6",
+        "size": 80563200,
+        "uuid": "dec42710-cc9c-88cf-bb2d-538692a92246"
+      },
+      {
+        "digest": "sha256:f3be357cc0b013ec07a7d8e199d3561e59009d35b35f3480dc025f6bdff584f5",
+        "size": 1302528,
+        "uuid": "5d9dbec9-8945-4460-ac1f-3ea09f798d56"
+      },
+      {
+        "digest": "sha256:b067192559839b8ade119469d9273bccb5692d042e46b058baa35f341f11501f",
+        "size": 8192,
+        "uuid": "01b26470-d248-45fe-aa97-2666db28b64a"
+      },
+      {
+        "digest": "sha256:3f01195a904b78a3e2b347774b59e8c05ed5855c82f06e904d03541b98338f9d",
+        "size": 8450048,
+        "uuid": "841fbcab-6dd2-4ecc-9dd5-16affe4ebe51"
+      }
+    ],
+    "memory_layers": [
+      {
+        "digest": "sha256:d36e49188b02afa72ff68fc54ef2f4a88efd950e84d6c28e44d993aa4b27789c",
+        "size": 76673024
+      },
+      {
+        "digest": "sha256:e2514701a379d5e18551399b22a0d1432a6979e86430e471acd590daf5435bff",
+        "size": 18907136
+      }
+    ],
+    "disk_bytes": 90323968,
+    "memory_bytes": 95580160,
+    "synthetic_canary_found_in_memory_layers": [
+      true,
+      true
+    ]
+  },
+  "incremental_disk_bytes": 8450048,
+  "reused_disk_bytes": 81873920
+}

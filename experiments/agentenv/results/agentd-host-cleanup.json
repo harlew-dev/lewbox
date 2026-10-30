@@ -1,0 +1,11 @@
+{
+  "lab_ports_closed": true,
+  "ipv4_forwarding_restored": true,
+  "ublk_unloaded": true,
+  "bounded_fixture_removed": true,
+  "loop_detached": true,
+  "lab_udev_rule_removed": true,
+  "overlaybd_system_config_removed": true,
+  "added_kvm_membership_removed": true,
+  "lab_subnet_rules_removed": true
+}

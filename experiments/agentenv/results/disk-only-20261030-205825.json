@@ -1,0 +1,106 @@
+{
+  "release": "v0.2.4",
+  "prototype_uses_internal_interfaces": true,
+  "upstream_source_modified": false,
+  "prefix": "disk-only-20261030-205825/",
+  "tests": [
+    {
+      "name": "full_root_disk_only_publication",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:f46d97ec2c8a196fea3cdcb0e2ff784226ffc3bc604951f87f8c0167f06bcb77",
+        "layers": [
+          {
+            "Managed": {
+              "digest": "sha256:a0cd516906d27e7111342d612412d4e928a755c20e6c060eb7331a3a3d167eb6",
+              "size": 80563200
+            }
+          },
+          {
+            "Managed": {
+              "digest": "sha256:8500eb019213f6bb6b03a729d77bd045d40cb154e2baa1c11f64b557aee137d3",
+              "size": 81653760
+            }
+          }
+        ],
+        "published_bytes": 162217394,
+        "memory_artifacts": [],
+        "synthetic_canary_excluded_from_disk_layers_and_manifest": true,
+        "fixture_paths": [
+          "/etc/lewbox-owned",
+          "/root/customer-config",
+          "/workspace/data.bin"
+        ],
+        "note": "Internal seal + repository image publication, not the public snapshot endpoint"
+      }
+    },
+    {
+      "name": "source_runtime_and_local_disk_data_removed",
+      "outcome": "passed",
+      "detail": {
+        "publisher_state_removed": true,
+        "capture_layers_removed": true
+      }
+    },
+    {
+      "name": "cold_create_automatically_runs_image_cmd",
+      "outcome": "blocked",
+      "detail": {
+        "startup_marker_created": false,
+        "note": "A disk-only adapter must invoke startup/readiness when the cold-create API does not"
+      }
+    },
+    {
+      "name": "fresh_state_cold_restore_entire_root",
+      "outcome": "passed",
+      "detail": {
+        "cold_create_seconds": 1.1378,
+        "boot_id_changed": true,
+        "startup_command_executed": true,
+        "adapter_invoked_startup": true,
+        "files_metadata_hardlink_symlink_verified": true,
+        "credential_tmpfs_file_and_create_time_env_absent": true,
+        "disk_bytes": 21474836480
+      }
+    },
+    {
+      "name": "prototype_upload_failure_retains_live_root",
+      "outcome": "passed",
+      "detail": {
+        "sandbox_not_deleted": true,
+        "sealed_layer_retained": true,
+        "resumed_files_verified": true,
+        "note": "Harness rollback policy, not a native AgentENV capture-failure regression test"
+      }
+    },
+    {
+      "name": "retry_and_previous_checkpoint_recovery",
+      "outcome": "passed",
+      "detail": {
+        "retry_digest": "sha256:8600bee7320268babc9c41595023c75ec52747d9e9ec52a8334f262595576f9e",
+        "new_write_durable_after_retry": true,
+        "previous_checkpoint_unchanged": true,
+        "no_memory_artifacts_before_native_control": true
+      }
+    },
+    {
+      "name": "native_shutdown_never_captures_customer_memory",
+      "outcome": "blocked",
+      "detail": {
+        "auto_pause": false,
+        "memory_state_artifacts_created": [
+          "persisted-sandboxes/artifacts/01a18e9b-baf4-7b03-b80d-a67a827dd5b3/01a18e9b-bf96-7363-bb9a-d6a2ff060469/mem_image.json",
+          "persisted-sandboxes/artifacts/01a18e9b-baf4-7b03-b80d-a67a827dd5b3/01a18e9b-bf96-7363-bb9a-d6a2ff060469/mem_overlaybd/overlaybd.commit",
+          "persisted-sandboxes/artifacts/01a18e9b-baf4-7b03-b80d-a67a827dd5b3/01a18e9b-bf96-7363-bb9a-d6a2ff060469/vm_state.bin"
+        ],
+        "note": "Public/runtime shutdown policy still needs a supported disk-only path"
+      }
+    }
+  ],
+  "execution_passed": true,
+  "full_lewbox_gate_passed": false,
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "release": "v0.2.4",
+  "prototype_uses_internal_interfaces": true,
+  "upstream_source_modified": false,
+  "prefix": "disk-only-20261030-205316/",
+  "tests": [],
+  "execution_passed": false,
+  "error": "",
+  "cleanup": {
+    "passed": true,
+    "errors": []
+  }
+}

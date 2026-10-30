@@ -1,0 +1,108 @@
+{
+  "release": "v0.2.4",
+  "prefix": "workload-20261030-212321/",
+  "tests": [
+    {
+      "name": "reuse_previously_built_desktop_image",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:8e2a1bf136a1c5d0a13997a7fed3cfc213ddf9bd4bdd2762ffa47238c0d43570",
+        "log": null,
+        "elapsed_seconds": 0.0021,
+        "published_layer_bytes": 1693986282
+      }
+    },
+    {
+      "name": "original_remote_image_64g_control",
+      "outcome": "passed",
+      "detail": {
+        "create_api_seconds": 1.3237,
+        "versions": "v24.22.0\n2.1.302 (Claude Code)\ncodex-cli 0.163.0\nChromium 156.0.8078.73 built on Ubuntu 24.04.5 LTS\n"
+      }
+    },
+    {
+      "name": "prefetch_image_layers_for_cpp_resize",
+      "outcome": "passed",
+      "detail": {
+        "layers": 13,
+        "downloaded_bytes": 1693986282,
+        "private_cache_rewrite": true
+      }
+    },
+    {
+      "name": "desktop_services_on_20g_cold_guest",
+      "outcome": "passed",
+      "detail": {
+        "create_api_seconds": 2.1159,
+        "services_and_screenshot": "SCREENSHOT_BYTES=127441\nCOMPUTER_USE_IMAGE_RECEIVED=true\n",
+        "versions": "v24.22.0\n2.1.302 (Claude Code)\ncodex-cli 0.163.0\nChromium 156.0.8078.73 built on Ubuntu 24.04.5 LTS\n",
+        "startup_invoked_by_adapter": true
+      }
+    },
+    {
+      "name": "desktop_interactive_pty",
+      "outcome": "passed",
+      "detail": {
+        "rows": 40,
+        "columns": 100,
+        "shell_command_observed": true
+      }
+    },
+    {
+      "name": "node_preview_inside_guest",
+      "outcome": "passed",
+      "detail": {
+        "response": "lewbox-preview\n",
+        "public_gateway_proxy_tested": false
+      }
+    },
+    {
+      "name": "desktop_disk_only_publication",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:37b23f77a4460f799efa5ebc6d8dd7c060f3fb95ae8deefd406ce09fcf41299b",
+        "new_disk_layer_bytes": 21213184,
+        "original_image_layers_reused": 13,
+        "no_guest_memory_artifacts": true
+      }
+    },
+    {
+      "name": "desktop_fresh_state_disk_only_cold_restore",
+      "outcome": "passed",
+      "detail": {
+        "create_api_seconds": 1.3822,
+        "hashes_metadata_and_ssh_host_key_match": true,
+        "new_kernel_boot_id": true,
+        "desktop_services_and_screenshot": "SCREENSHOT_BYTES=127441\nCOMPUTER_USE_IMAGE_RECEIVED=true\n",
+        "disk_bytes": 21474836480
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    }
+  ],
+  "node_backing_bytes": 75000000000,
+  "real_r2_tested": false,
+  "scope": "Legacy desktop, one VM, 2 CPUs/4096 MiB/20 GiB; private disk-only adapter",
+  "agentd_implementation_available": false,
+  "authenticated_agent_calls_tested": false,
+  "legacy_commit": "df12cac2c62f04080829f8ba85cb5842689dbd57",
+  "dockerfile_sha256": "57a41c4a0e83e72b1987b4264f7db02c3f1176f4e7ec5bb69087d0cba8407bbe",
+  "execution_passed": true,
+  "remote_object_bytes": 5239145929,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

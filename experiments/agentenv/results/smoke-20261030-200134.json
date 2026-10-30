@@ -1,0 +1,18 @@
+{
+  "release": "v0.2.4",
+  "tests": [
+    {
+      "name": "cached_oci_cold_start",
+      "passed": false,
+      "error": "POST /sandboxes-cold: HTTP 500: {\"code\":500,\"message\":\"sandbox 01a18e67-4edb-7442-b420-30916ca0f655 operation Start failed: open Firecracker network namespace /home/homelab/.local/share/lewbox-agentenv-lab/run/netns/agentenv-ns-01a18e66-246d-7e43-8e0f-894fa1e63254: open Firecracker network namespace /home/homelab/.local/share/lewbox-agentenv-lab/run/netns/agentenv-ns-01a18e66-246d-7e43-8e0f-894fa1e63254: No such file or directory (os error 2)\"}",
+      "elapsed_seconds": 1.3008
+    }
+  ],
+  "disk_1g_rejection": {
+    "response": {
+      "code": 400,
+      "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/state/firecracker-work/agentenv-fc-wVvixI/overlaybd: requested overlaybd runtime virtual size 1073741824 is smaller than base virtual size 68719476736; shrinking is disabled"
+    },
+    "api_seconds": 1.2728
+  }
+}

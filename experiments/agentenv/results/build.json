@@ -1,0 +1,23 @@
+{
+  "release": "v0.2.4",
+  "builds": [
+    {
+      "label": "initial",
+      "template_name": "lewbox-lab-build-1793390645-initial",
+      "elapsed_seconds": 5.9933,
+      "exit_code": 0
+    },
+    {
+      "label": "cached",
+      "template_name": "lewbox-lab-build-1793390645-cached",
+      "elapsed_seconds": 6.139,
+      "exit_code": 0
+    }
+  ],
+  "template_verification": {
+    "stdout": "Lewbox AgentENV synthetic build context.\nchecked\nstartup-ran\n1234:2345:640\n",
+    "stderr": "",
+    "exit_code": 0
+  },
+  "passed": true
+}

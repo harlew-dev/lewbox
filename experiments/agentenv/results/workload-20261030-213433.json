@@ -1,0 +1,44 @@
+{
+  "release": "v0.2.4",
+  "prefix": "workload-20261030-212321/",
+  "tests": [
+    {
+      "name": "reuse_previously_built_desktop_image",
+      "outcome": "passed",
+      "detail": {
+        "image_digest": "sha256:8e2a1bf136a1c5d0a13997a7fed3cfc213ddf9bd4bdd2762ffa47238c0d43570",
+        "log": null,
+        "elapsed_seconds": 0.0018,
+        "published_layer_bytes": 1693986282
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    }
+  ],
+  "node_backing_bytes": 75000000000,
+  "real_r2_tested": false,
+  "scope": "Legacy desktop, one VM, 2 CPUs/4096 MiB/20 GiB; private disk-only adapter",
+  "agentd_implementation_available": false,
+  "authenticated_agent_calls_tested": false,
+  "legacy_commit": "df12cac2c62f04080829f8ba85cb5842689dbd57",
+  "dockerfile_sha256": "57a41c4a0e83e72b1987b4264f7db02c3f1176f4e7ec5bb69087d0cba8407bbe",
+  "execution_passed": false,
+  "error": "POST /sandboxes-cold: HTTP 500 (expected 201): sandbox 01a18ebc-6b39-7463-b429-d6ebb431add8 operation Start failed: create user image overlaybd runtime device: create user image overlaybd runtime device: create overlaybd runtime device via daemon: daemon: create overlaybd runtime device failed: materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/n/p/firecracker-work/agentenv-fc-kuEijF/overlaybd: overlaybd-resize failed (status=exit status: 1): stdout=2026/10/30 21:34:35.532672|INFO |th=0000757653196BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll\n2026/10/30 21:34:35.532723|INFO |th=0000757653196BB0|signal.cpp:265|sync_signal_init:signalfd initialized\n2026/10/30 21:34:35.532787|INFO |th=0000757653196BB0|epoll.cpp:289|new_epoll_engine:Init event engine: epoll\n2026/10/30 21:34:35.533047|INFO |th=0000757653196BB0|image_service.cpp:253|read_global_config_and_set:using config /home/homelab/.local/share/lewbox-agentenv-lab/n/p/overlaybd/resize-overlaybd-global.json\n2026/10/30 21:34:35.533121|INFO |th=0000757653196BB0|image_service.cpp:274|read_global_config_and_set:audit disabled\n2026/10/30 21:34:35.533154|INFO |th=0000757653196BB0|image_service.cpp:279|read_global_config_and_set:[global_conf.log",
+  "diagnostics": "workload-20261030-213433.diagnostics.log",
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}

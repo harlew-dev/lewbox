@@ -1,0 +1,18 @@
+{
+  "release": "v0.2.4",
+  "tests": [
+    {
+      "name": "cached_oci_cold_start",
+      "passed": false,
+      "error": "POST /sandboxes-cold: HTTP 500: {\"code\":500,\"message\":\"sandbox 01a18e66-f7af-7d53-9a72-58d6521a2a24 operation Start failed: Failed to start microVM: Failed to start microVM: Request failed: 400 Bad Request - {\\\"fault_message\\\":\\\"Start microvm error: Kvm error: Error creating KVM object: Permission denied (os error 13) Make sure the user launching the firecracker process is \\\\\\\\\\\\nconfigured on the /dev/kvm file's ACL.\\\"}\"}",
+      "elapsed_seconds": 1.2558
+    }
+  ],
+  "disk_1g_rejection": {
+    "response": {
+      "code": 400,
+      "message": "materialize overlaybd runtime in /home/homelab/.local/share/lewbox-agentenv-lab/state/firecracker-work/agentenv-fc-vnhnEC/overlaybd: requested overlaybd runtime virtual size 1073741824 is smaller than base virtual size 68719476736; shrinking is disabled"
+    },
+    "api_seconds": 1.578
+  }
+}

@@ -1,0 +1,8 @@
+dd: error writing '/workspace/full.bin': No space left on device
+20123+0 records in
+20122+0 records out
+21099548672 bytes (19.7GB) copied, 483.593962 seconds, 41.6MB/s
+DD_EXIT=1
+FILE_BYTES=21099548672
+Filesystem           1K-blocks      Used Available Use% Mounted on
+/dev/vdb              20630224  20613840         0 100% /

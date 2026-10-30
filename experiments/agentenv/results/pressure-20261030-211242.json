@@ -1,0 +1,212 @@
+{
+  "release": "v0.2.4",
+  "node_backing_bytes": 75000000000,
+  "disk_bytes_per_guest": 21474836480,
+  "allow_shrink": true,
+  "real_r2_tested": false,
+  "prefix": "pressure-20261030-211242/",
+  "tests": [
+    {
+      "name": "three_concurrent_20g_devices",
+      "outcome": "passed",
+      "detail": {
+        "guests": [
+          {
+            "slot": 0,
+            "sandbox_id": "01a18ea8-7a5e-7e22-bcf1-3f1e5e5d394d",
+            "create_seconds": 5.0384,
+            "written_file_bytes": 21099548672
+          },
+          {
+            "slot": 1,
+            "sandbox_id": "01a18ea8-84a7-7571-8c59-c80c875aa304",
+            "create_seconds": 2.5284,
+            "written_file_bytes": 21099548672
+          },
+          {
+            "slot": 2,
+            "sandbox_id": "01a18ea8-8e90-7d63-962a-29a95b925573",
+            "create_seconds": 2.4372,
+            "written_file_bytes": 21099548672
+          }
+        ]
+      }
+    },
+    {
+      "name": "guest_enospc_isolated_from_node",
+      "outcome": "passed",
+      "detail": {
+        "guests": [
+          {
+            "slot": 0,
+            "sandbox_id": "01a18ea8-7a5e-7e22-bcf1-3f1e5e5d394d",
+            "create_seconds": 5.0384,
+            "written_file_bytes": 21099548672
+          },
+          {
+            "slot": 1,
+            "sandbox_id": "01a18ea8-84a7-7571-8c59-c80c875aa304",
+            "create_seconds": 2.5284,
+            "written_file_bytes": 21099548672
+          },
+          {
+            "slot": 2,
+            "sandbox_id": "01a18ea8-8e90-7d63-962a-29a95b925573",
+            "create_seconds": 2.4372,
+            "written_file_bytes": 21099548672
+          }
+        ],
+        "node_available_bytes": 10964176896,
+        "all_sentinels_verified": true
+      }
+    },
+    {
+      "name": "delete_full_guest_reclaims_disk_and_preserves_neighbors",
+      "outcome": "passed",
+      "detail": {
+        "reclaimed_bytes": 21112385536,
+        "neighbors_readable": true
+      }
+    },
+    {
+      "name": "full_guest_cleanup",
+      "outcome": "passed",
+      "detail": {
+        "node_allocated_bytes": 80965632,
+        "loop_backing_trim_supported": true,
+        "note": "OS/binaries excluded; full checkpoint staging is a separate capacity requirement"
+      }
+    },
+    {
+      "name": "native_capture_enospc_recovery",
+      "outcome": "passed",
+      "detail": {
+        "capture_response": {
+          "http_status": 500,
+          "state": null,
+          "message": "sandbox 01a18eb1-32af-7dc3-ac19-14b3b94a6544 operation Snapshot failed: convert dirty memory ranges to overlaybd layer: convert dirty memory ranges to overlaybd layer: convert dirty memory ranges to overlaybd layer: compact dirty memory ranges as overlaybd layer: compact memory layer: No space left on device (os error 28)"
+        },
+        "runtime_after_error": {
+          "http_status": 200,
+          "state": "running",
+          "message": null
+        },
+        "running_source_baseline_readable": true,
+        "no_new_catalog_record": true,
+        "known_durable_snapshot_id": "01a18eb1-3c33-7252-939f-f612a12a3e19"
+      }
+    },
+    {
+      "name": "previous_durable_checkpoint_survives_node_enospc",
+      "outcome": "passed",
+      "detail": {
+        "checksum_verified": true,
+        "uncommitted_write_absent": true,
+        "snapshot_id": "01a18eb1-3c33-7252-939f-f612a12a3e19"
+      }
+    }
+  ],
+  "storage": [
+    {
+      "stage": "empty_75gb_filesystem",
+      "filesystem_used_bytes": 2105344,
+      "filesystem_available_bytes": 74380025856,
+      "all_node_files_allocated_bytes": 0,
+      "image_cache_allocated_bytes": 0,
+      "snapshot_cache_allocated_bytes": 0,
+      "workspaces_allocated_bytes": 0,
+      "backing_file_host_allocated_bytes": 548593664
+    },
+    {
+      "stage": "three_20g_server_ready",
+      "filesystem_used_bytes": 2351104,
+      "filesystem_available_bytes": 74379780096,
+      "all_node_files_allocated_bytes": 245760,
+      "image_cache_allocated_bytes": 57344,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 4096,
+      "backing_file_host_allocated_bytes": 548855808
+    },
+    {
+      "stage": "all_three_guest_filesystems_enospc",
+      "filesystem_used_bytes": 63417954304,
+      "filesystem_available_bytes": 10964176896,
+      "all_node_files_allocated_bytes": 63415848960,
+      "image_cache_allocated_bytes": 80711680,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 63334899712,
+      "backing_file_host_allocated_bytes": 63966367744
+    },
+    {
+      "stage": "first_full_guest_deleted",
+      "filesystem_used_bytes": 42305568768,
+      "filesystem_available_bytes": 32076562432,
+      "all_node_files_allocated_bytes": 42303463424,
+      "image_cache_allocated_bytes": 80711680,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 42222505984,
+      "backing_file_host_allocated_bytes": 63966375936
+    },
+    {
+      "stage": "all_full_guests_deleted",
+      "filesystem_used_bytes": 83070976,
+      "filesystem_available_bytes": 74299060224,
+      "all_node_files_allocated_bytes": 80965632,
+      "image_cache_allocated_bytes": 80711680,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 4096,
+      "backing_file_host_allocated_bytes": 63966380032
+    },
+    {
+      "stage": "node_reserve_leaves_128m_for_capture",
+      "filesystem_used_bytes": 74247925760,
+      "filesystem_available_bytes": 134205440,
+      "all_node_files_allocated_bytes": 74245820416,
+      "image_cache_allocated_bytes": 80752640,
+      "snapshot_cache_allocated_bytes": 4096,
+      "workspaces_allocated_bytes": 4438339584,
+      "backing_file_host_allocated_bytes": 5094211584
+    },
+    {
+      "stage": "pressure_test_end",
+      "filesystem_used_bytes": 143925248,
+      "filesystem_available_bytes": 74238205952,
+      "all_node_files_allocated_bytes": 141819904,
+      "image_cache_allocated_bytes": 141471744,
+      "snapshot_cache_allocated_bytes": 49152,
+      "workspaces_allocated_bytes": 12288,
+      "backing_file_host_allocated_bytes": 5234794496
+    }
+  ],
+  "scope": "Node state/runtime/temp files on 75 GB raw ext4; OS, binaries and S3 fixture outside",
+  "guests": [
+    {
+      "slot": 0,
+      "sandbox_id": "01a18ea8-7a5e-7e22-bcf1-3f1e5e5d394d",
+      "create_seconds": 5.0384,
+      "written_file_bytes": 21099548672
+    },
+    {
+      "slot": 1,
+      "sandbox_id": "01a18ea8-84a7-7571-8c59-c80c875aa304",
+      "create_seconds": 2.5284,
+      "written_file_bytes": 21099548672
+    },
+    {
+      "slot": 2,
+      "sandbox_id": "01a18ea8-8e90-7d63-962a-29a95b925573",
+      "create_seconds": 2.4372,
+      "written_file_bytes": 21099548672
+    }
+  ],
+  "snapshots": [
+    "01a18eb1-3c33-7252-939f-f612a12a3e19"
+  ],
+  "execution_passed": true,
+  "cleanup": {
+    "passed": true,
+    "errors": [],
+    "filesystem_image_removed": true,
+    "mountpoint_removed": true
+  }
+}
