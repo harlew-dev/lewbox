@@ -12,7 +12,7 @@ UI_DIR ?= ../ui
 
 .DEFAULT_GOAL := build
 
-.PHONY: help deps web build build-go run dev test fmt docker docker-test up down e2e update-ui clean distclean
+.PHONY: help deps web build build-go run dev test fmt docker docker-test up down e2e update-ui release clean distclean
 
 help: ## List the targets and what they do.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.\/-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -74,8 +74,20 @@ update-ui: ## Re-vendor @harlew-dev/ui from the UI_DIR checkout and update the l
 		echo "vendored web/vendor/$$name"; \
 		cd web && npm install "@harlew-dev/ui@file:vendor/$$name"
 
+release: web ## Build the assets `lewbox update` reads (binaries, release.json, checksums.txt) into release/. Set VERSION=vX.Y.Z.
+	@[[ "$(VERSION)" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$ ]] || { echo "release: set VERSION=vX.Y.Z (got $(VERSION))"; exit 1; }
+	rm -rf release && mkdir -p release
+	@for arch in amd64 arm64; do \
+		echo "building release/lewbox_linux_$$arch"; \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o release/lewbox_linux_$$arch ./cmd/lewbox || exit 1; \
+	done
+	@aerolvm=$$(sed -n 's/^[[:space:]]*PinnedVersion = "\(v[^"]*\)"/\1/p' internal/machine/source.go); \
+		test -n "$$aerolvm" || { echo "release: no PinnedVersion in internal/machine/source.go"; exit 1; }; \
+		printf '{"version":"%s","aerolvm_version":"%s"}\n' "$(VERSION)" "$$aerolvm" > release/release.json
+	cd release && sha256sum lewbox_linux_* > checksums.txt && cat release.json checksums.txt
+
 clean: ## Remove bin/ and built web console files, keeping web/dist/.gitkeep.
-	rm -rf bin
+	rm -rf bin release
 	@mkdir -p web/dist
 	find web/dist -mindepth 1 ! -name .gitkeep -delete
 
