@@ -21,7 +21,7 @@ TOKEN=$(curl -fsS -X POST https://lewbox.example.com/v0/auth/login \
 curl -fsS -H "Authorization: Bearer $TOKEN" https://lewbox.example.com/v0/clusters
 ```
 
-Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, the public docs routes (`GET /v0/docs…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
+Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
 
 Browsers use `POST /v0/auth/session` instead. It takes the same body and sets an `HttpOnly` session cookie, so the token never reaches JavaScript:
 
@@ -50,7 +50,7 @@ API responses carry `Cache-Control: no-store`.
 
 ### Rate limits
 
-`POST /v0/auth/login` and `POST /v0/auth/session` share two budgets: 20 attempts per client IP per minute, and 5 failed attempts per normalized email per minute. When one is exhausted the response is `429` with a `Retry-After` header and:
+`POST /v0/auth/login`, `POST /v0/auth/session` and `POST /v0/auth/signup` share two budgets: 20 attempts per client IP per minute, and 5 failed attempts per normalized email per minute (sign-up only uses the per-IP budget). When one is exhausted the response is `429` with a `Retry-After` header and:
 
 ```json
 {"error":{"code":"rate_limited","message":"too many sign-in attempts; try again in 42 seconds","details":{"retry_after_seconds":42}}}
@@ -65,29 +65,58 @@ API responses carry `Cache-Control: no-store`.
 | Route | Who | |
 |---|---|---|
 | `GET /v0/health` | anyone | `{"ok": true}` |
+| `GET /v0/instance` | anyone | `{name, signup}`: the instance's name and sign-up mode, for the sign-in page |
 | `POST /v0/auth/login` | anyone | `{email, password}` → `{token, expires_at, user}` |
 | `POST /v0/auth/session` | anyone | Same body, sets the browser session cookie → `{expires_at, user}`. The token is only in the cookie |
+| `POST /v0/auth/signup` | anyone | `{email, password, organization}` → the same body and cookie as `POST /v0/auth/session`. `403` when sign-up is closed, `409` when the email is taken |
 | `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}` |
-| `GET /v0/me` | signed in | `{user, via}` |
+| `GET /v0/me` | signed in | `{user, organizations, via}` for an account; `{organization, admin_key, via}` for an API key |
+
+### Regions
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/regions` | signed in, or a key | `{data: [Region]}`: clusters that are `ready` or `degraded`, ordered by slug. No admin fields |
+
+### Settings
+
+Instance admins only.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/settings` | admin | `{instance_name, signup, default_plan}` |
+| `PATCH /v0/settings` | admin | `{instance_name, signup, default_plan}`; only the fields set change. `signup` is `open`, `approval` or `closed`; `default_plan` is a plan slug |
+
+### Plans
+
+Instance admins only. A `null` limit is unlimited.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/plans` | admin | `{data: [Plan]}`, ordered by slug |
+| `POST /v0/plans` | admin | `{slug, name, max_sandboxes, max_vcpus, max_memory_mb}` → `201` Plan |
+| `GET /v0/plans/{ref}` | admin | Plan, by ID or slug |
+| `PATCH /v0/plans/{ref}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
+| `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while organizations use it or it is the default plan |
 
 ### Clusters
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/clusters` | signed in | `{data: [Cluster]}` |
+| `GET /v0/clusters` | admin | `{data: [Cluster]}` |
 | `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, admin_token}` → `201` ClusterDetail. A failed required check → `412` with the checks in `details` |
-| `GET /v0/clusters/{ref}` | signed in | ClusterDetail, from the last check |
+| `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}` | admin | Stop managing it → the Cluster |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
 | `POST /v0/clusters/{ref}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
-| `GET /v0/clusters/resolve/{ref}` | signed in | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
+| `GET /v0/clusters/resolve/{ref}` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
 
 ### Nodes
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/nodes?cluster={ref}` | signed in | `{data: [Node]}`, optionally for one cluster |
-| `GET /v0/nodes/{ref}` | signed in | Node |
+| `GET /v0/nodes?cluster={ref}` | admin | `{data: [Node]}`, optionally for one cluster |
+| `GET /v0/nodes/{ref}` | admin | Node |
 | `DELETE /v0/nodes/{ref}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
 
@@ -109,10 +138,10 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/organizations?user={ref}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each |
-| `POST /v0/organizations` | admin | `{slug, name, owner}` → `201` Organization. `owner` (an email or ID) defaults to you |
+| `GET /v0/organizations?user={ref}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
+| `POST /v0/organizations` | admin | `{slug, name, owner, plan}` → `201` Organization. `owner` (an email or ID) defaults to you; `plan` (a slug) defaults to the instance's default plan |
 | `GET /v0/organizations/{ref}` | its members, admins, its keys | Organization |
-| `PATCH /v0/organizations/{ref}` | owner or admin; `status`: admin | `{name}` renames; `{status: "suspended"\|"active"}` suspends or restores → Organization |
+| `PATCH /v0/organizations/{ref}` | owner or admin; plan, limits and status: admin | `{name}` renames. Instance admins can also set `{plan, max_sandboxes, max_vcpus, max_memory_mb, status}`. A `null` limit falls back to the plan's; `status` is `active` or `suspended` → Organization |
 | `GET /v0/organization` | as for the header's, or the key's own | Organization |
 | `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
@@ -122,7 +151,7 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
 | `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
 
-"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or keys, and gets `403` on every route outside its organization (clusters, nodes, accounts). A suspended organization's keys get `403`, and its members can only read.
+"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or keys, and gets `403` on every route outside its organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`, and its members can only read.
 
 ### Docs
 
@@ -179,7 +208,36 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 
-**Organization**: `{id, slug, name, status, members, role, created_at}`. `status` is `active` or `suspended`; `role` is your role (or the listed account's) when it's a member.
+**Organization**
+
+```json
+{
+  "id": "01a1cb34-29a5-74c3-9691-5394d021b0f2",
+  "slug": "acme",
+  "name": "Acme Inc",
+  "status": "active",
+  "status_reason": "",
+  "team": "lbx-01a1cb3429a574c396915394d021b0f2",
+  "plan": {"slug": "free", "name": "Free"},
+  "limits": {"sandboxes": 2, "vcpus": 2, "memory_mb": 4096},
+  "overrides": {"sandboxes": null, "vcpus": null, "memory_mb": null},
+  "members": 1,
+  "role": "owner",
+  "created_at": "2026-11-11T15:22:35.8Z"
+}
+```
+
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `limits` are the effective limits: an override if set, otherwise the plan's; `null` is unlimited. `team` and `overrides` are only present for instance admins. `role` is your role (or the listed account's) when it is a member.
+
+**Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use.
+
+**Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, organizations, default, created_at}`. A `null` limit is unlimited; `organizations` is how many organizations use it.
+
+**Settings**: `{instance_name, signup, default_plan}`. `signup` is `open`, `approval` or `closed`.
+
+**Instance**: `{name, signup}`; public.
+
+**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. For an API key it is `{organization, admin_key, via}` instead.
 
 **Member**: `{id, organization_id, user_id, email, role, created_at}`.
 

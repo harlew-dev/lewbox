@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -43,16 +44,19 @@ func (q *Queries) CountMembersByOrganization(ctx context.Context) ([]CountMember
 }
 
 const createOrganization = `-- name: CreateOrganization :one
-INSERT INTO organizations (id, slug, name, status, created_at)
-VALUES (?, ?, ?, 'active', ?)
-RETURNING id, slug, name, status, created_at
+INSERT INTO organizations (id, slug, name, status, created_at, team, plan_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason
 `
 
 type CreateOrganizationParams struct {
 	ID        string
 	Slug      string
 	Name      string
+	Status    string
 	CreatedAt time.Time
+	Team      sql.NullString
+	PlanID    sql.NullString
 }
 
 func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
@@ -60,7 +64,10 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.ID,
 		arg.Slug,
 		arg.Name,
+		arg.Status,
 		arg.CreatedAt,
+		arg.Team,
+		arg.PlanID,
 	)
 	var i Organization
 	err := row.Scan(
@@ -69,6 +76,12 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
 	)
 	return i, err
 }
@@ -83,7 +96,7 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id string) error {
 }
 
 const getOrganizationByID = `-- name: GetOrganizationByID :one
-SELECT id, slug, name, status, created_at FROM organizations WHERE id = ?
+SELECT id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason FROM organizations WHERE id = ?
 `
 
 func (q *Queries) GetOrganizationByID(ctx context.Context, id string) (Organization, error) {
@@ -95,12 +108,18 @@ func (q *Queries) GetOrganizationByID(ctx context.Context, id string) (Organizat
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
 	)
 	return i, err
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, slug, name, status, created_at FROM organizations WHERE slug = ?
+SELECT id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason FROM organizations WHERE slug = ?
 `
 
 func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
@@ -112,12 +131,18 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
 	)
 	return i, err
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, slug, name, status, created_at FROM organizations ORDER BY slug
+SELECT id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason FROM organizations ORDER BY slug
 `
 
 func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error) {
@@ -135,6 +160,12 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 			&i.Name,
 			&i.Status,
 			&i.CreatedAt,
+			&i.Team,
+			&i.PlanID,
+			&i.MaxSandboxes,
+			&i.MaxVcpus,
+			&i.MaxMemoryMb,
+			&i.StatusReason,
 		); err != nil {
 			return nil, err
 		}
@@ -150,7 +181,7 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 }
 
 const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
-SELECT organizations.id, organizations.slug, organizations.name, organizations.status, organizations.created_at, memberships.role
+SELECT organizations.id, organizations.slug, organizations.name, organizations.status, organizations.created_at, organizations.team, organizations.plan_id, organizations.max_sandboxes, organizations.max_vcpus, organizations.max_memory_mb, organizations.status_reason, memberships.role
 FROM organizations
 JOIN memberships ON memberships.org_id = organizations.id
 WHERE memberships.user_id = ?
@@ -177,6 +208,12 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID string) (
 			&i.Organization.Name,
 			&i.Organization.Status,
 			&i.Organization.CreatedAt,
+			&i.Organization.Team,
+			&i.Organization.PlanID,
+			&i.Organization.MaxSandboxes,
+			&i.Organization.MaxVcpus,
+			&i.Organization.MaxMemoryMb,
+			&i.Organization.StatusReason,
 			&i.Role,
 		); err != nil {
 			return nil, err
@@ -193,7 +230,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID string) (
 }
 
 const setOrganizationName = `-- name: SetOrganizationName :one
-UPDATE organizations SET name = ? WHERE id = ? RETURNING id, slug, name, status, created_at
+UPDATE organizations SET name = ? WHERE id = ? RETURNING id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason
 `
 
 type SetOrganizationNameParams struct {
@@ -210,21 +247,37 @@ func (q *Queries) SetOrganizationName(ctx context.Context, arg SetOrganizationNa
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
 	)
 	return i, err
 }
 
-const setOrganizationStatus = `-- name: SetOrganizationStatus :one
-UPDATE organizations SET status = ? WHERE id = ? RETURNING id, slug, name, status, created_at
+const setOrganizationOverrides = `-- name: SetOrganizationOverrides :one
+UPDATE organizations
+SET max_sandboxes = ?, max_vcpus = ?, max_memory_mb = ?
+WHERE id = ?
+RETURNING id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason
 `
 
-type SetOrganizationStatusParams struct {
-	Status string
-	ID     string
+type SetOrganizationOverridesParams struct {
+	MaxSandboxes sql.NullInt64
+	MaxVcpus     sql.NullInt64
+	MaxMemoryMb  sql.NullInt64
+	ID           string
 }
 
-func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) (Organization, error) {
-	row := q.db.QueryRowContext(ctx, setOrganizationStatus, arg.Status, arg.ID)
+func (q *Queries) SetOrganizationOverrides(ctx context.Context, arg SetOrganizationOverridesParams) (Organization, error) {
+	row := q.db.QueryRowContext(ctx, setOrganizationOverrides,
+		arg.MaxSandboxes,
+		arg.MaxVcpus,
+		arg.MaxMemoryMb,
+		arg.ID,
+	)
 	var i Organization
 	err := row.Scan(
 		&i.ID,
@@ -232,6 +285,69 @@ func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganization
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
+	)
+	return i, err
+}
+
+const setOrganizationPlan = `-- name: SetOrganizationPlan :one
+UPDATE organizations SET plan_id = ? WHERE id = ? RETURNING id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason
+`
+
+type SetOrganizationPlanParams struct {
+	PlanID sql.NullString
+	ID     string
+}
+
+func (q *Queries) SetOrganizationPlan(ctx context.Context, arg SetOrganizationPlanParams) (Organization, error) {
+	row := q.db.QueryRowContext(ctx, setOrganizationPlan, arg.PlanID, arg.ID)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
+	)
+	return i, err
+}
+
+const setOrganizationStatus = `-- name: SetOrganizationStatus :one
+UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason
+`
+
+type SetOrganizationStatusParams struct {
+	Status       string
+	StatusReason string
+	ID           string
+}
+
+func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganizationStatusParams) (Organization, error) {
+	row := q.db.QueryRowContext(ctx, setOrganizationStatus, arg.Status, arg.StatusReason, arg.ID)
+	var i Organization
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Status,
+		&i.CreatedAt,
+		&i.Team,
+		&i.PlanID,
+		&i.MaxSandboxes,
+		&i.MaxVcpus,
+		&i.MaxMemoryMb,
+		&i.StatusReason,
 	)
 	return i, err
 }

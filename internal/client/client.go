@@ -201,9 +201,16 @@ func (c *Client) RemoveNode(ctx context.Context, ref string, req service.RemoveN
 
 // ListOrganizations returns organizations.
 func (c *Client) ListOrganizations(ctx context.Context, req service.ListOrganizationsRequest) (service.OrganizationList, error) {
-	path := "/v0/organizations"
+	query := url.Values{}
 	if req.User != "" {
-		path += "?user=" + url.QueryEscape(req.User)
+		query.Set("user", req.User)
+	}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	path := "/v0/organizations"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
 	var out service.OrganizationList
 	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
@@ -233,6 +240,62 @@ func (c *Client) GetOrganization(ctx context.Context, ref string) (service.Organ
 func (c *Client) UpdateOrganization(ctx context.Context, ref string, req service.UpdateOrganizationRequest) (service.Organization, error) {
 	var out service.Organization
 	err := c.do(ctx, http.MethodPatch, "/v0/organizations/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// ListRegions returns the clusters customers can use.
+func (c *Client) ListRegions(ctx context.Context) (service.RegionList, error) {
+	var out service.RegionList
+	err := c.do(ctx, http.MethodGet, "/v0/regions", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetSettings returns the instance settings.
+func (c *Client) GetSettings(ctx context.Context) (service.Settings, error) {
+	var out service.Settings
+	err := c.do(ctx, http.MethodGet, "/v0/settings", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdateSettings changes the instance settings.
+func (c *Client) UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error) {
+	var out service.Settings
+	err := c.do(ctx, http.MethodPatch, "/v0/settings", req, &out, defaultTimeout)
+	return out, err
+}
+
+// ListPlans returns every plan.
+func (c *Client) ListPlans(ctx context.Context) (service.PlanList, error) {
+	var out service.PlanList
+	err := c.do(ctx, http.MethodGet, "/v0/plans", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetPlan returns a plan by ID or slug.
+func (c *Client) GetPlan(ctx context.Context, ref string) (service.Plan, error) {
+	var out service.Plan
+	err := c.do(ctx, http.MethodGet, "/v0/plans/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// CreatePlan adds a plan.
+func (c *Client) CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error) {
+	var out service.Plan
+	err := c.do(ctx, http.MethodPost, "/v0/plans", req, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdatePlan changes a plan.
+func (c *Client) UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error) {
+	var out service.Plan
+	err := c.do(ctx, http.MethodPatch, "/v0/plans/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// DeletePlan removes a plan that no organization uses.
+func (c *Client) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
+	var out service.Plan
+	err := c.do(ctx, http.MethodDelete, "/v0/plans/"+url.PathEscape(ref), nil, &out, defaultTimeout)
 	return out, err
 }
 

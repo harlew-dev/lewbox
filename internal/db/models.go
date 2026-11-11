@@ -62,11 +62,27 @@ type Node struct {
 }
 
 type Organization struct {
-	ID        string
-	Slug      string
-	Name      string
-	Status    string
-	CreatedAt time.Time
+	ID           string
+	Slug         string
+	Name         string
+	Status       string
+	CreatedAt    time.Time
+	Team         sql.NullString
+	PlanID       sql.NullString
+	MaxSandboxes sql.NullInt64
+	MaxVcpus     sql.NullInt64
+	MaxMemoryMb  sql.NullInt64
+	StatusReason string
+}
+
+type Plan struct {
+	ID           string
+	Slug         string
+	Name         string
+	MaxSandboxes sql.NullInt64
+	MaxVcpus     sql.NullInt64
+	MaxMemoryMb  sql.NullInt64
+	CreatedAt    time.Time
 }
 
 type Session struct {
@@ -77,6 +93,11 @@ type Session struct {
 	ExpiresAt  time.Time
 	LastUsedAt time.Time
 	Kind       string
+}
+
+type Setting struct {
+	Key   string
+	Value string
 }
 
 type User struct {

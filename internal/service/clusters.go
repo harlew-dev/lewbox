@@ -198,7 +198,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 
 // ListClusters returns every cluster, ordered by slug.
 func (s *Service) ListClusters(ctx context.Context) (ClusterList, error) {
-	if _, err := requireUser(ctx); err != nil {
+	if _, err := requireAdmin(ctx); err != nil {
 		return ClusterList{}, err
 	}
 	rows, err := s.q.ListClusters(ctx)
@@ -218,7 +218,7 @@ func (s *Service) ListClusters(ctx context.Context) (ClusterList, error) {
 
 // GetCluster returns a cluster by ID or slug without calling AerolVM.
 func (s *Service) GetCluster(ctx context.Context, ref string) (ClusterDetail, error) {
-	if _, err := requireUser(ctx); err != nil {
+	if _, err := requireAdmin(ctx); err != nil {
 		return ClusterDetail{}, err
 	}
 	row, err := s.findCluster(ctx, ref)
@@ -317,7 +317,7 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string) (Cluster, error
 // ResolveCluster finds a cluster by its ID or slug, or by the name or ID of
 // one of its nodes. "cluster/<x>" and "node/<x>" remove any ambiguity.
 func (s *Service) ResolveCluster(ctx context.Context, ref string) (Cluster, error) {
-	if _, err := requireUser(ctx); err != nil {
+	if _, err := requireAdmin(ctx); err != nil {
 		return Cluster{}, err
 	}
 	row, err := s.resolveClusterRow(ctx, ref)

@@ -346,6 +346,9 @@ func newRootCmd(a *app) *cobra.Command {
 		newOrgCmd(a),
 		newMemberCmd(a),
 		newAdminKeyCmd(a),
+		newRegionCmd(a),
+		newPlanCmd(a),
+		newSettingsCmd(a),
 		newUpdateCmd(a),
 		newVersionCmd(),
 	)

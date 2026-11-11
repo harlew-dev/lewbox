@@ -38,6 +38,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderJoinToken(w, *data, now)
 	case service.OrganizationList:
 		return renderOrganizations(w, data.Data)
+	case service.RegionList:
+		return renderRegions(w, data.Data)
+	case service.PlanList:
+		return renderPlans(w, data.Data)
 	case service.MemberList:
 		return renderMembers(w, data.Data, now)
 	case service.AdminKeyList:
@@ -123,11 +127,45 @@ func renderJoinToken(w io.Writer, j service.JoinToken, now time.Time) error {
 // account's role, when it is a member.
 func renderOrganizations(w io.Writer, orgs []service.Organization) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tMEMBERS\tROLE")
+	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tPLAN\tMEMBERS\tROLE")
 	for _, o := range orgs {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, o.Members, dash(o.Role))
+		plan := ""
+		if o.Plan != nil {
+			plan = o.Plan.Slug
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, dash(plan), o.Members, dash(o.Role))
 	}
 	return tw.Flush()
+}
+
+// renderRegions prints the clusters customers can use.
+func renderRegions(w io.Writer, regions []service.Region) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "SLUG\tNAME\tRUNTIME\tSTATUS\tENDPOINT")
+	for _, r := range regions {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Slug, r.Name, r.Runtime, r.Status, r.EndpointURL)
+	}
+	return tw.Flush()
+}
+
+// renderPlans prints a plan table. A limit of "-" is unlimited.
+func renderPlans(w io.Writer, plans []service.Plan) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "SLUG\tNAME\tSANDBOXES\tVCPUS\tMEMORY\tORGS\tDEFAULT")
+	for _, p := range plans {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
+			p.Slug, p.Name,
+			limitText(p.MaxSandboxes, ""), limitText(p.MaxVcpus, ""), limitText(p.MaxMemoryMB, "MB"),
+			p.Organizations, yesNo(p.Default))
+	}
+	return tw.Flush()
+}
+
+func limitText(n *int64, unit string) string {
+	if n == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d%s", *n, unit)
 }
 
 // renderMembers prints a member table.

@@ -42,6 +42,15 @@ type Backend interface {
 	GetOrganization(ctx context.Context, ref string) (service.Organization, error)
 	UpdateOrganization(ctx context.Context, ref string, req service.UpdateOrganizationRequest) (service.Organization, error)
 
+	ListRegions(ctx context.Context) (service.RegionList, error)
+	GetSettings(ctx context.Context) (service.Settings, error)
+	UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error)
+	ListPlans(ctx context.Context) (service.PlanList, error)
+	GetPlan(ctx context.Context, ref string) (service.Plan, error)
+	CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error)
+	UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error)
+	DeletePlan(ctx context.Context, ref string) (service.Plan, error)
+
 	ListMembers(ctx context.Context, org string) (service.MemberList, error)
 	AddMember(ctx context.Context, org string, req service.AddMemberRequest) (service.Member, error)
 	SetMemberRole(ctx context.Context, org, ref string, req service.SetMemberRoleRequest) (service.Member, error)
@@ -186,6 +195,46 @@ func (l Local) GetOrganization(ctx context.Context, ref string) (service.Organiz
 // UpdateOrganization renames, suspends or restores an organization.
 func (l Local) UpdateOrganization(ctx context.Context, ref string, req service.UpdateOrganizationRequest) (service.Organization, error) {
 	return l.Svc.UpdateOrganization(l.withPrincipal(ctx), ref, req)
+}
+
+// ListRegions returns the clusters customers can use.
+func (l Local) ListRegions(ctx context.Context) (service.RegionList, error) {
+	return l.Svc.ListRegions(l.withPrincipal(ctx))
+}
+
+// GetSettings returns the instance settings.
+func (l Local) GetSettings(ctx context.Context) (service.Settings, error) {
+	return l.Svc.GetSettings(l.withPrincipal(ctx))
+}
+
+// UpdateSettings changes the instance settings.
+func (l Local) UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error) {
+	return l.Svc.UpdateSettings(l.withPrincipal(ctx), req)
+}
+
+// ListPlans returns every plan.
+func (l Local) ListPlans(ctx context.Context) (service.PlanList, error) {
+	return l.Svc.ListPlans(l.withPrincipal(ctx))
+}
+
+// GetPlan returns a plan by ID or slug.
+func (l Local) GetPlan(ctx context.Context, ref string) (service.Plan, error) {
+	return l.Svc.GetPlan(l.withPrincipal(ctx), ref)
+}
+
+// CreatePlan adds a plan.
+func (l Local) CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error) {
+	return l.Svc.CreatePlan(l.withPrincipal(ctx), req)
+}
+
+// UpdatePlan changes a plan.
+func (l Local) UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error) {
+	return l.Svc.UpdatePlan(l.withPrincipal(ctx), ref, req)
+}
+
+// DeletePlan removes a plan that no organization uses.
+func (l Local) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
+	return l.Svc.DeletePlan(l.withPrincipal(ctx), ref)
 }
 
 // ListMembers returns an organization's members.

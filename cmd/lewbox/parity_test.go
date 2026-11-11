@@ -327,6 +327,7 @@ func TestClusters(t *testing.T) {
 	e.same([]string{"cluster", "get", added.ID}, "GET", "/v0/clusters/"+added.ID, "", 200)
 	e.same([]string{"node", "list", "--cluster", "eu-west"}, "GET", "/v0/nodes?cluster=eu-west", "", 200)
 	e.same([]string{"node", "list", "--cluster", added.ID}, "GET", "/v0/nodes?cluster="+added.ID, "", 200)
+	e.same([]string{"region", "list"}, "GET", "/v0/regions", "", 200)
 }
 
 func TestClusterHTTP(t *testing.T) {
@@ -505,6 +506,80 @@ func TestOrganizations(t *testing.T) {
 	e.sameError([]string{"member", "list"}, "GET", "/v0/members", "", 400)
 	e.sameError([]string{"org", "get", "missing"}, "GET", "/v0/organizations/missing", "", 404)
 	e.sameError([]string{"org", "create", "acme"}, "POST", "/v0/organizations", `{"slug":"acme"}`, 409)
+}
+
+func TestPlansSettingsAndSignup(t *testing.T) {
+	e := newEnv(t)
+
+	// Settings read and write the same either way.
+	e.same([]string{"settings"}, "GET", "/v0/settings", "", 200)
+	e.same([]string{"settings", "set", "--signup", "approval"},
+		"PATCH", "/v0/settings", `{"signup":"approval"}`, 200)
+	e.same([]string{"settings", "set", "--name", "Acme Sandboxes", "--default-plan", "free"},
+		"PATCH", "/v0/settings", `{"instance_name":"Acme Sandboxes","default_plan":"free"}`, 200)
+
+	// A sign-up waits for approval, then the operator approves it.
+	status, body := e.httpWith("POST", "/v0/auth/signup",
+		`{"email":"new@example.com","password":"new-password-1","organization":"New Co"}`, "")
+	if status != http.StatusOK {
+		t.Fatalf("signup: status %d body %s", status, body)
+	}
+	pending := e.same([]string{"org", "list", "--status", "pending"},
+		"GET", "/v0/organizations?status=pending", "", 200)
+	var list service.OrganizationList
+	if err := json.Unmarshal([]byte(pending), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].Status != "pending" || list.Data[0].Plan == nil || list.Data[0].Plan.Slug != "free" {
+		t.Fatalf("pending = %s", pending)
+	}
+	e.same([]string{"org", "approve", list.Data[0].Slug},
+		"PATCH", "/v0/organizations/"+list.Data[0].Slug, `{"status":"active"}`, 200)
+
+	// Plans: create, show, list, update, clear a limit, delete.
+	smallOut, errOut, code := e.cli("plan", "create", "small", "--name", "Small",
+		"--max-sandboxes", "5", "--max-vcpus", "2", "--max-memory", "4GB")
+	if code != 0 {
+		t.Fatalf("plan create: exit %d: %s", code, errOut)
+	}
+	var small service.Plan
+	if err := json.Unmarshal([]byte(smallOut), &small); err != nil {
+		t.Fatal(err)
+	}
+	if small.MaxMemoryMB == nil || *small.MaxMemoryMB != 4096 || small.Default {
+		t.Fatalf("plan = %+v", small)
+	}
+	if got := e.same([]string{"plan", "show", "small"}, "GET", "/v0/plans/small", "", 200); got != smallOut {
+		t.Errorf("plan show = %s, want the create output %s", got, smallOut)
+	}
+	e.same([]string{"plan", "show", small.ID}, "GET", "/v0/plans/"+small.ID, "", 200)
+	e.same([]string{"plan", "list"}, "GET", "/v0/plans", "", 200)
+	cleared := e.same([]string{"plan", "update", "small", "--name", "Smaller", "--max-vcpus", "unlimited", "--max-memory", "1GB"},
+		"PATCH", "/v0/plans/small", `{"name":"Smaller","max_vcpus":null,"max_memory_mb":1024}`, 200)
+	if got, errOut, code := e.cli("plan", "delete", "small", "--yes"); code != 0 || got != cleared {
+		t.Fatalf("plan delete: exit %d stdout %s stderr %s\nwant %s", code, got, errOut, cleared)
+	}
+	e.sameError([]string{"plan", "show", "small"}, "GET", "/v0/plans/small", "", 404)
+
+	// A plan an organization uses, and an organization's limits.
+	if _, errOut, code := e.cli("plan", "create", "pro", "--max-sandboxes", "50"); code != 0 {
+		t.Fatalf("plan create pro: %s", errOut)
+	}
+	created, errOut, code := e.cli("org", "create", "acme", "--plan", "free")
+	if code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	if got := e.same([]string{"org", "get", "acme"}, "GET", "/v0/organizations/acme", "", 200); got != created {
+		t.Errorf("org get = %s, want the create output %s", got, created)
+	}
+	updated := e.same([]string{"org", "update", "acme", "--plan", "pro", "--max-sandboxes", "10"},
+		"PATCH", "/v0/organizations/acme", `{"plan":"pro","max_sandboxes":10}`, 200)
+	if !strings.Contains(updated, `"slug":"pro"`) || !strings.Contains(updated, `"sandboxes":10`) || !strings.Contains(updated, `"team":"lbx-`) {
+		t.Errorf("updated organization = %s", updated)
+	}
+	e.same([]string{"org", "update", "acme", "--max-sandboxes", "unlimited"},
+		"PATCH", "/v0/organizations/acme", `{"max_sandboxes":null}`, 200)
+	e.same([]string{"org", "list", "--status", "active"}, "GET", "/v0/organizations?status=active", "", 200)
 }
 
 func TestLoginWithAdminKey(t *testing.T) {

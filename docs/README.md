@@ -50,14 +50,15 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Sign in](accounts/sign-in.md) | `lewbox login`, contexts, scripts and CI |
 | [Manage accounts](accounts/manage-accounts.md) | Instance admins and regular accounts, passwords, disabling |
 | [Organizations and API keys](accounts/organizations-and-api-keys.md) | Organizations, member roles, and `lba_` API keys for your backend |
+| [Customers, plans and limits](accounts/customers-and-plans.md) | Sign-up, plans, approvals, suspension, per-organization limits, regions |
 
 ## Operations
 
 | | |
 |---|---|
 | [Update](operations/update.md) | Update the CLI and AerolVM on a machine |
-| [Troubleshooting](operations/troubleshooting.md) | Common errors and how to fix them |
 | [Turn on the firewall](operations/firewall.md) | ufw with exactly the ports a node needs |
+| [Troubleshooting](operations/troubleshooting.md) | Common errors and how to fix them |
 
 ## Reference
 

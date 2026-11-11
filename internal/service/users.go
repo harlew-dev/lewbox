@@ -63,12 +63,24 @@ type LogoutResponse struct {
 }
 
 // Me is returned by Me. User is nil for the local principal and for an
-// admin key, which has Organization and AdminKey instead.
+// admin key, which has Organization and AdminKey instead. Organizations is
+// set for user principals so a client can pick the portal and the current
+// organization without another call.
 type Me struct {
-	User         *User         `json:"user,omitempty"`
-	Organization *Organization `json:"organization,omitempty"`
-	AdminKey     *AdminKey     `json:"admin_key,omitempty"`
-	Via          string        `json:"via"` // "session", "local" or "admin_key"
+	User          *User            `json:"user,omitempty"`
+	Organization  *Organization    `json:"organization,omitempty"`
+	AdminKey      *AdminKey        `json:"admin_key,omitempty"`
+	Organizations []MeOrganization `json:"organizations,omitzero"`
+	Via           string           `json:"via"` // "session", "local" or "admin_key"
+}
+
+// MeOrganization is one of a user's organizations, as Me lists them.
+type MeOrganization struct {
+	ID     string `json:"id"`
+	Slug   string `json:"slug"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Status string `json:"status"`
 }
 
 // CreateUser creates an account. Only instance admins can do this.
@@ -313,24 +325,34 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 		return "", time.Time{}, db.User{}, unauthorized("email or password is wrong")
 	}
 
-	token, digest, err := newSessionToken()
+	token, expires, err = s.startSession(ctx, now, row.ID, kind, lifetime)
 	if err != nil {
 		return "", time.Time{}, db.User{}, err
+	}
+	s.limiter.clearEmail(email)
+	return token, expires, row, nil
+}
+
+// startSession creates a session of kind for an account and returns its token
+// and expiry. The token itself is never stored.
+func (s *Service) startSession(ctx context.Context, now time.Time, userID, kind string, lifetime time.Duration) (token string, expires time.Time, err error) {
+	token, digest, err := newSessionToken()
+	if err != nil {
+		return "", time.Time{}, err
 	}
 	expires = now.Add(lifetime)
 	if err := s.q.CreateSession(ctx, db.CreateSessionParams{
 		ID:         uuid.NewV7().String(),
-		UserID:     row.ID,
+		UserID:     userID,
 		TokenHash:  digest,
 		CreatedAt:  now,
 		ExpiresAt:  expires,
 		LastUsedAt: now,
 		Kind:       kind,
 	}); err != nil {
-		return "", time.Time{}, db.User{}, fmt.Errorf("create session: %w", err)
+		return "", time.Time{}, fmt.Errorf("create session: %w", err)
 	}
-	s.limiter.clearEmail(email)
-	return token, expires, row, nil
+	return token, expires, nil
 }
 
 // Logout ends the caller's session.
@@ -373,7 +395,21 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 		return Me{}, fmt.Errorf("get user: %w", err)
 	}
 	u := toUser(row)
-	return Me{User: &u, Via: "session"}, nil
+	rows, err := s.q.ListOrganizationsForUser(ctx, p.UserID)
+	if err != nil {
+		return Me{}, fmt.Errorf("list organizations: %w", err)
+	}
+	orgs := make([]MeOrganization, 0, len(rows))
+	for _, r := range rows {
+		orgs = append(orgs, MeOrganization{
+			ID:     r.Organization.ID,
+			Slug:   r.Organization.Slug,
+			Name:   r.Organization.Name,
+			Role:   r.Role,
+			Status: r.Organization.Status,
+		})
+	}
+	return Me{User: &u, Organizations: orgs, Via: "session"}, nil
 }
 
 // Authenticate resolves a bearer token to a principal. The HTTP middleware

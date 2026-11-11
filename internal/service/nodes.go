@@ -97,7 +97,7 @@ func (s *Service) AddNode(ctx context.Context, req AddNodeRequest) (Node, error)
 // ListNodes returns nodes ordered by cluster slug and then name. Nodes that
 // do not belong to a cluster come last.
 func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList, error) {
-	if _, err := requireUser(ctx); err != nil {
+	if _, err := requireAdmin(ctx); err != nil {
 		return NodeList{}, err
 	}
 	var rows []db.Node
@@ -138,7 +138,7 @@ func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList
 
 // GetNode returns a node by ID or name.
 func (s *Service) GetNode(ctx context.Context, ref string) (Node, error) {
-	if _, err := requireUser(ctx); err != nil {
+	if _, err := requireAdmin(ctx); err != nil {
 		return Node{}, err
 	}
 	row, err := s.findNode(ctx, ref)

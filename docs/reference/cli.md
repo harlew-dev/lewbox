@@ -3,7 +3,7 @@ title: CLI reference
 description: Every lewbox command, its flags, and what it does.
 ---
 
-`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
+`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `plans`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
 
 ***
 
@@ -277,21 +277,21 @@ Deletes the account, its sessions and its memberships. Asks to confirm. The last
 
 See [Organizations and API keys](../accounts/organizations-and-api-keys.md).
 
-### `lewbox org create SLUG [--name NAME] [--owner EMAIL]`
+### `lewbox org create SLUG [--name NAME] [--owner EMAIL] [--plan SLUG]`
 
-Creates an organization. Instance admins only. The owner defaults to you (none in local mode).
+Creates an organization. Instance admins only. The owner defaults to you (none in local mode); the plan defaults to the instance's default plan.
 
-### `lewbox org list [--user ID|EMAIL]` · `lewbox org get [ID|SLUG]`
+### `lewbox org list [--user ID|EMAIL] [--status STATUS]` · `lewbox org get [ID|SLUG]`
 
-Lists the organizations you can see (instance admins: all of them), or one. `--user` lists that account's organizations and its role in each. `get` with no argument shows `--org`, the context's default, or an API key's own.
+Lists the organizations you can see (instance admins: all of them), or one. `--user` lists that account's organizations and its role in each; `--status` keeps `pending`, `active` or `suspended` ones. `get` with no argument shows `--org`, the context's default, or an API key's own.
 
-### `lewbox org update ID|SLUG --name NAME`
+### `lewbox org update ID|SLUG [--name NAME] [--plan SLUG] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
 
-Renames an organization. Owners, admins and instance admins.
+Renames an organization (owners, admins and instance admins) or, for instance admins, re-plans it or sets its own limits. `--max-memory` takes `4096`, `4096MB` or `4GB`; `0` or `unlimited` falls back to the plan's limit.
 
-### `lewbox org suspend ID|SLUG` · `lewbox org restore ID|SLUG`
+### `lewbox org suspend ID|SLUG` · `lewbox org restore ID|SLUG` · `lewbox org approve ID|SLUG`
 
-Instance admins only. Suspending stops the organization's API keys and leaves its members read-only. `suspend` asks to confirm.
+Instance admins only. Suspending stops the organization's API keys and leaves its members read-only; restoring and approving make it `active` again. `suspend` asks to confirm.
 
 ### `lewbox org use ID|SLUG`
 
@@ -308,3 +308,33 @@ Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `3
 ### `lewbox admin-key list` · `lewbox admin-key revoke ID|NAME`
 
 Lists the keys, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm.
+
+***
+
+## Customers
+
+See [Customers, plans and limits](../accounts/customers-and-plans.md).
+
+### `lewbox region list`
+
+The clusters customers can use: ready or degraded ones, with their endpoint, runtime and status. Any signed-in account or API key.
+
+### `lewbox settings` · `lewbox settings set [--name NAME] [--signup MODE] [--default-plan SLUG]`
+
+Shows the instance settings, or changes them. Instance admins only. `--signup` is `open`, `approval` or `closed`; `--default-plan` is the plan new sign-ups get.
+
+### `lewbox plan list` · `lewbox plan show ID|SLUG`
+
+Every plan with its limits, organization count and whether it is the default, or one plan.
+
+### `lewbox plan create SLUG [--name NAME] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
+
+Creates a plan. A missing or cleared limit is unlimited.
+
+### `lewbox plan update ID|SLUG [--name NAME] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
+
+Changes a plan. `--max-memory` takes `4096`, `4096MB` or `4GB`; `0` and `unlimited` clear a limit.
+
+### `lewbox plan delete ID|SLUG`
+
+Deletes a plan no organization uses and that is not the default. Asks to confirm.

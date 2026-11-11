@@ -1,6 +1,6 @@
 -- name: CreateOrganization :one
-INSERT INTO organizations (id, slug, name, status, created_at)
-VALUES (?, ?, ?, 'active', ?)
+INSERT INTO organizations (id, slug, name, status, created_at, team, plan_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetOrganizationByID :one
@@ -26,7 +26,16 @@ SELECT org_id, COUNT(*) AS members FROM memberships GROUP BY org_id;
 UPDATE organizations SET name = ? WHERE id = ? RETURNING *;
 
 -- name: SetOrganizationStatus :one
-UPDATE organizations SET status = ? WHERE id = ? RETURNING *;
+UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING *;
+
+-- name: SetOrganizationPlan :one
+UPDATE organizations SET plan_id = ? WHERE id = ? RETURNING *;
+
+-- name: SetOrganizationOverrides :one
+UPDATE organizations
+SET max_sandboxes = ?, max_vcpus = ?, max_memory_mb = ?
+WHERE id = ?
+RETURNING *;
 
 -- name: DeleteOrganization :exec
 DELETE FROM organizations WHERE id = ?;

@@ -294,6 +294,62 @@ func TestBearerRequestDoesNotNeedJSONContentType(t *testing.T) {
 	}
 }
 
+func TestInstanceRouteIsPublic(t *testing.T) {
+	ts := newTestServer(t)
+	res, body := ts.do("GET", "/v0/instance", "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", res.StatusCode, body)
+	}
+	var instance service.Instance
+	if err := json.Unmarshal([]byte(body), &instance); err != nil {
+		t.Fatal(err)
+	}
+	if instance.Name != "Lewbox" || instance.Signup != "closed" {
+		t.Errorf("instance = %+v", instance)
+	}
+}
+
+func TestSignupSetsSessionCookie(t *testing.T) {
+	ts := newTestServer(t)
+	open := "open"
+	if _, err := ts.svc.UpdateSettings(service.WithPrincipal(context.Background(), service.LocalPrincipal()),
+		service.UpdateSettingsRequest{Signup: &open}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, body := ts.do("POST", "/v0/auth/signup", `{"email":"ada@example.com","password":"ada-password-1"}`, nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", res.StatusCode, body)
+	}
+	if strings.Contains(body, `"token"`) {
+		t.Errorf("signup body contains a token field: %s", body)
+	}
+	c := cookieNamed(t, res, "lewbox_session")
+	if c.Value == "" || !strings.HasPrefix(c.Value, "lbs_") {
+		t.Errorf("cookie value = %q", c.Value)
+	}
+	var session service.SessionResponse
+	if err := json.Unmarshal([]byte(body), &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.User.Email != "ada@example.com" || session.User.InstanceAdmin {
+		t.Errorf("session = %+v", session)
+	}
+
+	me, meBody := ts.do("GET", "/v0/me", "", nil, c)
+	if me.StatusCode != http.StatusOK || !strings.Contains(meBody, `"slug":"ada-`) || !strings.Contains(meBody, `"role":"owner"`) {
+		t.Fatalf("GET /v0/me: status %d body %s", me.StatusCode, meBody)
+	}
+}
+
+func TestSignupClosed(t *testing.T) {
+	ts := newTestServer(t)
+	res, body := ts.do("POST", "/v0/auth/signup", `{"email":"ada@example.com","password":"ada-password-1"}`, nil)
+	if res.StatusCode != http.StatusForbidden || !strings.Contains(body, `"code":"forbidden"`) {
+		t.Errorf("status %d body %s", res.StatusCode, body)
+	}
+}
+
 func TestRateLimitedResponse(t *testing.T) {
 	ts := newTestServer(t, service.WithLoginLimits(0, 2))
 	wrong := `{"email":"` + adminEmail + `","password":"wrong-password-1"}`

@@ -57,7 +57,7 @@ func newOrgCmd(a *app) *cobra.Command {
 		Short:   "Manage organizations",
 	}
 
-	var createName, createOwner string
+	var createName, createOwner, createPlan string
 	create := &cobra.Command{
 		Use:   "create <slug>",
 		Short: "Create an organization (POST /v0/organizations)",
@@ -68,23 +68,26 @@ func newOrgCmd(a *app) *cobra.Command {
 				Slug:  args[0],
 				Name:  createName,
 				Owner: createOwner,
+				Plan:  createPlan,
 			})
 		}),
 	}
 	create.Flags().StringVar(&createName, "name", "", "a display name (default: the slug)")
 	create.Flags().StringVar(&createOwner, "owner", "", "the first owner's email (default: you)")
+	create.Flags().StringVar(&createPlan, "plan", "", "the plan's slug (default: the instance's default plan)")
 
-	var listUser string
+	var listUser, listStatus string
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List organizations (GET /v0/organizations)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{User: listUser})
+			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{User: listUser, Status: listStatus})
 		}),
 	}
 	list.Flags().StringVar(&listUser, "user", "", "list this account's organizations and its role in each")
+	list.Flags().StringVar(&listStatus, "status", "", "only pending, active or suspended organizations")
 
 	get := &cobra.Command{
 		Use:   "get [<id|slug>]",
@@ -99,21 +102,45 @@ func newOrgCmd(a *app) *cobra.Command {
 		}),
 	}
 
-	var updateName string
+	var (
+		updateName, updatePlan, updateSandboxes, updateVcpus, updateMemory string
+	)
 	update := &cobra.Command{
 		Use:   "update <id|slug>",
-		Short: "Rename an organization (PATCH /v0/organizations/{id|slug})",
+		Short: "Change an organization (PATCH /v0/organizations/{id|slug})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !cmd.Flags().Changed("name") {
-				return usagef("nothing to change: pass --name")
+			req := service.UpdateOrganizationRequest{}
+			if cmd.Flags().Changed("name") {
+				req.Name = &updateName
+			}
+			if cmd.Flags().Changed("plan") {
+				req.Plan = &updatePlan
+			}
+			var err error
+			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, parseCountLimit); err != nil {
+				return err
+			}
+			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, parseCountLimit); err != nil {
+				return err
+			}
+			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, parseMemoryLimit); err != nil {
+				return err
+			}
+			if req.Name == nil && req.Plan == nil &&
+				!req.MaxSandboxes.Set && !req.MaxVcpus.Set && !req.MaxMemoryMB.Set {
+				return usagef("nothing to change: pass --name, --plan, --max-sandboxes, --max-vcpus or --max-memory")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.UpdateOrganization(ctx, args[0], service.UpdateOrganizationRequest{Name: &updateName})
+				return b.UpdateOrganization(ctx, args[0], req)
 			})(cmd, args)
 		},
 	}
 	update.Flags().StringVar(&updateName, "name", "", "the new display name")
+	update.Flags().StringVar(&updatePlan, "plan", "", "the plan's slug")
+	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes: a number, or 0/unlimited for the plan's")
+	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs: a number, or 0/unlimited for the plan's")
+	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: 4096, 4096MB or 4GB, or 0/unlimited for the plan's")
 
 	status := func(use, short, value, question string) *cobra.Command {
 		return &cobra.Command{
@@ -135,6 +162,7 @@ func newOrgCmd(a *app) *cobra.Command {
 	suspend := status("suspend", "Suspend an organization: its admin keys stop working (PATCH /v0/organizations/{id|slug})",
 		"suspended", "Suspend organization %q? Its admin keys stop working.")
 	restore := status("restore", "Restore a suspended organization (PATCH /v0/organizations/{id|slug})", "active", "")
+	approve := status("approve", "Approve a pending organization (PATCH /v0/organizations/{id|slug})", "active", "")
 
 	use := &cobra.Command{
 		Use:   "use <id|slug>",
@@ -166,7 +194,7 @@ func newOrgCmd(a *app) *cobra.Command {
 		},
 	}
 
-	org.AddCommand(create, list, get, update, suspend, restore, use)
+	org.AddCommand(create, list, get, update, suspend, restore, approve, use)
 	return org
 }
 

@@ -478,6 +478,9 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	if err != nil || me.Via != "admin_key" || me.Organization == nil || me.Organization.Slug != "acme" {
 		t.Fatalf("me with key = %+v, %v", me, err)
 	}
+	if me.Organization.Team != "" || me.Organization.Overrides != nil || me.Organization.Plan == nil {
+		t.Errorf("a key sees admin fields: %+v", me.Organization)
+	}
 	if org, err := keyed.GetOrganization(ctx, ""); err != nil || org.Slug != "acme" {
 		t.Fatalf("own organization with key = %+v, %v", org, err)
 	}
@@ -513,6 +516,116 @@ func resultJSON(t *testing.T, v any, err error) string {
 	}
 	return string(data)
 }
+
+func TestCustomerBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	// One ready cluster to make regions meaningful.
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	getSettings := func(ctx context.Context, b backend.Backend) (any, error) { return b.GetSettings(ctx) }
+	getPro := func(ctx context.Context, b backend.Backend) (any, error) { return b.GetPlan(ctx, "pro") }
+	getTemp := func(ctx context.Context, b backend.Backend) (any, error) { return b.GetPlan(ctx, "temp") }
+	listPlans := func(ctx context.Context, b backend.Backend) (any, error) { return b.ListPlans(ctx) }
+	getCustomer := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetOrganization(ctx, "customer")
+	}
+	setOverrides := func(n *int64) callFunc {
+		return func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.UpdateOrganization(ctx, "customer", service.UpdateOrganizationRequest{
+				MaxSandboxes: service.OptionalInt{Set: true, Value: n},
+			})
+		}
+	}
+
+	runSteps(t, h, []step{
+		both("get settings", getSettings),
+		{
+			name: "set settings",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				mode := "approval"
+				return b.UpdateSettings(ctx, service.UpdateSettingsRequest{Signup: &mode})
+			},
+			remote:  getSettings,
+			compare: true,
+		},
+		{
+			name: "create plan",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreatePlan(ctx, service.CreatePlanRequest{
+					Slug:         "pro",
+					Name:         "Pro",
+					MaxSandboxes: intPtr(50),
+					MaxVcpus:     intPtr(8),
+				})
+			},
+			remote:  getPro,
+			compare: true,
+		},
+		both("list plans", listPlans),
+		both("update plan", func(ctx context.Context, b backend.Backend) (any, error) {
+			name := "Pro Plus"
+			return b.UpdatePlan(ctx, "pro", service.UpdatePlanRequest{
+				Name:     &name,
+				MaxVcpus: service.OptionalInt{Set: true},
+			})
+		}),
+		{
+			name: "create an organization on the plan",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "customer", Plan: "pro"})
+			},
+			remote:  getCustomer,
+			compare: true,
+		},
+		both("override a limit", setOverrides(intPtr(10))),
+		both("clear a limit", setOverrides(nil)),
+		both("suspend the organization", func(ctx context.Context, b backend.Backend) (any, error) {
+			status := "suspended"
+			return b.UpdateOrganization(ctx, "customer", service.UpdateOrganizationRequest{Status: &status})
+		}),
+		both("restore the organization", func(ctx context.Context, b backend.Backend) (any, error) {
+			status := "active"
+			return b.UpdateOrganization(ctx, "customer", service.UpdateOrganizationRequest{Status: &status})
+		}),
+		{
+			name: "create an unused plan",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreatePlan(ctx, service.CreatePlanRequest{Slug: "temp"})
+			},
+			remote:  getTemp,
+			compare: true,
+		},
+		{
+			name:  "delete the unused plan",
+			local: getTemp,
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeletePlan(ctx, "temp")
+			},
+			compare: true,
+		},
+		both("list regions", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListRegions(ctx)
+		}),
+		both("listing by status", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{Status: "active"})
+		}),
+		both("deleting a plan in use", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.DeletePlan(ctx, "pro")
+		}),
+	})
+}
+
+func intPtr(n int64) *int64 { return &n }
 
 func TestLocalAuthHasNoSession(t *testing.T) {
 	h := newHarness(t)
