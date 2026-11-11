@@ -1,6 +1,6 @@
 ---
 title: What Lewbox changes on a machine
-description: Every file, service and privileged command that lewbox install, node add and update touch on a node.
+description: Every file, service and privileged command that lewbox install, node add, update and firewall enable touch on a node.
 ---
 
 Lewbox runs privileged steps one at a time through `sudo`, and prints each one before running it. Secrets in those lines and in the installer's output are replaced with `******`. `lewbox install --dry-run` prints the steps without running them.
@@ -42,6 +42,17 @@ Then `sudo systemctl daemon-reload` and `sudo systemctl restart sandboxd`, but o
 ## `lewbox update --aerolvm`
 
 Re-runs the verified installer for the new version, with no `init` or `join`: `sudo bash install.sh --version <tag>`. AerolVM swaps its binaries in place, keeping the old ones as `*.prev` and a database backup. Lewbox re-applies its settings and checks `/health` for the new version.
+
+## `lewbox firewall enable`
+
+Reads, changing nothing: `sudo ufw version`, `sudo sshd -T` (the SSH port), `sudo iptables-save -t filter` (AerolVM's sandbox rules), `sudo cat /etc/ufw/user.rules` and `user6.rules` (the current rules), and the cluster's members over `127.0.0.1` with the operator token. Then:
+
+1. `sudo ufw --force reset`, only if you chose to reset;
+2. `sudo ufw default deny incoming`, and after a reset `sudo ufw default allow outgoing`;
+3. one `sudo ufw allow proto <tcp|udp> from <any|network> to any port <port> comment lewbox:<purpose>` per rule;
+4. `sudo ufw --force enable`.
+
+See [Turn on the firewall](../operations/firewall.md) for the rules themselves.
 
 ## Removing AerolVM
 

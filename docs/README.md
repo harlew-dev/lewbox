@@ -57,6 +57,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 |---|---|
 | [Update](operations/update.md) | Update the CLI and AerolVM on a machine |
 | [Troubleshooting](operations/troubleshooting.md) | Common errors and how to fix them |
+| [Turn on the firewall](operations/firewall.md) | ufw with exactly the ports a node needs |
 
 ## Reference
 

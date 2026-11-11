@@ -100,6 +100,7 @@ Details in [aerolvm.md](aerolvm-integration.md).
 | `lewbox install --dry-run` | Runs every check and prints every command, but changes nothing. Use it as a "can this machine run AerolVM?" check | this machine | ✅ |
 | `lewbox update [--version <tag>] [--check]` | Updates the CLI itself. Never automatic | this machine | ✅ |
 | `lewbox update --aerolvm [--aerolvm-version <tag>]` | Updates the CLI, then AerolVM on this machine, to the version the new CLI is tested with. On a cluster with more than one node it refuses and points you to `cluster upgrade` | this machine | ✅ (tested v0.6.13 → v0.7.0) |
+| `lewbox firewall enable [--peers <cidr>] [--allow <port[/proto]>] [--reset[=false]] [--dry-run]` | Turns on ufw with the ports this node needs (mode ports, cluster ports from the private network only, AerolVM's sandbox node-guard rules). Offers to reset ufw when it has rules Lewbox doesn't set (`[Y/n]`) | this machine | ✅ |
 | `lewbox uninstall` | Prints the manual steps to remove AerolVM. AerolVM's installer has no uninstall, so Lewbox doesn't guess | this machine | ❓ (AerolVM releases now ship `uninstall.sh`) |
 
 ### Orchestrator (the Lewbox server)

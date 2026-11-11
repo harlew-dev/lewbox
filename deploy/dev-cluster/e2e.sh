@@ -100,6 +100,43 @@ echo "placement: node-1 runs $on1, node-2 runs $on2"
 (( on1 + on2 == 3 )) && pass "3 sandbox containers across the cluster" || fail "expected 3 containers, got $on1 + $on2"
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
+step "firewall enable: ufw with Lewbox's ports, the cluster ports from the private network only"
+compose exec -T node-1 ufw allow 5555/tcp >/dev/null # a rule Lewbox doesn't set
+if lb node-1 firewall enable >/dev/null 2>&1; then fail "other rules were handled without asking"; else pass "other rules need --reset outside a terminal"; fi
+out=$(lb node-1 firewall enable --reset=false --json) || fail "firewall enable --reset=false on node-1"
+expect "node-1 kept 5555/tcp" '.enabled and (.reset | not) and .kept == ["5555/tcp"]' "$out"
+expect "cluster ports open to the dev network only" '[.rules[] | select(.purpose == "cluster") | .from] | unique == ["172.30.0.0/24"]' "$out"
+expect "AerolVM's sandbox rules copied" '[.rules[] | select(.purpose == "sandbox-to-host")] | length > 0' "$out"
+out=$(lb node-1 firewall enable --yes --json) || fail "firewall enable --yes on node-1"
+expect "node-1 reset to Lewbox's rules" '.reset and .kept == []' "$out"
+compose exec -T node-1 sh -c '! ufw status | grep -q 5555' && pass "5555/tcp removed by the reset" || fail "5555/tcp still open"
+lb node-2 firewall enable --yes --json >/dev/null || fail "firewall enable on node-2"
+for n in node-1 node-2; do compose exec -T "$n" ufw status | grep -q '^Status: active' && pass "$n: ufw active" || fail "$n: ufw not active"; done
+c=$(lb node-1 cluster check "$CLUSTER" --json)
+expect "cluster still ready behind the firewall" '.status == "ready"' "$c"
+ids=()
+for i in 1 2; do
+	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-fw-$i\",\"image\":\"alpine:3.20\"}")
+	expect "sandbox e2e-fw-$i started through node-2" '.status == "started"' "$s"
+	ids+=("$(jq -r .id <<<"$s")")
+done
+# A sandbox with an egress allowlist goes through AerolVM's egress proxy and
+# DNS on the host, which ufw's default-deny would drop without Lewbox's rules.
+s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes \
+	-d '{"name":"e2e-fw-egress","image":"alpine:3.20","network_allow_out":["example.com"]}')
+expect "egress-restricted sandbox started" '.status == "started"' "$s"
+id=$(jq -r .id <<<"$s"); ids+=("$id")
+found=false
+for n in node-1 node-2; do
+	ct=$(compose exec -T "$n" docker ps -q --filter "name=^${id}\$")
+	[[ -n "$ct" ]] || continue
+	found=true
+	compose exec -T "$n" docker exec "$ct" timeout 20 wget -q -O /dev/null http://example.com && pass "allowed host reachable behind the firewall" || fail "egress to an allowed host blocked"
+	if compose exec -T "$n" docker exec "$ct" timeout 20 wget -q -O /dev/null http://google.com 2>/dev/null; then fail "egress to a host not allowed got through"; else pass "other hosts still blocked"; fi
+done
+$found || fail "egress-restricted sandbox's container not found on either node"
+for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
+
 step "node add is safe to run again"
 out=$(lb node-2 node add node-2 --cluster node-1 --json) || fail "re-run of node add failed"
 expect "re-run reports node-2" '.name == "node-2"' "$out"

@@ -37,6 +37,7 @@ type Member struct {
 	NodeID     string   `json:"node_id"`
 	NodeName   string   `json:"node_name"`
 	APIURL     string   `json:"api_url"`
+	RaftAddr   string   `json:"raft_addr"`
 	PublicHost string   `json:"public_host"`
 	Role       string   `json:"role"`
 	Alive      bool     `json:"alive"`

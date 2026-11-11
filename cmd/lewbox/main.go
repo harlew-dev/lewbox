@@ -341,6 +341,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newInstallCmd(a),
 		newNodeCmd(a),
 		newClusterCmd(a),
+		newFirewallCmd(a),
 		newUserCmd(a),
 		newOrgCmd(a),
 		newMemberCmd(a),

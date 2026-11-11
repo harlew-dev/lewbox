@@ -67,6 +67,7 @@ From the host you can also use the orchestrator directly: `lewbox login http://1
 - Lewbox's settings are on each node, in Lewbox's own files;
 - the installer's PAT never appears in the CLI's output;
 - sandboxes start through node-2 and spread across both nodes;
+- `firewall enable` turns on ufw on both nodes (keeping or resetting other rules), and the cluster, sandboxes and egress allowlists still work behind it;
 - `node add` is safe to run again;
 - a stopped cluster is reported `unreachable`, then `ready` again;
 - `node remove` needs `--yes`, removes the node from AerolVM too, and refuses the last node;
@@ -91,7 +92,7 @@ From the host you can also use the orchestrator directly: `lewbox login http://1
 ## Things that differ from a real server
 
 - **IP mode, no TLS.** Nodes use `--public-host <container IP>`. Domain mode needs a real DNS zone and Cloudflare token.
-- **No firewall between nodes.** On real servers, ports 7000–7003 must be open only between cluster nodes.
+- **No firewall until the e2e test turns one on.** The node image includes `ufw` (as Ubuntu servers do), off by default. `e2e.sh` runs `lewbox firewall enable` on node-1 and node-2.
 - The image removes Ubuntu's container-only `policy-rc.d` (it stops services from starting), adds `file` (the installer uses it to check binaries), and masks units that need real hardware.
 - `/var/lib/docker`, `/var/lib/containerd` and `/var/lib/sandboxd` are volumes, because Docker inside Docker can't use overlayfs on top of overlayfs.
 - `/lib/modules` is mounted read-only, so `sandboxd` can load `br_netfilter` for sandbox network isolation.

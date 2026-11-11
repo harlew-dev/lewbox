@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,17 +22,18 @@ import (
 // hostDeps are the machine-facing dependencies the install, node add and
 // update commands use. Tests replace them; zero values get real ones.
 type hostDeps struct {
-	runner      machine.Runner
-	env         machine.Env
-	localAPIURL string
-	probe       func(ctx context.Context, addr string) error
-	executable  func() (string, error)
-	euid        func() int
-	execFn      func(argv0 string, argv []string, envv []string) error
-	sleep       func(ctx context.Context, d time.Duration)
-	now         func() time.Time
-	hostname    func() (string, error)
-	releaseURL  string
+	runner         machine.Runner
+	env            machine.Env
+	localAPIURL    string
+	probe          func(ctx context.Context, addr string) error
+	executable     func() (string, error)
+	euid           func() int
+	execFn         func(argv0 string, argv []string, envv []string) error
+	sleep          func(ctx context.Context, d time.Duration)
+	now            func() time.Time
+	hostname       func() (string, error)
+	releaseURL     string
+	interfaceAddrs func() ([]netip.Prefix, error)
 }
 
 // defaultHostDeps wires the commands to the real machine.
@@ -64,6 +66,25 @@ func defaultHostDeps(a *app) *hostDeps {
 		now:        time.Now,
 		hostname:   os.Hostname,
 		releaseURL: envOr("LEWBOX_RELEASE_URL", machine.DefaultReleaseURL),
+		interfaceAddrs: func() ([]netip.Prefix, error) {
+			addrs, err := net.InterfaceAddrs()
+			if err != nil {
+				return nil, err
+			}
+			prefixes := make([]netip.Prefix, 0, len(addrs))
+			for _, addr := range addrs {
+				ipnet, ok := addr.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				prefix, err := netip.ParsePrefix(ipnet.String())
+				if err != nil {
+					continue
+				}
+				prefixes = append(prefixes, prefix)
+			}
+			return prefixes, nil
+		},
 	}
 }
 
@@ -112,6 +133,9 @@ func (a *app) host() *hostDeps {
 	}
 	if hd.releaseURL == "" {
 		hd.releaseURL = base.releaseURL
+	}
+	if hd.interfaceAddrs == nil {
+		hd.interfaceAddrs = base.interfaceAddrs
 	}
 	return hd
 }

@@ -46,6 +46,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderNewAdminKey(w, data, now)
 	case contextList:
 		return renderContexts(w, data.Data)
+	case firewallOutput:
+		return renderFirewall(w, data)
+	case *firewallOutput:
+		return renderFirewall(w, *data)
 	default:
 		return renderObject(w, v, now)
 	}
@@ -179,6 +183,29 @@ func renderContexts(w io.Writer, entries []contextEntry) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", e.Name, dash(e.APIURL), current)
 	}
 	return tw.Flush()
+}
+
+// renderFirewall prints the enabled state and the rules ufw now has.
+func renderFirewall(w io.Writer, f firewallOutput) error {
+	if f.DryRun {
+		fmt.Fprintln(w, "dry run: nothing changed")
+	} else {
+		fmt.Fprintln(w, "ufw enabled")
+	}
+	fmt.Fprintf(w, "reset: %s\n", yesNo(f.Reset))
+
+	tw := newTable(w)
+	fmt.Fprintln(tw, "PORT\tPROTO\tFROM\tFOR")
+	for _, rule := range f.Rules {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", rule.Port, rule.Proto, rule.From, rule.Purpose)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(f.Kept) > 0 {
+		fmt.Fprintf(w, "kept: %s\n", strings.Join(f.Kept, ", "))
+	}
+	return nil
 }
 
 // renderObject prints any JSON object as aligned key: value lines. Nested

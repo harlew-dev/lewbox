@@ -171,6 +171,25 @@ Asks to confirm before replacing anything (`--yes` skips).
 
 See [Update](../operations/update.md).
 
+### `lewbox firewall enable`
+
+Run on a node after `lewbox node add`. Turns on ufw with the ports this node needs: SSH, its install mode's ports, the cluster ports from the private network only, and AerolVM's sandbox rules. If ufw has other rules, it asks `Do you want to reset your firewall? [Y/n]`: yes resets ufw to Lewbox's rules only, no keeps them.
+
+```bash
+lewbox firewall enable
+lewbox firewall enable --peers 10.0.0.0/16 --allow 8080/tcp
+lewbox firewall enable --reset=false --dry-run
+```
+
+| Flag | Default | |
+|---|---|---|
+| `--peers CIDR` | the private network of this node's cluster address | Where cluster ports are open from. Repeatable. Refused if a current node falls outside it |
+| `--allow PORT[/PROTO]` | | Also open this port, or `START:END` range, to anyone. `tcp` unless `/udp`. Repeatable |
+| `--reset` | ask | `--reset` resets without asking, `--reset=false` keeps other rules. Needed outside a terminal when there are other rules, unless `--yes` (which resets) |
+| `--dry-run` | | Read everything, print every command, change nothing |
+
+See [Turn on the firewall](../operations/firewall.md).
+
 ***
 
 ## Clusters

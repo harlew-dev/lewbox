@@ -36,10 +36,12 @@ It doesn't need root.
 | 80/TCP | Your customers | Sandbox URLs in public-host mode |
 | 2220/TCP | Your customers | AerolVM's SSH gateway |
 | 22000–23000/TCP | Your customers (optional) | Ports that sandboxes expose |
-| 7000–7003 | **Cluster nodes only** | Raft, gossip, internal RPC and joins |
+| 7000–7003/TCP, 7001/UDP | **Cluster nodes only** | Raft, gossip, internal RPC and joins |
 
 > [!WARNING]
 > Never open ports 7000–7003 to the internet. Nodes in one cluster need a private network between them (a VPC, a WireGuard mesh, or a dedicated subnet), and every node must reach every other node on these ports. AerolVM checks this when a node joins.
+
+`lewbox firewall enable` turns on ufw with these ports, opening the cluster ports to your private network only. See [Turn on the firewall](../operations/firewall.md).
 
 ## Next
 
