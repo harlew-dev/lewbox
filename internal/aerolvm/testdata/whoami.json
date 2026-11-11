@@ -1,0 +1,10 @@
+{
+  "principal": {
+    "kind": "token",
+    "id": "tok_H4IZwIoxL6t5",
+    "name": "lewbox"
+  },
+  "role": "admin",
+  "team": "*",
+  "expires_at": "2126-10-18T13:21:04Z"
+}

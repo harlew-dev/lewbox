@@ -1,0 +1,12 @@
+{
+  "token": "abc123.REDACTEDsecretREDACTEDsecret12",
+  "id": "8xr414",
+  "role": "server",
+  "reusable": false,
+  "expires_at": "2026-11-11T13:40:23.17525276Z",
+  "ca_cert_hash": "sha256:a9531f1c8fa5b96efcdd8dcfcdeb1089627a92c493491659a63354ba150488ce",
+  "join_urls": [
+    "https://172.30.0.11:7003",
+    "https://172.30.0.12:7003"
+  ]
+}

@@ -1,0 +1,15 @@
+.git
+.gitignore
+**/node_modules
+# Vite writes the console here; the Dockerfile copies it from the web stage.
+web/dist
+# The dev cluster downloads about 200 MB of AerolVM release files here.
+deploy/dev-cluster/.cache
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.tgz.tmp
+.DS_Store
+*.swp
+*~

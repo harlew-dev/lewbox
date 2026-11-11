@@ -1,0 +1,52 @@
+# Lewbox orchestrator (API + web console + docs) in one container.
+#
+#   LEWBOX_ADMIN_PASSWORD='at-least-12-chars' docker compose up -d --build
+#   open http://localhost:8080
+#
+# The first admin is created only while there are no accounts. All state
+# (SQLite database *and* the keyring that decrypts cluster tokens) lives in
+# the lewbox-data volume; back up both together.
+#
+# Full guide: docs/setup/run-with-docker.md
+
+services:
+  lewbox:
+    build:
+      context: .
+      target: runtime
+      args:
+        VERSION: ${LEWBOX_VERSION:-dev}
+    image: lewbox:local
+    restart: unless-stopped
+    ports:
+      - "${LEWBOX_HTTP_PORT:-8080}:8080"
+    volumes:
+      - lewbox-data:/data
+    environment:
+      LEWBOX_BOOTSTRAP_ADMIN_EMAIL: ${LEWBOX_ADMIN_EMAIL:-admin@example.com}
+      LEWBOX_BOOTSTRAP_ADMIN_PASSWORD: ${LEWBOX_ADMIN_PASSWORD:?set LEWBOX_ADMIN_PASSWORD (at least 12 characters)}
+      # Behind a TLS proxy that does not send X-Forwarded-Proto:
+      # LEWBOX_COOKIE_SECURE: always
+      # Extra origins the CSRF check accepts, comma-separated:
+      # LEWBOX_TRUSTED_ORIGINS: https://lewbox.example.com
+      # How often to check every cluster (0 turns checks off):
+      # LEWBOX_CHECK_INTERVAL: 60s
+
+  # Checks, built only on request. Compose builds with the daemon's BuildKit,
+  # so these work without the docker buildx plugin:
+  #   docker compose --profile test build test web-test
+  test:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    image: lewbox:test
+  web-test:
+    profiles: [test]
+    build:
+      context: .
+      target: web-test
+    image: lewbox:web-test
+
+volumes:
+  lewbox-data:

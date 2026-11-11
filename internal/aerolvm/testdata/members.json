@@ -1,0 +1,127 @@
+{
+  "members": [
+    {
+      "node_id": "proto-a",
+      "node_name": "proto-a",
+      "api_url": "http://172.30.0.11:21212",
+      "data_plane_host": "172.30.0.11",
+      "raft_addr": "172.30.0.11:7000",
+      "internal_url": "https://172.30.0.11:7002",
+      "role": "mixed",
+      "public_host": "172.30.0.11",
+      "fsm_ops_version": 15,
+      "alive": true,
+      "capacity": {
+        "host_cpu_cores": 4,
+        "host_memory_total_mb": 15364,
+        "host_disk_free_gb": 13,
+        "reserved_cpu": 2,
+        "reserved_memory_mb": 2048,
+        "reserved_disk_gb": 20,
+        "available_cpu": 34,
+        "available_memory_mb": 128546,
+        "live_memory_free_mb": 8552,
+        "sandboxes_active": 2,
+        "sandboxes_by_runtime": {
+          "docker": 2
+        },
+        "can_admit": true,
+        "cpu_reservation_ratio": 0.9,
+        "memory_reservation_ratio": 0.85,
+        "memory_floor_ratio": 0.05,
+        "cpu_overprovision_factor": 10,
+        "memory_overprovision_factor": 10,
+        "memory_floor_mb": 768,
+        "cpu_budget": 36,
+        "memory_budget_mb": 130594,
+        "supported_runtimes": [
+          "docker"
+        ],
+        "egress_gateway_ready": true,
+        "mediated_egress": true,
+        "slot_pools": [
+          {
+            "name": "docker_bridge",
+            "runtimes": [
+              "docker",
+              "gvisor"
+            ],
+            "total": 1000,
+            "free": 998
+          }
+        ]
+      },
+      "capacity_updated_unix": 1794403523,
+      "pat_scope": "host",
+      "version": "v0.7.0",
+      "arch": "amd64",
+      "voter": true,
+      "leader": true
+    },
+    {
+      "node_id": "proto-b",
+      "node_name": "proto-b",
+      "api_url": "http://172.30.0.12:21212",
+      "data_plane_host": "172.30.0.12",
+      "raft_addr": "172.30.0.12:7000",
+      "internal_url": "https://172.30.0.12:7002",
+      "role": "mixed",
+      "public_host": "172.30.0.12",
+      "fsm_ops_version": 15,
+      "alive": true,
+      "capacity": {
+        "host_cpu_cores": 4,
+        "host_memory_total_mb": 15364,
+        "host_disk_free_gb": 13,
+        "reserved_cpu": 1,
+        "reserved_memory_mb": 1024,
+        "reserved_disk_gb": 10,
+        "available_cpu": 35,
+        "available_memory_mb": 129570,
+        "live_memory_free_mb": 8581,
+        "sandboxes_active": 1,
+        "sandboxes_by_runtime": {
+          "docker": 1
+        },
+        "can_admit": true,
+        "cpu_reservation_ratio": 0.9,
+        "memory_reservation_ratio": 0.85,
+        "memory_floor_ratio": 0.05,
+        "cpu_overprovision_factor": 10,
+        "memory_overprovision_factor": 10,
+        "memory_floor_mb": 768,
+        "cpu_budget": 36,
+        "memory_budget_mb": 130594,
+        "supported_runtimes": [
+          "docker"
+        ],
+        "egress_gateway_ready": true,
+        "mediated_egress": true,
+        "container_engine": "docker",
+        "slot_pools": [
+          {
+            "name": "docker_bridge",
+            "runtimes": [
+              "docker",
+              "gvisor"
+            ],
+            "total": 1000,
+            "free": 999
+          }
+        ],
+        "local_template_inventory_known": true,
+        "local_template_catalog_inventory_known": true
+      },
+      "capacity_updated_unix": 1794403522,
+      "pat_scope": "host",
+      "version": "v0.7.0",
+      "arch": "amd64",
+      "voter": true
+    }
+  ],
+  "raft_voters": [
+    "proto-a",
+    "proto-b"
+  ],
+  "server_key_ring_ready": true
+}

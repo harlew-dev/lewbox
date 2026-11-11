@@ -1,0 +1,83 @@
+# Lewbox dev cluster: one orchestrator and two (or three) machines that each
+# run their own AerolVM node, on a private network. See README.md.
+#
+#   ./dev.sh up        # build and start everything
+#   ./dev.sh cluster   # install AerolVM on node-1 and node-2 and make a cluster
+#
+# Host ports (all on 127.0.0.1):
+#   8080        orchestrator API             (LEWBOX_DEV_PORT)
+#   21201..3    node-N AerolVM API (21212)
+#   8001..3     node-N sandbox URLs (80)
+
+name: lewbox-dev
+
+x-node: &node
+  image: lewbox-node:dev
+  build:
+    context: ../..
+    dockerfile: deploy/dev-cluster/Dockerfile
+    target: node
+  privileged: true            # systemd and Docker inside the container
+  cgroup: private
+  tmpfs: [/run, /run/lock]
+  volumes:
+    - /lib/modules:/lib/modules:ro            # lets sandboxd load br_netfilter
+    - ./.cache/aerolvm:/opt/aerolvm:ro        # AerolVM release files (./dev.sh fetch)
+  environment:
+    # `lewbox install` and `node add` take AerolVM from here, not GitHub.
+    LEWBOX_AEROLVM_FROM: /opt/aerolvm
+  depends_on: [orchestrator]
+
+services:
+  orchestrator:
+    image: lewbox:dev
+    build:
+      context: ../..
+      dockerfile: deploy/dev-cluster/Dockerfile
+      target: orchestrator
+    command: ["serve", "--port", "8080", "--check-interval", "30s"]
+    environment:
+      LEWBOX_BOOTSTRAP_ADMIN_EMAIL: ${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}
+      LEWBOX_BOOTSTRAP_ADMIN_PASSWORD: ${LEWBOX_DEV_PASSWORD:-dev-password-123}
+    volumes:
+      - orchestrator-data:/data
+    ports:
+      - "127.0.0.1:${LEWBOX_DEV_PORT:-8080}:8080"
+    networks:
+      lewbox:
+        ipv4_address: 172.30.0.10
+
+  node-1:
+    <<: *node
+    hostname: node-1
+    ports: ["127.0.0.1:21201:21212", "127.0.0.1:8001:80"]
+    networks:
+      lewbox:
+        ipv4_address: 172.30.0.11
+
+  node-2:
+    <<: *node
+    hostname: node-2
+    ports: ["127.0.0.1:21202:21212", "127.0.0.1:8002:80"]
+    networks:
+      lewbox:
+        ipv4_address: 172.30.0.12
+
+  # A third node, for a 3-voter cluster: ./dev.sh up --three
+  node-3:
+    <<: *node
+    hostname: node-3
+    profiles: [three]
+    ports: ["127.0.0.1:21203:21212", "127.0.0.1:8003:80"]
+    networks:
+      lewbox:
+        ipv4_address: 172.30.0.13
+
+networks:
+  lewbox:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  orchestrator-data:

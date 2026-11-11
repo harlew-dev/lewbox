@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "sandboxes": 2,
+  "docker": "ok",
+  "caddy": "ok",
+  "firecracker": "disabled",
+  "wasm": "disabled",
+  "isolate": "disabled",
+  "ssh_gateway": "ok",
+  "cluster_topology": "ok",
+  "cluster_nodes": 2,
+  "version": "v0.7.0"
+}

@@ -1,0 +1,411 @@
+// Package aerolvmtest provides an in-memory fake AerolVM cluster for tests.
+package aerolvmtest
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/harlew-dev/lewbox/internal/aerolvm"
+)
+
+// Server is a fake AerolVM node backed by an httptest.Server.
+type Server struct {
+	t   testing.TB
+	srv *httptest.Server
+
+	// AdminToken is a token that is always accepted.
+	AdminToken string
+
+	mu          sync.Mutex
+	version     string
+	members     []aerolvm.Member
+	clusterOn   bool
+	tokens      []aerolvm.Token
+	tokenByVal  map[string]aerolvm.Token
+	joins       []aerolvm.JoinToken
+	drained     []string
+	deleted     []string
+	revoked     []string
+	failures    map[string]*failure
+	tokenTTLCap time.Duration
+	nextID      int
+}
+
+type failure struct {
+	status int
+	body   string
+	n      int
+}
+
+// New starts a fake node and closes it when the test finishes.
+func New(t testing.TB) *Server {
+	t.Helper()
+	s := &Server{
+		t:          t,
+		version:    "v0.7.0",
+		clusterOn:  true,
+		tokenByVal: make(map[string]aerolvm.Token),
+		failures:   make(map[string]*failure),
+	}
+	s.members = []aerolvm.Member{{
+		NodeID:   "node-a",
+		NodeName: "node-a",
+		Role:     "mixed",
+		Alive:    true,
+		Version:  s.version,
+		Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}}
+	s.srv = httptest.NewServer(s.routes())
+	s.members[0].APIURL = s.srv.URL
+	t.Cleanup(s.srv.Close)
+	return s
+}
+
+// URL is the fake node's base URL.
+func (s *Server) URL() string { return s.srv.URL }
+
+// SetVersion changes what /health reports.
+func (s *Server) SetVersion(v string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.version = v
+	for i := range s.members {
+		s.members[i].Version = v
+	}
+}
+
+// SetMembers replaces the cluster's member list.
+func (s *Server) SetMembers(members []aerolvm.Member) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.members = append([]aerolvm.Member(nil), members...)
+}
+
+// SetClusterMode turns the /v1/cluster/* routes on or off. Off models a
+// single-node daemon that was started without a cluster.
+func (s *Server) SetClusterMode(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clusterOn = on
+}
+
+// SetTokenTTLCap rejects token creates whose expires_in exceeds d. Zero
+// removes the cap.
+func (s *Server) SetTokenTTLCap(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokenTTLCap = d
+}
+
+// FailNext makes the next n requests to path fail with status and body,
+// before any handler logic runs.
+func (s *Server) FailNext(path string, status int, body string, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures[path] = &failure{status: status, body: body, n: n}
+}
+
+// Tokens returns the tokens created through POST /v1/tokens.
+func (s *Server) Tokens() []aerolvm.Token {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]aerolvm.Token(nil), s.tokens...)
+}
+
+// JoinTokens returns the join tokens created through POST /v1/cluster/join-tokens.
+func (s *Server) JoinTokens() []aerolvm.JoinToken {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]aerolvm.JoinToken(nil), s.joins...)
+}
+
+// Drained returns the node IDs passed to the drain route, in order.
+func (s *Server) Drained() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.drained...)
+}
+
+// Deleted returns the node IDs passed to the delete route, in order.
+func (s *Server) Deleted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deleted...)
+}
+
+// Revoked returns the token IDs passed to the revoke route, in order.
+func (s *Server) Revoked() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.revoked...)
+}
+
+// Stop closes the fake node, so callers can model an unreachable cluster.
+func (s *Server) Stop() { s.srv.Close() }
+
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /v1/whoami", s.handleWhoAmI)
+	mux.HandleFunc("GET /v1/cluster/members", s.handleMembers)
+	mux.HandleFunc("POST /v1/tokens", s.handleCreateToken)
+	mux.HandleFunc("GET /v1/tokens", s.handleListTokens)
+	mux.HandleFunc("DELETE /v1/tokens/{id}", s.handleRevokeToken)
+	mux.HandleFunc("POST /v1/cluster/join-tokens", s.handleCreateJoinToken)
+	mux.HandleFunc("POST /v1/cluster/nodes/{id}/drain", s.handleDrainNode)
+	mux.HandleFunc("DELETE /v1/cluster/nodes/{id}", s.handleDeleteNode)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.injected(w, r) {
+			return
+		}
+		if r.URL.Path != "/health" && !s.authorized(r) {
+			s.writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/cluster/") && !s.clusterEnabled() {
+			s.writeError(w, http.StatusServiceUnavailable, "cluster: not enabled on this node")
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) injected(w http.ResponseWriter, r *http.Request) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, ok := s.failures[r.URL.Path]
+	if !ok || f.n <= 0 {
+		return false
+	}
+	f.n--
+	if f.body == "" {
+		w.WriteHeader(f.status)
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(f.status)
+	_, _ = w.Write([]byte(f.body))
+	return true
+}
+
+func (s *Server) authorized(r *http.Request) bool {
+	scheme, token, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if token == s.AdminToken {
+		return true
+	}
+	_, ok = s.tokenByVal[token]
+	return ok
+}
+
+func (s *Server) clusterEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clusterOn
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	version := s.version
+	n := len(s.members)
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, map[string]any{
+		"status":        "ok",
+		"version":       version,
+		"cluster_nodes": n,
+	})
+}
+
+func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	if token == s.AdminToken {
+		s.writeJSON(w, http.StatusOK, aerolvm.WhoAmI{
+			Principal: aerolvm.Principal{Kind: "token", ID: "tok_admin", Name: "admin"},
+			Role:      "admin",
+			Team:      "*",
+		})
+		return
+	}
+	record, ok := s.tokenByVal[token]
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, aerolvm.WhoAmI{
+		Principal: aerolvm.Principal{Kind: "token", ID: record.ID, Name: record.Name},
+		Role:      record.Role,
+		Team:      record.Team,
+		ExpiresAt: record.ExpiresAt,
+	})
+}
+
+func (s *Server) handleMembers(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	members := append([]aerolvm.Member(nil), s.members...)
+	s.mu.Unlock()
+	if members == nil {
+		members = []aerolvm.Member{}
+	}
+	s.writeJSON(w, http.StatusOK, aerolvm.Members{Members: members})
+}
+
+func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
+	var req aerolvm.CreateTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ttl, err := parseTTL(req.ExpiresIn)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid expires_in")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tokenTTLCap > 0 && ttl > s.tokenTTLCap {
+		s.writeError(w, http.StatusBadRequest, "expires_in exceeds SB_TOKEN_MAX_TTL")
+		return
+	}
+	switch req.Role {
+	case "runner":
+		if req.Team == "" {
+			s.writeError(w, http.StatusBadRequest, "runner tokens require a team")
+			return
+		}
+	case "admin":
+		if req.Team != "*" {
+			s.writeError(w, http.StatusBadRequest, "admin tokens require team *")
+			return
+		}
+	}
+	s.nextID++
+	tok := aerolvm.Token{
+		ID:    fmt.Sprintf("tok_%d", s.nextID),
+		Name:  req.Name,
+		Role:  req.Role,
+		Team:  req.Team,
+		Token: fmt.Sprintf("avm_%d", s.nextID),
+	}
+	if ttl > 0 {
+		expires := time.Now().UTC().Add(ttl).Truncate(time.Second)
+		tok.ExpiresAt = &expires
+	}
+	s.tokens = append(s.tokens, tok)
+	s.tokenByVal[tok.Token] = tok
+	s.writeJSON(w, http.StatusCreated, tok)
+}
+
+func (s *Server) handleListTokens(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	tokens := append([]aerolvm.Token(nil), s.tokens...)
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+}
+
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revoked = append(s.revoked, id)
+	for i, tok := range s.tokens {
+		if tok.ID == id {
+			delete(s.tokenByVal, tok.Token)
+			s.tokens = append(s.tokens[:i], s.tokens[i+1:]...)
+			break
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleCreateJoinToken(w http.ResponseWriter, r *http.Request) {
+	var req aerolvm.JoinTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ttl, err := parseTTL(req.TTL)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid ttl")
+		return
+	}
+	role := req.Role
+	if role == "" {
+		role = "server"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextID++
+	join := aerolvm.JoinToken{
+		Token:      fmt.Sprintf("join_%d", s.nextID),
+		ID:         fmt.Sprintf("jnt_%d", s.nextID),
+		Role:       role,
+		Reusable:   req.Reusable,
+		ExpiresAt:  time.Now().UTC().Add(ttl).Truncate(time.Second),
+		CACertHash: "sha256:fake",
+		JoinURLs:   []string{s.srv.URL},
+	}
+	s.joins = append(s.joins, join)
+	s.writeJSON(w, http.StatusCreated, join)
+}
+
+func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	s.drained = append(s.drained, id)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, m := range s.members {
+		if m.NodeID == id {
+			s.members = append(s.members[:i], s.members[i+1:]...)
+			s.deleted = append(s.deleted, id)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	s.writeError(w, http.StatusNotFound, "cluster: unknown node")
+}
+
+func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (s *Server) writeError(w http.ResponseWriter, status int, msg string) {
+	s.writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// parseTTL accepts Go durations and the <n>d form AerolVM uses.
+func parseTTL(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid day duration %q", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
