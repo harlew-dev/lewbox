@@ -3,7 +3,7 @@ title: CLI reference
 description: Every lewbox command, its flags, and what it does.
 ---
 
-`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `plans`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
+`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
 
 ***
 
@@ -15,7 +15,7 @@ These work on every command.
 |---|---|---|
 | `--context NAME` | `LEWBOX_CONTEXT` | Use this saved sign-in |
 | `--api-url URL` | `LEWBOX_API_URL` | Talk to this orchestrator (token from `LEWBOX_TOKEN` or a saved context) |
-| `--org ID\|SLUG` | `LEWBOX_ORG` | The organization `member` and `admin-key` commands act on. Default: the context's, from `lewbox org use`; with an API key, its own |
+| `--org ID\|SLUG` | `LEWBOX_ORG` | The organization `member`, `admin-key` and `key` commands act on. Default: the context's, from `lewbox org use`; with an API key, its own |
 | `--json` | `LEWBOX_OUTPUT=json` | Print JSON, byte-identical to the API. On automatically when output isn't a terminal |
 | `-y`, `--yes` | | Skip confirmations. Required outside a terminal for commands that ask: `install`, `update`, and every `remove`/`disable` |
 | `--db PATH` | `LEWBOX_DB` | The orchestrator database, in local mode. Default `~/.local/share/lewbox/lewbox.db` |
@@ -295,7 +295,7 @@ Instance admins only. Suspending stops the organization's API keys and leaves it
 
 ### `lewbox org use ID|SLUG`
 
-Makes it the current context's default organization for `member` and `admin-key`. Not available in local mode: pass `--org` there.
+Makes it the current context's default organization for `member`, `admin-key` and `key`. Not available in local mode: pass `--org` there.
 
 ### `lewbox member list` · `add EMAIL [--role ROLE]` · `set-role EMAIL|ID ROLE` · `remove EMAIL|ID`
 
@@ -308,6 +308,14 @@ Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `3
 ### `lewbox admin-key list` · `lewbox admin-key revoke ID|NAME`
 
 Lists the keys, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm.
+
+### `lewbox key create NAME [--region SLUG] [--expires-in DUR | --never-expires]`
+
+Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the only ready region. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
+
+### `lewbox key list` · `lewbox key revoke ID|NAME`
+
+Lists the keys, live ones first and revoked ones included; or revokes one at once. A member can revoke only the keys they created; owners and admins can revoke any. Revoke asks to confirm.
 
 ***
 

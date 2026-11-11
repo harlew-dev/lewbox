@@ -161,6 +161,9 @@ const (
 	// accessKeys: see the admin keys. Owners, admins, the organization's
 	// admin keys and instance admins.
 	accessKeys
+	// accessUse: create and revoke sandbox keys. Owners, admins, members, the
+	// organization's admin keys and instance admins; never a viewer.
+	accessUse
 	// accessManage: change the organization, its members or its keys.
 	// Owners, admins and instance admins; never an admin key, and not while
 	// the organization is suspended (except for instance admins).
@@ -226,8 +229,11 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 	if c.role == "" {
 		return orgCaller{}, notFound("organization %q not found", ref)
 	}
-	if need >= accessKeys && c.role != roleOwner && c.role != roleAdmin {
+	if (need == accessKeys || need == accessManage) && c.role != roleOwner && c.role != roleAdmin {
 		return orgCaller{}, forbidden("only an owner or admin of %q can do this", org.Slug)
+	}
+	if need == accessUse && c.role != roleOwner && c.role != roleAdmin && c.role != roleMember {
+		return orgCaller{}, forbidden("only an owner, admin or member of %q can do this", org.Slug)
 	}
 	if need == accessManage && org.Status != orgActive {
 		return orgCaller{}, forbidden("organization %q is %s", org.Slug, org.Status)

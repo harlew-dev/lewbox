@@ -59,6 +59,10 @@ type Backend interface {
 	ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error)
 	CreateAdminKey(ctx context.Context, org string, req service.CreateAdminKeyRequest) (service.NewAdminKey, error)
 	RevokeAdminKey(ctx context.Context, org, ref string) (service.AdminKey, error)
+
+	ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error)
+	CreateSandboxKey(ctx context.Context, org string, req service.CreateSandboxKeyRequest) (service.NewSandboxKey, error)
+	RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error)
 }
 
 // Local runs every operation in-process as the local principal. Whoever can
@@ -270,6 +274,21 @@ func (l Local) CreateAdminKey(ctx context.Context, org string, req service.Creat
 // RevokeAdminKey revokes an admin key.
 func (l Local) RevokeAdminKey(ctx context.Context, org, ref string) (service.AdminKey, error) {
 	return l.Svc.RevokeAdminKey(l.withPrincipal(ctx), org, ref)
+}
+
+// ListSandboxKeys returns an organization's sandbox keys.
+func (l Local) ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error) {
+	return l.Svc.ListSandboxKeys(l.withPrincipal(ctx), org)
+}
+
+// CreateSandboxKey mints a sandbox key and returns its token once.
+func (l Local) CreateSandboxKey(ctx context.Context, org string, req service.CreateSandboxKeyRequest) (service.NewSandboxKey, error) {
+	return l.Svc.CreateSandboxKey(l.withPrincipal(ctx), org, req)
+}
+
+// RevokeSandboxKey revokes a sandbox key.
+func (l Local) RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error) {
+	return l.Svc.RevokeSandboxKey(l.withPrincipal(ctx), org, ref)
 }
 
 func (l Local) withPrincipal(ctx context.Context) context.Context {

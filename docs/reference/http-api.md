@@ -150,8 +150,11 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `GET /v0/admin-keys` | owner, admin, admins, its keys | `{data: [AdminKey]}`, newest first, revoked ones included |
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
 | `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
+| `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
+| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active or the region is not ready; a cluster failure is `502` and stores nothing |
+| `DELETE /v0/sandbox-keys/{ref}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `502` and the key stays live |
 
-"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or keys, and gets `403` on every route outside its organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`, and its members can only read.
+"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
 
 ### Docs
 
@@ -242,5 +245,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 **Member**: `{id, organization_id, user_id, email, role, created_at}`.
 
 **AdminKey**: `{id, organization_id, name, prefix, last4, status, created_by, created_at, last_used_at, expires_at, revoked_at}`. `status` is `active`, `expired` or `revoked`; `created_by` is an email. The token is only in the create response.
+
+**SandboxKey**: `{id, name, region, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `region` is `{slug, name, endpoint_url, runtime}`; `token_hint` is `avm_…` and the token's last four characters; `expires_at` and `revoked_at` are `null` when they do not apply. **NewSandboxKey** adds the `token` (shown only in the create response), `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a `docker` region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
 
 **JoinToken**: `{cluster_id, cluster, runtime, version, role, token_role, token, ca_cert_hash, join_urls, expires_at, command}`. `token` is single-use and is shown only in this response.

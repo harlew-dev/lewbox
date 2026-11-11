@@ -321,7 +321,7 @@ func newRootCmd(a *app) *cobra.Command {
 	root.PersistentFlags().StringVar(&a.apiURL, "api-url", envOr("LEWBOX_API_URL", ""),
 		"talk to this Lewbox server (env LEWBOX_API_URL)")
 	root.PersistentFlags().StringVar(&a.org, "org", envOr("LEWBOX_ORG", ""),
-		"organization ID or slug for member and admin-key commands (env LEWBOX_ORG; default: lewbox org use)")
+		"organization ID or slug for organization commands (env LEWBOX_ORG; default: lewbox org use)")
 	root.PersistentFlags().BoolVar(&a.jsonFlag, "json", os.Getenv("LEWBOX_OUTPUT") == "json",
 		"print JSON, byte-identical to the API (env LEWBOX_OUTPUT=json)")
 	root.PersistentFlags().BoolVarP(&a.yes, "yes", "y", false, "skip confirmations")
@@ -346,6 +346,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newOrgCmd(a),
 		newMemberCmd(a),
 		newAdminKeyCmd(a),
+		newSandboxKeyCmd(a),
 		newRegionCmd(a),
 		newPlanCmd(a),
 		newSettingsCmd(a),

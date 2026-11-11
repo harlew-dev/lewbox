@@ -133,8 +133,8 @@ func parseLifetime(raw string) (time.Duration, error) {
 	return d, nil
 }
 
-// keyName trims and checks an admin key's name. It is looked up like an ID,
-// so it must never parse as a UUID.
+// keyName trims and checks a key's name. It is looked up like an ID, so it
+// must never parse as a UUID.
 func keyName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {

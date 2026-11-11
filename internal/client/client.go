@@ -348,6 +348,27 @@ func (c *Client) RevokeAdminKey(ctx context.Context, org, ref string) (service.A
 	return out, err
 }
 
+// ListSandboxKeys returns an organization's sandbox keys.
+func (c *Client) ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error) {
+	var out service.SandboxKeyList
+	err := c.doOrg(ctx, org, http.MethodGet, "/v0/sandbox-keys", nil, &out)
+	return out, err
+}
+
+// CreateSandboxKey mints a sandbox key and returns its token once.
+func (c *Client) CreateSandboxKey(ctx context.Context, org string, req service.CreateSandboxKeyRequest) (service.NewSandboxKey, error) {
+	var out service.NewSandboxKey
+	err := c.doOrg(ctx, org, http.MethodPost, "/v0/sandbox-keys", req, &out)
+	return out, err
+}
+
+// RevokeSandboxKey revokes a sandbox key.
+func (c *Client) RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error) {
+	var out service.SandboxKey
+	err := c.doOrg(ctx, org, http.MethodDelete, "/v0/sandbox-keys/"+url.PathEscape(ref), nil, &out)
+	return out, err
+}
+
 // doOrg is do for the member and admin-key routes, which name their
 // organization in a header ("" leaves it to the admin key).
 func (c *Client) doOrg(ctx context.Context, org, method, path string, in, out any) error {

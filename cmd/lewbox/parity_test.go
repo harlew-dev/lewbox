@@ -508,6 +508,88 @@ func TestOrganizations(t *testing.T) {
 	e.sameError([]string{"org", "create", "acme"}, "POST", "/v0/organizations", `{"slug":"acme"}`, 409)
 }
 
+func TestSandboxKeys(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_sandbox_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	if got := e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("empty key list = %q", got)
+	}
+
+	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west", "--expires-in", "30d")
+	if code != 0 {
+		t.Fatalf("key create: exit %d: %s", code, errOut)
+	}
+	var created service.NewSandboxKey
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(created.Token, "avm_") || created.Name != "laptop" || created.Region.Slug != "eu-west" ||
+		created.ExpiresAt == nil || created.Env["SB_API_TOKEN"] != created.Token || created.E2BEnv["E2B_API_KEY"] != created.Token {
+		t.Fatalf("created = %+v", created)
+	}
+
+	status, body := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"agent","region":"eu-west"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST sandbox-keys: status %d body %s", status, body)
+	}
+	var remote service.NewSandboxKey
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Name != "agent" || remote.Token == created.Token {
+		t.Errorf("remote key = %+v", remote)
+	}
+	list := e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200)
+	if !strings.Contains(list, `"name":"laptop"`) || !strings.Contains(list, `"name":"agent"`) {
+		t.Errorf("list = %s", list)
+	}
+
+	status, body = e.httpOrg("acme", "DELETE", "/v0/sandbox-keys/agent", "")
+	if status != http.StatusOK {
+		t.Fatalf("DELETE sandbox key: status %d body %s", status, body)
+	}
+	var revoked service.SandboxKey
+	if err := json.Unmarshal([]byte(body), &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Name != "agent" || revoked.RevokedAt == nil {
+		t.Errorf("revoked = %+v", revoked)
+	}
+
+	out, errOut, code = e.cli("key", "revoke", "laptop", "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("key revoke: exit %d: %s", code, errOut)
+	}
+	if err := json.Unmarshal([]byte(out), &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Name != "laptop" || revoked.RevokedAt == nil {
+		t.Errorf("revoked = %+v", revoked)
+	}
+	e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200)
+	out, errOut, code = e.cli("key", "revoke", "laptop", "--org", "acme", "--yes")
+	if code != 1 || out != "" {
+		t.Fatalf("revoke a revoked key: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	status, body = e.httpOrg("acme", "DELETE", "/v0/sandbox-keys/laptop", "")
+	if status != http.StatusNotFound || errOut != body {
+		t.Errorf("revoked key error = %d %q, want 404 %q", status, body, errOut)
+	}
+}
+
 func TestPlansSettingsAndSignup(t *testing.T) {
 	e := newEnv(t)
 

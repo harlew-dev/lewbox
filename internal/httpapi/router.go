@@ -412,6 +412,27 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("GET "+Prefix+"/sandbox-keys", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListSandboxKeys(r.Context(), r.Header.Get(OrganizationHeader))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/sandbox-keys", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateSandboxKeyRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateSandboxKey(r.Context(), r.Header.Get(OrganizationHeader), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	// {ref} is a key ID or the name of a live key.
+	mux.HandleFunc("DELETE "+Prefix+"/sandbox-keys/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RevokeSandboxKey(r.Context(), r.Header.Get(OrganizationHeader), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	// Docs are static content and public, so they are an HTTP-only exception
 	// to the two-entry-points rule.
 	mux.HandleFunc("GET "+Prefix+"/docs", func(w http.ResponseWriter, r *http.Request) {

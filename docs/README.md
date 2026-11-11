@@ -52,6 +52,12 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Organizations and API keys](accounts/organizations-and-api-keys.md) | Organizations, member roles, and `lba_` API keys for your backend |
 | [Customers, plans and limits](accounts/customers-and-plans.md) | Sign-up, plans, approvals, suspension, per-organization limits, regions |
 
+## For customers
+
+| | |
+|---|---|
+| [Sandbox API keys](customers/api-keys.md) | Create a key for a region and use it with the AerolVM or E2B SDK |
+
 ## Operations
 
 | | |

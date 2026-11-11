@@ -48,6 +48,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderAdminKeys(w, data.Data, now)
 	case service.NewAdminKey:
 		return renderNewAdminKey(w, data, now)
+	case service.SandboxKeyList:
+		return renderSandboxKeys(w, data.Data, now)
+	case service.NewSandboxKey:
+		return renderNewSandboxKey(w, data, now)
 	case contextList:
 		return renderContexts(w, data.Data)
 	case firewallOutput:
@@ -207,6 +211,49 @@ func optionalTime(t *time.Time, now time.Time, none string) string {
 		return none
 	}
 	return relativeTime(*t, now)
+}
+
+// renderSandboxKeys prints a sandbox key table; the key column is what is
+// left of the token to recognise it by.
+func renderSandboxKeys(w io.Writer, keys []service.SandboxKey, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tREGION\tKEY\tSTATUS\tCREATED_BY\tCREATED\tEXPIRES")
+	for _, k := range keys {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			k.Name, k.Region.Slug, k.TokenHint, sandboxKeyStatus(k), dash(k.CreatedBy),
+			relativeTime(k.CreatedAt, now), optionalTime(k.ExpiresAt, now, "never"))
+	}
+	return tw.Flush()
+}
+
+func sandboxKeyStatus(k service.SandboxKey) string {
+	switch {
+	case k.RevokedAt != nil:
+		return "revoked"
+	case k.Expired:
+		return "expired"
+	default:
+		return "active"
+	}
+}
+
+// renderNewSandboxKey prints a new key with its token and the settings to
+// paste into a sandbox client.
+func renderNewSandboxKey(w io.Writer, k service.NewSandboxKey, now time.Time) error {
+	if err := renderObject(w, k.SandboxKey, now); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\ntoken: %s\n", k.Token)
+	for _, name := range []string{"SB_API_URL", "SB_API_TOKEN", "E2B_API_URL", "E2B_SANDBOX_URL", "E2B_API_KEY"} {
+		if value, ok := k.Env[name]; ok {
+			fmt.Fprintf(w, "%s=%s\n", name, value)
+		}
+		if value, ok := k.E2BEnv[name]; ok {
+			fmt.Fprintf(w, "%s=%s\n", name, value)
+		}
+	}
+	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its last four characters and cannot show it again.")
+	return nil
 }
 
 // renderContexts prints the saved contexts, marking the current one.

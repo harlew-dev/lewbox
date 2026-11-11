@@ -291,6 +291,12 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, existing := range s.tokens {
+		if existing.Name == req.Name && existing.Team == req.Team {
+			s.writeError(w, http.StatusConflict, "a token with this name already exists on this team")
+			return
+		}
+	}
 	s.nextID++
 	tok := aerolvm.Token{
 		ID:    fmt.Sprintf("tok_%d", s.nextID),

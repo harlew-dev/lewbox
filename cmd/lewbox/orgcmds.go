@@ -166,7 +166,7 @@ func newOrgCmd(a *app) *cobra.Command {
 
 	use := &cobra.Command{
 		Use:   "use <id|slug>",
-		Short: "Make an organization this context's default for member and admin-key commands",
+		Short: "Make an organization this context's default for organization commands",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, sel, err := a.resolve(cmd.Context())
@@ -308,6 +308,73 @@ func newAdminKeyCmd(a *app) *cobra.Command {
 			}
 			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
 				return b.RevokeAdminKey(ctx, org, args[0])
+			})(cmd, args)
+		},
+	}
+
+	key.AddCommand(create, list, revoke)
+	return key
+}
+
+// newSandboxKeyCmd mirrors /v0/sandbox-keys.
+func newSandboxKeyCmd(a *app) *cobra.Command {
+	key := &cobra.Command{
+		Use:     "key",
+		Aliases: []string{"keys"},
+		Short:   "Manage sandbox API keys for an organization (--org)",
+	}
+
+	var (
+		region       string
+		expiresIn    string
+		neverExpires bool
+	)
+	create := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a sandbox key; its avm_ token is shown once (POST /v0/sandbox-keys)",
+		Args:  usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if neverExpires && cmd.Flags().Changed("expires-in") {
+				return usagef("--expires-in and --never-expires cannot be used together")
+			}
+			lifetime := expiresIn
+			if neverExpires {
+				lifetime = "never"
+			}
+			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
+				return b.CreateSandboxKey(ctx, org, service.CreateSandboxKeyRequest{
+					Name:      args[0],
+					Region:    region,
+					ExpiresIn: lifetime,
+				})
+			})(cmd, args)
+		},
+	}
+	create.Flags().StringVar(&region, "region", "", "the region's slug (default: the only ready region)")
+	create.Flags().StringVar(&expiresIn, "expires-in", "90d", "how long the key works, such as 30d or 720h")
+	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the key works until it is revoked")
+
+	list := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List sandbox keys, revoked ones included (GET /v0/sandbox-keys)",
+		Args:    usageArgs(cobra.NoArgs),
+		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
+			return b.ListSandboxKeys(ctx, org)
+		}),
+	}
+
+	revoke := &cobra.Command{
+		Use:     "revoke <id|name>",
+		Aliases: []string{"rm", "remove"},
+		Short:   "Revoke a sandbox key; it stops working at once (DELETE /v0/sandbox-keys/{id|name})",
+		Args:    usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.confirm(fmt.Sprintf("Revoke sandbox key %q? Anything using it stops working.", args[0])); err != nil {
+				return err
+			}
+			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
+				return b.RevokeSandboxKey(ctx, org, args[0])
 			})(cmd, args)
 		},
 	}

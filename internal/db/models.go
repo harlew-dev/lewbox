@@ -85,6 +85,19 @@ type Plan struct {
 	CreatedAt    time.Time
 }
 
+type SandboxKey struct {
+	ID         string
+	OrgID      string
+	ClusterID  string
+	Name       string
+	UpstreamID string
+	Last4      string
+	CreatedBy  sql.NullString
+	CreatedAt  time.Time
+	ExpiresAt  sql.NullTime
+	RevokedAt  sql.NullTime
+}
+
 type Session struct {
 	ID         string
 	UserID     string

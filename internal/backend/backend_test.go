@@ -495,6 +495,85 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	}
 }
 
+func TestSandboxKeyBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+
+	listKeys := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListSandboxKeys(ctx, "acme")
+	}
+	runSteps(t, h, []step{
+		{
+			name: "create sandbox key",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "laptop", Region: "eu-west"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "agent", Region: "eu-west"})
+			},
+			check: func(t *testing.T, v any) {
+				k, ok := v.(service.NewSandboxKey)
+				if !ok || !strings.HasPrefix(k.Token, "avm_") || k.TokenHint == "" ||
+					k.Env["SB_API_URL"] == "" || k.Env["SB_API_TOKEN"] != k.Token {
+					t.Errorf("new sandbox key = %+v", v)
+				}
+				if k.E2BEnv["E2B_API_KEY"] != k.Token {
+					t.Errorf("e2b env = %+v", k.E2BEnv)
+				}
+			},
+		},
+		both("list sandbox keys", listKeys),
+		{
+			name:  "revoke sandbox key",
+			local: listKeys,
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RevokeSandboxKey(ctx, "acme", "agent")
+			},
+			check: func(t *testing.T, v any) {
+				if k, ok := v.(service.SandboxKey); ok && k.RevokedAt == nil {
+					t.Errorf("revoked key = %+v", k)
+				}
+			},
+		},
+		both("list sandbox keys after revoke", listKeys),
+		both("no organization chosen", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListSandboxKeys(ctx, "")
+		}),
+		both("missing region", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "x", Region: "missing"})
+		}),
+	})
+
+	// The organization's API key uses the same routes for its own organization.
+	key, err := h.local.CreateAdminKey(ctx, "acme", service.CreateAdminKeyRequest{Name: "backend", ExpiresIn: "90d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed := client.New(h.url, key.Token, nil)
+	if _, err := keyed.ListSandboxKeys(ctx, ""); err != nil {
+		t.Errorf("admin key lists sandbox keys: %v", err)
+	}
+	created, err := keyed.CreateSandboxKey(ctx, "", service.CreateSandboxKeyRequest{Name: "from-key", Region: "eu-west"})
+	if err != nil {
+		t.Fatalf("admin key creates a sandbox key: %v", err)
+	}
+	if _, err := keyed.RevokeSandboxKey(ctx, "", created.ID); err != nil {
+		t.Errorf("admin key revokes a sandbox key: %v", err)
+	}
+}
+
 // resultJSON renders a result the way the CLI would. Error bodies drop
 // details, whose field order differs between a service value and decoded JSON.
 func resultJSON(t *testing.T, v any, err error) string {

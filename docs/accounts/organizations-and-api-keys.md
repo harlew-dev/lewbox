@@ -35,7 +35,7 @@ Over HTTP, send its slug or ID in the `Lewbox-Organization` header. An API key a
 |---|---|
 | `owner` | Everything, including making and removing owners |
 | `admin` | Add, change and remove members (except owners), create and revoke API keys, rename the organization |
-| `member` | See the organization and its members |
+| `member` | See the organization and its members; create sandbox keys and revoke the ones they created |
 | `viewer` | The same, read-only |
 
 Instance admins can do everything in every organization, whether or not they're members.
@@ -68,11 +68,11 @@ curl -H "Authorization: Bearer $LEWBOX_KEY" https://lewbox.example.com/v0/organi
 printf '%s\n' "$LEWBOX_KEY" | lewbox login https://lewbox.example.com --key-stdin
 ```
 
-A key is deliberately narrow. It can read its organization, its members and its keys. It can't change members or keys, and it can't reach anything outside its organization, such as clusters, nodes or accounts: those calls get `403`. Revoking a key, or suspending its organization, stops it at once.
+A key is deliberately narrow. It can read its organization, its members and its keys. It can't change members or admin keys, and it can't reach anything outside its organization, such as clusters, nodes or accounts: those calls get `403`. It can list, create and revoke the organization's [sandbox keys](../customers/api-keys.md). Revoking a key, or suspending its organization, stops it at once.
 
 ## Suspend an organization
 
-Instance admins can suspend an organization (`lewbox org suspend acme`, or **Settings** in the console). Its API keys stop working and its members can only look until it is restored with `lewbox org restore acme`. Nothing is deleted.
+Instance admins can suspend an organization (`lewbox org suspend acme`, or **Settings** in the console). Its API keys stop working, its members can only look and it cannot mint sandbox keys until it is restored with `lewbox org restore acme`. Nothing is deleted.
 
 ## Not yet
 

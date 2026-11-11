@@ -302,6 +302,11 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string) (Cluster, error
 	}
 	if token, err := s.clusterToken(row); err == nil {
 		client := s.aerolvmClient(row.AdminURL, token)
+		if keys, err := s.q.ListLiveSandboxKeysByCluster(ctx, row.ID); err == nil {
+			for _, key := range keys {
+				_ = client.RevokeToken(ctx, key.UpstreamID)
+			}
+		}
 		_ = client.RevokeToken(ctx, row.AdminTokenID)
 	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
