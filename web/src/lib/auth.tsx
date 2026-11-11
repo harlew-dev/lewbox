@@ -14,23 +14,30 @@ import {
   TextLink,
 } from '@harlew-dev/ui'
 import * as api from './api'
-import type { User } from './api'
+import type { MeOrganization, User } from './api'
+import { NotFoundPage } from '../pages/not-found'
 
 type Status = 'loading' | 'authenticated' | 'guest' | 'error'
 
 interface AuthContextValue {
   user: User | null
+  // The organizations the account belongs to, from /v0/me.
+  organizations: MeOrganization[]
   status: Status
   error: string
   signIn: (email: string, password: string) => Promise<void>
+  signUp: (input: { email: string; password: string; organization: string }) => Promise<void>
   signOut: () => Promise<void>
   refresh: () => Promise<void>
+  // Reloads /v0/me without the loading state, after joining or leaving.
+  reloadOrganizations: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [organizations, setOrganizations] = useState<MeOrganization[]>([])
   const [status, setStatus] = useState<Status>('loading')
   const [error, setError] = useState('')
 
@@ -41,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await api.me()
       if (result.user) {
         setUser(result.user)
+        setOrganizations(result.organizations ?? [])
         setStatus('authenticated')
       } else {
         setUser(null)
@@ -71,25 +79,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const result = await api.signIn(email, password)
-    setUser(result.user)
-    setStatus('authenticated')
-    setError('')
+  const reloadOrganizations = useCallback(async () => {
+    try {
+      const result = await api.me()
+      setOrganizations(result.organizations ?? [])
+    } catch {
+      // The next full load picks them up.
+    }
   }, [])
+
+  const signedIn = useCallback(
+    async (user: User) => {
+      await reloadOrganizations()
+      setUser(user)
+      setStatus('authenticated')
+      setError('')
+    },
+    [reloadOrganizations],
+  )
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const result = await api.signIn(email, password)
+      await signedIn(result.user)
+    },
+    [signedIn],
+  )
+
+  const signUp = useCallback(
+    async (input: { email: string; password: string; organization: string }) => {
+      const result = await api.signUp(input)
+      await signedIn(result.user)
+    },
+    [signedIn],
+  )
 
   const signOut = useCallback(async () => {
     try {
       await api.signOut()
     } finally {
       setUser(null)
+      setOrganizations([])
       setStatus('guest')
       setError('')
     }
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, status, error, signIn, signOut, refresh }}>
+    <AuthContext.Provider
+      value={{ user, organizations, status, error, signIn, signUp, signOut, refresh, reloadOrganizations }}
+    >
       {children}
     </AuthContext.Provider>
   )
@@ -115,7 +154,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (status === 'error') {
     return (
       <StatusPage
-        title="Could not load the console"
+        title="Could not load the page"
         description={error || 'The Lewbox server did not answer.'}
         action={
           <Button onClick={() => void refresh()}>
@@ -137,17 +176,15 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+// The console is invisible to everyone else: they get the not-found page.
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  if (!user?.instance_admin) {
-    return (
-      <StatusPage
-        title="Admins only"
-        description="This page is for instance admins. Ask an admin if you need access."
-        action={<Button href="/">Back to the overview</Button>}
-      />
-    )
-  }
+  if (!user?.instance_admin) return <NotFoundPage />
   return <>{children}</>
 }
 
+// Where an account lands after signing in: the console for instance admins,
+// the portal for everyone else.
+export function homeFor(user: User | null): string {
+  return user?.instance_admin ? '/admin' : '/'
+}

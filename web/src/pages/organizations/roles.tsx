@@ -19,6 +19,18 @@ export function RoleBadge({ role }: { role: api.Role }) {
   return <Badge color={roleColors[role]}>{role.charAt(0).toUpperCase() + role.slice(1)}</Badge>
 }
 
-export function OrgStatusBadge({ status }: { status: api.Organization['status'] }) {
-  return status === 'active' ? <Badge color="lime">Active</Badge> : <Badge color="amber">Suspended</Badge>
+const orgStatuses: Record<api.OrgStatus, { label: string; color: BadgeColor }> = {
+  active: { label: 'Active', color: 'lime' },
+  pending: { label: 'Pending', color: 'amber' },
+  suspended: { label: 'Suspended', color: 'red' },
+}
+
+export function OrgStatusBadge({ status, reason }: { status: api.OrgStatus; reason?: string }) {
+  const { label, color } = orgStatuses[status] ?? { label: status, color: 'zinc' }
+  return (
+    <Badge color={color} title={reason === 'credits' ? 'Out of credits' : undefined}>
+      {label}
+      {status === 'suspended' && reason === 'credits' ? ' · credits' : ''}
+    </Badge>
+  )
 }

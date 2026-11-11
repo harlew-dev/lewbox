@@ -9,9 +9,220 @@ export interface User {
   created_at: string
 }
 
+export interface MeOrganization {
+  id: string
+  slug: string
+  name: string
+  role: Role
+  status: OrgStatus
+}
+
 export interface Me {
   user?: User
+  organizations?: MeOrganization[]
   via: string
+}
+
+export type SignupMode = 'open' | 'approval' | 'closed'
+export type BillingMode = 'off' | 'show' | 'enforce'
+
+// Public: what the sign-in page and the portal need before anyone signs in.
+export interface Instance {
+  name: string
+  signup: SignupMode
+  billing?: BillingMode
+  currency?: string
+}
+
+export interface Settings {
+  instance_name: string
+  signup: SignupMode
+  default_plan: string
+  currency: string
+  price_vcpu_hour_micros: number
+  price_memory_gib_hour_micros: number
+  billing: BillingMode
+  signup_credits_micros: number
+}
+
+// null is unlimited.
+export interface Limits {
+  sandboxes: number | null
+  vcpus: number | null
+  memory_mb: number | null
+}
+
+export interface Plan {
+  id: string
+  slug: string
+  name: string
+  max_sandboxes: number | null
+  max_vcpus: number | null
+  max_memory_mb: number | null
+  monthly_credits_micros?: number
+  organizations: number
+  default: boolean
+  created_at: string
+}
+
+export interface PlanInput {
+  slug?: string
+  name?: string
+  max_sandboxes?: number | null
+  max_vcpus?: number | null
+  max_memory_mb?: number | null
+  monthly_credits_micros?: number
+}
+
+export interface Region {
+  slug: string
+  name: string
+  endpoint_url: string
+  runtime: string
+  status?: string
+}
+
+export interface SandboxKey {
+  id: string
+  name: string
+  region: Region
+  token_hint: string
+  created_by?: string
+  created_at: string
+  expires_at: string | null
+  revoked_at: string | null
+  expired: boolean
+}
+
+export interface NewSandboxKey extends SandboxKey {
+  token: string
+  env: { SB_API_URL: string; SB_API_TOKEN: string }
+  e2b_env?: { E2B_API_URL: string; E2B_SANDBOX_URL: string; E2B_API_KEY: string }
+}
+
+export type SandboxStatus = 'creating' | 'started' | 'stopped' | 'destroyed' | 'error'
+
+export interface Sandbox {
+  id: string
+  region: string
+  organization?: { slug: string; name: string }
+  name: string
+  image: string
+  status: SandboxStatus | string
+  status_reason: string
+  runtime: string
+  cpu: number
+  memory_mb: number
+  disk_gb: number
+  node?: string
+  created_at: string
+  last_seen_at: string
+}
+
+export interface SandboxFilter {
+  region?: string
+  status?: string
+  org?: string
+}
+
+export interface UsageAmounts {
+  sandbox_hours: number
+  vcpu_hours: number
+  memory_gib_hours: number
+  cost_micros?: number
+}
+
+export interface UsageBucket extends UsageAmounts {
+  start: string
+  peak_sandboxes: number
+  regions: Record<string, { vcpu_hours: number }>
+}
+
+export interface Usage {
+  from: string
+  to: string
+  granularity: 'hour' | 'day'
+  totals: UsageAmounts
+  data: UsageBucket[]
+}
+
+export interface LimitsReport {
+  limits: Limits
+  used: { sandboxes: number; vcpus: number; memory_mb: number }
+  regions: {
+    slug: string
+    used: { sandboxes: number; vcpus: number; memory_mb: number }
+    quota: { max_sandboxes: number; max_cpu: number; max_memory_mb: number } | null
+    blocked: boolean
+    pushed_at: string
+    error: string
+  }[]
+}
+
+export interface CreditTxn {
+  id: string
+  amount_micros: number
+  kind: 'grant' | 'usage' | 'monthly' | 'signup' | string
+  reference: string
+  note: string
+  created_by?: string
+  created_at: string
+}
+
+export interface Credits {
+  currency: string
+  balance_micros: number
+  month_spend_micros: number
+  unbilled_micros: number
+  monthly_credits_micros: number
+  data: CreditTxn[]
+}
+
+export interface UptimeDay {
+  date: string
+  uptime: number | null
+  samples?: number
+  down_minutes?: number
+}
+
+export interface ClusterHealth {
+  cluster: { uptime: number | null; days: UptimeDay[] }
+  nodes: { name: string; uptime: number | null; days: UptimeDay[] }[]
+}
+
+export type MetricsRange = '24h' | '7d' | '30d'
+
+export interface NodeMetric {
+  start: string
+  sandboxes: number
+  cpu_cores: number
+  cpu_reserved: number
+  memory_total_mb: number
+  memory_used_mb: number
+  disk_free_gb: number
+  alive: number
+}
+
+export interface ClusterMetrics {
+  range: MetricsRange
+  bucket_seconds: number
+  nodes: { name: string; data: NodeMetric[] }[]
+}
+
+export interface Overview {
+  customers: { total: number; pending: number; suspended: number }
+  sandboxes: { running: number; stopped: number }
+  capacity: {
+    nodes_alive: number
+    nodes: number
+    cpu_cores: number
+    cpu_reserved: number
+    memory_total_mb: number
+    memory_used_mb: number
+  }
+  clusters: { slug: string; name: string; status: string; uptime: number | null; days: UptimeDay[] }[]
+  running: { start: string; sandboxes: number }[]
+  top_customers: { slug: string; name: string; vcpu_hours: number }[]
 }
 
 export interface SessionResponse {
@@ -76,14 +287,33 @@ export interface JoinToken {
 
 export type Role = 'owner' | 'admin' | 'member' | 'viewer'
 
+export type OrgStatus = 'pending' | 'active' | 'suspended'
+
 export interface Organization {
   id: string
   slug: string
   name: string
-  status: 'active' | 'suspended'
+  status: OrgStatus
+  status_reason?: '' | 'admin' | 'credits' | string
+  team?: string
+  plan?: { slug: string; name: string }
+  limits: Limits
+  overrides?: Limits
+  balance_micros?: number
+  // Assumed, for the console's customer list: not yet in the plans.
+  vcpu_hours_30d?: number
   members: number
   role?: Role
   created_at: string
+}
+
+export interface OrganizationUpdate {
+  name?: string
+  status?: OrgStatus
+  plan?: string
+  max_sandboxes?: number | null
+  max_vcpus?: number | null
+  max_memory_mb?: number | null
 }
 
 export interface OrganizationList {
@@ -195,6 +425,7 @@ const UNAUTHORIZED_EVENT = 'lewbox:unauthorized'
 // ended", so they never trigger a redirect.
 const AUTH_PATHS = new Set([
   '/v0/auth/session',
+  '/v0/auth/signup',
   '/v0/auth/login',
   '/v0/auth/logout',
   '/v0/me',
@@ -271,6 +502,16 @@ function ref(value: string): string {
   return encodeURIComponent(value)
 }
 
+// "?a=1&b=2" from the set values, or "".
+function query(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value))
+  }
+  const text = search.toString()
+  return text ? `?${text}` : ''
+}
+
 export function me(): Promise<Me> {
   return request<Me>('/v0/me', { authRedirect: false })
 }
@@ -281,6 +522,22 @@ export function signIn(email: string, password: string): Promise<SessionResponse
     body: { email, password },
     authRedirect: false,
   })
+}
+
+export function signUp(input: {
+  email: string
+  password: string
+  organization: string
+}): Promise<SessionResponse> {
+  return request<SessionResponse>('/v0/auth/signup', {
+    method: 'POST',
+    body: input,
+    authRedirect: false,
+  })
+}
+
+export function instance(): Promise<Instance> {
+  return request<Instance>('/v0/instance', { authRedirect: false })
 }
 
 export function signOut(): Promise<{ ok: boolean }> {
@@ -380,9 +637,8 @@ export function addNode(input: { name: string; url: string }): Promise<Node> {
   return request<Node>('/v0/nodes', { method: 'POST', body: input })
 }
 
-export function listOrganizations(user?: string): Promise<OrganizationList> {
-  const query = user ? `?user=${ref(user)}` : ''
-  return request<OrganizationList>(`/v0/organizations${query}`)
+export function listOrganizations(filter: { user?: string; status?: OrgStatus } = {}): Promise<OrganizationList> {
+  return request<OrganizationList>(`/v0/organizations${query(filter)}`)
 }
 
 export function getOrganization(orgRef: string): Promise<Organization> {
@@ -397,10 +653,7 @@ export function createOrganization(input: {
   return request<Organization>('/v0/organizations', { method: 'POST', body: input })
 }
 
-export function updateOrganization(
-  orgRef: string,
-  input: { name?: string; status?: Organization['status'] },
-): Promise<Organization> {
+export function updateOrganization(orgRef: string, input: OrganizationUpdate): Promise<Organization> {
   return request<Organization>(`/v0/organizations/${ref(orgRef)}`, {
     method: 'PATCH',
     body: input,
@@ -440,6 +693,105 @@ export function createAdminKey(
 
 export function revokeAdminKey(org: string, keyRef: string): Promise<AdminKey> {
   return request<AdminKey>(`/v0/admin-keys/${ref(keyRef)}`, { method: 'DELETE', org })
+}
+
+export function getSettings(): Promise<Settings> {
+  return request<Settings>('/v0/settings')
+}
+
+export function updateSettings(input: Partial<Settings>): Promise<Settings> {
+  return request<Settings>('/v0/settings', { method: 'PATCH', body: input })
+}
+
+export function listPlans(): Promise<{ data: Plan[] }> {
+  return request<{ data: Plan[] }>('/v0/plans')
+}
+
+export function createPlan(input: PlanInput): Promise<Plan> {
+  return request<Plan>('/v0/plans', { method: 'POST', body: input })
+}
+
+export function updatePlan(planRef: string, input: PlanInput): Promise<Plan> {
+  return request<Plan>(`/v0/plans/${ref(planRef)}`, { method: 'PATCH', body: input })
+}
+
+export function deletePlan(planRef: string): Promise<Plan> {
+  return request<Plan>(`/v0/plans/${ref(planRef)}`, { method: 'DELETE' })
+}
+
+export function listRegions(): Promise<{ data: Region[] }> {
+  return request<{ data: Region[] }>('/v0/regions')
+}
+
+export function listSandboxKeys(org: string): Promise<{ data: SandboxKey[] }> {
+  return request<{ data: SandboxKey[] }>('/v0/sandbox-keys', { org })
+}
+
+export function createSandboxKey(
+  org: string,
+  input: { name: string; region: string; expires_in: string },
+): Promise<NewSandboxKey> {
+  return request<NewSandboxKey>('/v0/sandbox-keys', { method: 'POST', body: input, org })
+}
+
+export function revokeSandboxKey(org: string, keyRef: string): Promise<SandboxKey> {
+  return request<SandboxKey>(`/v0/sandbox-keys/${ref(keyRef)}`, { method: 'DELETE', org })
+}
+
+// The organization goes in the header and, for instance admins who see
+// every organization, in ?org= too. Without one an admin sees the fleet.
+export function listSandboxes(filter: SandboxFilter = {}): Promise<{ data: Sandbox[] }> {
+  return request<{ data: Sandbox[] }>(`/v0/sandboxes${query({ ...filter })}`, { org: filter.org })
+}
+
+export function stopSandbox(sandbox: Pick<Sandbox, 'id' | 'region'>, org?: string): Promise<Sandbox> {
+  return request<Sandbox>(`/v0/sandboxes/${ref(sandbox.id)}/stop${query({ region: sandbox.region })}`, {
+    method: 'POST',
+    org,
+  })
+}
+
+export function deleteSandbox(sandbox: Pick<Sandbox, 'id' | 'region'>, org?: string): Promise<Sandbox> {
+  return request<Sandbox>(`/v0/sandboxes/${ref(sandbox.id)}${query({ region: sandbox.region })}`, {
+    method: 'DELETE',
+    org,
+  })
+}
+
+export function getUsage(filter: {
+  from?: string
+  to?: string
+  granularity?: 'hour' | 'day'
+  org?: string
+}): Promise<Usage> {
+  return request<Usage>(`/v0/usage${query(filter)}`, { org: filter.org })
+}
+
+export function getLimits(org: string): Promise<LimitsReport> {
+  return request<LimitsReport>('/v0/limits', { org })
+}
+
+export function getCredits(org: string): Promise<Credits> {
+  return request<Credits>('/v0/credits', { org })
+}
+
+export function addCredits(
+  org: string,
+  input: { amount_micros: number; note: string; reference?: string },
+): Promise<CreditTxn> {
+  return request<CreditTxn>('/v0/credits', { method: 'POST', body: input, org })
+}
+
+export function getOverview(): Promise<Overview> {
+  return request<Overview>('/v0/overview')
+}
+
+export function clusterHealth(clusterRef: string, days = 30): Promise<ClusterHealth> {
+  return request<ClusterHealth>(`/v0/clusters/${ref(clusterRef)}/health${query({ days })}`)
+}
+
+export function clusterMetrics(clusterRef: string, range: MetricsRange): Promise<ClusterMetrics> {
+  return request<ClusterMetrics>(`/v0/clusters/${ref(clusterRef)}/metrics${query({ range })}`)
 }
 
 export function docsNav(): Promise<DocsNav> {

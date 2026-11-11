@@ -1,24 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, type ReactNode } from 'react'
-import { matchPath, useLocation } from 'react-router'
-import * as api from './api'
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import type * as api from './api'
 import { useAuth } from './auth'
-import { useLoad } from './use-load'
 
-// The organizations the signed-in account can see, and the current one: the
-// organization page being shown, otherwise the last one opened on this
-// browser, otherwise the first.
+// The organizations the signed-in account belongs to (from /v0/me) and the
+// one the portal shows: the last one picked on this browser, otherwise the
+// first.
 interface OrganizationsValue {
-  organizations: api.Organization[]
-  loading: boolean
-  current: api.Organization | null
-  reload: () => void
+  organizations: api.MeOrganization[]
+  current: api.MeOrganization | null
+  select: (slug: string) => void
 }
 
 const OrganizationsContext = createContext<OrganizationsValue>({
   organizations: [],
-  loading: false,
   current: null,
-  reload: () => {},
+  select: () => {},
 })
 
 const storageKey = 'lewbox:org'
@@ -39,32 +35,20 @@ function remember(slug: string) {
   }
 }
 
-// The organization slug in the current URL, if any.
-export function useOrgSlugFromURL(): string | null {
-  const location = useLocation()
-  return matchPath('/organizations/:org/*', location.pathname)?.params.org ?? null
-}
-
 export function OrganizationsProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
-  const load = useLoad(() => api.listOrganizations(), [user?.id])
-  const fromURL = useOrgSlugFromURL()
-  const organizations = useMemo(() => load.data?.data ?? [], [load.data])
+  const { organizations } = useAuth()
+  const [picked, setPicked] = useState(remembered)
 
-  useEffect(() => {
-    if (fromURL) remember(fromURL)
-  }, [fromURL])
+  const select = useCallback((slug: string) => {
+    remember(slug)
+    setPicked(slug)
+  }, [])
 
-  const current = useMemo(() => {
-    const wanted = fromURL ?? remembered()
-    return organizations.find((org) => org.slug === wanted) ?? organizations[0] ?? null
-  }, [organizations, fromURL])
-
-  const reload = useCallback(() => load.reload(), [load])
-  const value = useMemo(
-    () => ({ organizations, loading: load.loading, current, reload }),
-    [organizations, load.loading, current, reload],
+  const current = useMemo(
+    () => organizations.find((org) => org.slug === picked) ?? organizations[0] ?? null,
+    [organizations, picked],
   )
+  const value = useMemo(() => ({ organizations, current, select }), [organizations, current, select])
   return <OrganizationsContext.Provider value={value}>{children}</OrganizationsContext.Provider>
 }
 
@@ -72,14 +56,22 @@ export function useOrganizations(): OrganizationsValue {
   return useContext(OrganizationsContext)
 }
 
+export type Permissions = ReturnType<typeof orgPermissions>
+
 // What the caller may do in an organization, from its role there.
-export function orgPermissions(org: api.Organization, instanceAdmin: boolean) {
+export function orgPermissions(org: { role?: api.Role; status: api.OrgStatus }, instanceAdmin: boolean) {
   const manager = org.role === 'owner' || org.role === 'admin'
+  const writer = manager || org.role === 'member'
+  const active = org.status === 'active'
   return {
-    // See and create admin keys.
+    // See and create management API keys.
     keys: instanceAdmin || manager,
+    // Create sandbox API keys (only while the organization is active).
+    use: instanceAdmin || (writer && active),
+    // Stop and delete sandboxes.
+    sandboxes: instanceAdmin || writer,
     // Change the organization, its members and its keys.
-    manage: instanceAdmin || (manager && org.status === 'active'),
+    manage: instanceAdmin || (manager && active),
     // Hand out or take away the owner role.
     owner: instanceAdmin || org.role === 'owner',
   }

@@ -106,7 +106,7 @@ function ClustersTab({ load }: { load: ReturnType<typeof useLoad<api.ClusterList
           {clusters.map((cluster) => (
             <TableRow
               key={cluster.id}
-              href={`/servers/clusters/${encodeURIComponent(cluster.slug)}`}
+              href={`/admin/servers/clusters/${encodeURIComponent(cluster.slug)}`}
               title={`Open ${cluster.name}`}
             >
               <TableCell>
@@ -216,7 +216,7 @@ function NodesTab({ clusters, isAdmin }: { clusters: api.Cluster[]; isAdmin: boo
                 <TableCell className="font-medium">{node.name}</TableCell>
                 <TableCell>
                   {node.cluster ? (
-                    <TextLink href={`/servers/clusters/${encodeURIComponent(node.cluster)}`}>
+                    <TextLink href={`/admin/servers/clusters/${encodeURIComponent(node.cluster)}`}>
                       {node.cluster}
                     </TextLink>
                   ) : (

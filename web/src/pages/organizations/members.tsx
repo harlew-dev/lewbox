@@ -17,8 +17,6 @@ import {
   Input,
   Label,
   ListSkeleton,
-  Notice,
-  PageHeader,
   RadioGroup,
   Table,
   TableBody,
@@ -39,25 +37,31 @@ import {
   TrashIcon,
 } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { formatDate, relativeTime } from '../../lib/format'
-import { useOrganizations } from '../../lib/organizations'
-import { useDocumentTitle } from '../../lib/use-document-title'
+import type { Permissions } from '../../lib/organizations'
 import { failureMessage, useLoad } from '../../lib/use-load'
-import { useOrganizationPage } from './organization-route'
-import { OrgStatusBadge, RoleBadge, roleOptions } from './roles'
+import { RoleBadge, roleOptions } from './roles'
 
-export function MembersPage() {
-  const { org, can } = useOrganizationPage()
-  useDocumentTitle(`Members · ${org.name}`)
+// An organization's members, with role changes, removal and leaving. The
+// page around it owns the "Add member" button and opens the dialog.
+export function MembersSection({
+  org,
+  can,
+  addOpen,
+  onAddClose,
+  onLeft,
+}: {
+  org: api.Organization
+  can: Permissions
+  addOpen: boolean
+  onAddClose: () => void
+  onLeft: () => void
+}) {
   const { user } = useAuth()
-  const navigate = useNavigate()
-  const organizations = useOrganizations()
   const members = useLoad(() => api.listMembers(org.slug), [org.slug])
   const list = members.data?.data ?? []
-  const [addOpen, setAddOpen] = useState(false)
   const [roleTarget, setRoleTarget] = useState<api.Member | null>(null)
   const [removeTarget, setRemoveTarget] = useState<api.Member | null>(null)
 
@@ -65,20 +69,6 @@ export function MembersPage() {
 
   return (
     <>
-      <PageHeader
-        title="Members"
-        description={`The people in ${org.name} and what each can do.`}
-        meta={org.status === 'suspended' ? <OrgStatusBadge status={org.status} /> : undefined}
-        actions={can.manage ? <Button onClick={() => setAddOpen(true)}>Add member</Button> : undefined}
-      />
-
-      {org.status === 'suspended' && (
-        <Notice variant="warning" className="mb-6">
-          This organization is suspended: its API keys don't work, and only instance admins can
-          change it.
-        </Notice>
-      )}
-
       {members.loading && !members.data ? (
         <ListSkeleton label="Loading members" rows={4} />
       ) : members.error.message ? (
@@ -105,7 +95,7 @@ export function MembersPage() {
                 <TableRow key={member.id}>
                   <TableCell className="font-medium">
                     {user?.instance_admin ? (
-                      <TextLink href={`/users/${member.user_id}`}>{member.email}</TextLink>
+                      <TextLink href={`/admin/users/${member.user_id}`}>{member.email}</TextLink>
                     ) : (
                       member.email
                     )}
@@ -153,22 +143,13 @@ export function MembersPage() {
         </Table>
       )}
 
-      <AddMemberDialog
-        open={addOpen}
-        org={org}
-        canOwner={can.owner}
-        onClose={() => setAddOpen(false)}
-        onAdded={() => {
-          members.reload()
-          organizations.reload()
-        }}
-      />
+      <AddMemberDialog open={addOpen} org={org} canOwner={can.owner} onClose={onAddClose} onAdded={members.refresh} />
       <ChangeRoleDialog
         member={roleTarget}
         org={org}
         canOwner={can.owner}
         onClose={() => setRoleTarget(null)}
-        onChanged={members.reload}
+        onChanged={members.refresh}
       />
       <ConfirmationDialog
         open={removeTarget !== null}
@@ -186,9 +167,8 @@ export function MembersPage() {
         }}
         onConfirmed={() => {
           toast.success(leaving ? `You left ${org.name}.` : 'Member removed.')
-          organizations.reload()
-          if (leaving) navigate('/organizations')
-          else members.reload()
+          if (leaving) onLeft()
+          else members.refresh()
         }}
       />
     </>
@@ -250,10 +230,7 @@ function AddMember({
   return (
     <form onSubmit={submit}>
       <DialogTitle>Add a member</DialogTitle>
-      <DialogDescription>
-        Give an existing Lewbox account a role in {org.name}. An instance admin creates accounts
-        on the Users page.
-      </DialogDescription>
+      <DialogDescription>Give someone who already has an account a role in {org.name}.</DialogDescription>
       <DialogBody>
         <FieldGroup>
           <ErrorNotice error={add.error} />

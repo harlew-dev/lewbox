@@ -36,23 +36,24 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
-import { useOrganizations } from '../../lib/organizations'
+import { useAuth } from '../../lib/auth'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { RoleBadge, roleOptions } from '../organizations/roles'
 import { UserActions } from './user-actions'
 import { UserBadges } from './users'
 
-const back = { href: '/users', label: 'Users' }
+const back = { href: '/admin/users', label: 'Users' }
 
 // One account: what it is, which organizations it belongs to, and what an
 // instance admin can do to it.
 export function UserDetailPage() {
   const { ref = '' } = useParams()
   const navigate = useNavigate()
-  const organizations = useOrganizations()
+  const { reloadOrganizations } = useAuth()
+  const all = useLoad(() => api.listOrganizations(), [])
   const user = useLoad(() => api.getUser(ref), [ref])
-  const orgs = useLoad(() => api.listOrganizations(ref), [ref])
+  const orgs = useLoad(() => api.listOrganizations({ user: ref }), [ref])
   const [addOpen, setAddOpen] = useState(false)
   useDocumentTitle(user.data?.email ?? 'User')
 
@@ -69,7 +70,7 @@ export function UserDetailPage() {
       <EmptyState
         title="Account not found"
         description="It may have been removed."
-        action={<Button href="/users">Back to users</Button>}
+        action={<Button href="/admin/users">Back to users</Button>}
       />
     )
   }
@@ -84,7 +85,7 @@ export function UserDetailPage() {
 
   const account = user.data
   const memberships = orgs.data?.data ?? []
-  const joinable = organizations.organizations.filter(
+  const joinable = (all.data?.data ?? []).filter(
     (org) => !memberships.some((member) => member.id === org.id),
   )
 
@@ -95,7 +96,7 @@ export function UserDetailPage() {
         title={account.email}
         meta={<UserBadges user={account} />}
         actions={
-          <UserActions user={account} onChanged={user.reload} onRemoved={() => navigate('/users')} />
+          <UserActions user={account} onChanged={user.reload} onRemoved={() => navigate('/admin/users')} />
         }
       />
 
@@ -141,7 +142,7 @@ export function UserDetailPage() {
               {memberships.map((org) => (
                 <TableRow key={org.id}>
                   <TableCell className="font-medium">
-                    <TextLink href={`/organizations/${org.slug}/members`}>{org.name}</TextLink>
+                    <TextLink href={`/admin/customers/${encodeURIComponent(org.slug)}`}>{org.name}</TextLink>
                   </TableCell>
                   <TableCell>{org.role && <RoleBadge role={org.role} />}</TableCell>
                 </TableRow>
@@ -158,7 +159,7 @@ export function UserDetailPage() {
         onClose={() => setAddOpen(false)}
         onAdded={() => {
           orgs.reload()
-          organizations.reload()
+          void reloadOrganizations()
         }}
       />
     </>

@@ -82,7 +82,7 @@ function RegisterCluster({ onClose }: { onClose: () => void }) {
     if (result.ok && result.value) {
       toast.success(`Cluster ${result.value.name} registered.`)
       onClose()
-      navigate(`/servers/clusters/${encodeURIComponent(result.value.slug)}`)
+      navigate(`/admin/servers/clusters/${encodeURIComponent(result.value.slug)}`)
     }
   }
 

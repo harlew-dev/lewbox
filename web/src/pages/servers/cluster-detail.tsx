@@ -37,10 +37,11 @@ import { formatDate, relativeTime } from '../../lib/format'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { AddNodeDialog } from './add-node-dialog'
+import { ClusterMetrics, ClusterUptime } from './cluster-health'
 import { RemoveNodeDialog } from './remove-node-dialog'
 import { NodeActions } from './servers'
 
-const back = { href: '/servers', label: 'Servers' }
+const back = { href: '/admin/servers', label: 'Servers' }
 
 export function ClusterDetailPage() {
   const { ref = '' } = useParams()
@@ -87,7 +88,7 @@ export function ClusterDetailPage() {
       <EmptyState
         title="Cluster not found"
         description={`No cluster matched ${ref}. It may have been removed.`}
-        action={<Button href="/servers">Back to servers</Button>}
+        action={<Button href="/admin/servers">Back to servers</Button>}
       />
     )
   }
@@ -168,6 +169,8 @@ export function ClusterDetailPage() {
           {relativeTime(detail.checked_at)}
         </DescriptionDetails>
       </DescriptionList>
+
+      <ClusterUptime cluster={detail.slug} />
 
       <div className="mt-12 flex items-center gap-3">
         <Subheading>Checks</Subheading>
@@ -260,6 +263,8 @@ export function ClusterDetailPage() {
         )}
       </div>
 
+      <ClusterMetrics cluster={detail.slug} />
+
       <ConfirmationDialog
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
@@ -272,7 +277,7 @@ export function ClusterDetailPage() {
         }}
         onConfirmed={() => {
           toast.success('Cluster removed.')
-          navigate('/servers')
+          navigate('/admin/servers')
         }}
       />
 

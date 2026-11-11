@@ -15,7 +15,7 @@ import {
 import { ArrowUpRightIcon, HomeIcon } from '@heroicons/react/20/solid'
 import { Outlet, useLocation } from 'react-router'
 import { BrandLogo } from './brand-logo'
-import { useAuth } from '../lib/auth'
+import { homeFor, useAuth } from '../lib/auth'
 import * as api from '../lib/api'
 import { useLoad } from '../lib/use-load'
 
@@ -28,7 +28,7 @@ function navHref(path: string): string {
 }
 
 export function DocsLayout() {
-  const { status } = useAuth()
+  const { status, user } = useAuth()
   const location = useLocation()
   const current = docsPath(location.pathname)
   const nav = useLoad(() => api.docsNav(), [])
@@ -88,7 +88,7 @@ export function DocsLayout() {
       <NavbarSpacer />
       <NavbarSection>
         {signedIn ? (
-          <NavbarItem href="/">Console</NavbarItem>
+          <NavbarItem href={homeFor(user)}>{user?.instance_admin ? 'Console' : 'Dashboard'}</NavbarItem>
         ) : (
           <NavbarItem href="/login">Sign in</NavbarItem>
         )}

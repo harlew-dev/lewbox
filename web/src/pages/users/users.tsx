@@ -77,7 +77,7 @@ export function UsersPage() {
             {userList.map((user) => (
               <TableRow key={user.id}>
                 <TableCell className="font-medium">
-                  <TextLink href={`/users/${user.id}`}>{user.email}</TextLink>
+                  <TextLink href={`/admin/users/${user.id}`}>{user.email}</TextLink>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
@@ -128,7 +128,7 @@ function CreateUser({ onClose }: { onClose: () => void }) {
     if (result.ok) {
       toast.success('Account created.')
       onClose()
-      navigate(`/users/${result.value.id}`)
+      navigate(`/admin/users/${result.value.id}`)
     }
   }
 

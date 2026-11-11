@@ -40,11 +40,11 @@ beforeEach(() => {
 
 describe('ServersPage', () => {
   it('shows clusters, and nodes in their own tab', async () => {
-    renderAt('/servers', <Route path="/servers" element={<ServersPage />} />)
+    renderAt('/admin/servers', <Route path="/admin/servers" element={<ServersPage />} />)
     // Every cell of a linked row is a link to the cluster.
     expect((await screen.findAllByRole('link', { name: /EU West/ }))[0]).toHaveAttribute(
       'href',
-      '/servers/clusters/eu-west',
+      '/admin/servers/clusters/eu-west',
     )
     const tabs = screen.getByRole('navigation', { name: 'Server views' })
     expect(within(tabs).getByRole('link', { name: 'Clusters' })).toHaveAttribute('aria-current', 'page')
@@ -55,7 +55,7 @@ describe('ServersPage', () => {
   })
 
   it('offers every way to add a server to instance admins', async () => {
-    renderAt('/servers', <Route path="/servers" element={<ServersPage />} />)
+    renderAt('/admin/servers', <Route path="/admin/servers" element={<ServersPage />} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add server/ }))
     expect(await screen.findByRole('menuitem', { name: /Start a new cluster/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /Add a node to a cluster/ })).toBeInTheDocument()

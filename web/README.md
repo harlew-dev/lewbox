@@ -44,7 +44,18 @@ Open `http://localhost:5173/`. The Vite server proxies `/v0` to the Go server, s
 
 The console never holds a token. `POST /v0/auth/session` sets an `HttpOnly` cookie and returns the user and the expiry, never a token; every later request sends the cookie. `src/lib/api.ts` is the only place that calls `fetch`, and it always uses `credentials: 'same-origin'`.
 
-A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-out and `/v0/me` calls opt out of that redirect. `RequireAdmin` shows an "Admins only" page for accounts without `instance_admin`.
+A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-up, sign-out and `/v0/me` calls opt out of that redirect. `AuthProvider` also keeps the account's organizations from `/v0/me`; `reloadOrganizations()` refreshes them after joining, leaving or renaming one.
+
+## Two sides: portal and console
+
+The app has two sides, routed in `src/app.tsx` (`src/main.tsx` only mounts it):
+
+- the **portal** at `/` for customers: Home, Sandboxes, API keys, Usage, Billing (only when `/v0/instance` says billing isn't `off`), Team and Settings, in `src/pages/portal/`. `PortalRoute` loads the current organization, shows the pending or suspended banner, and hands `{org, can, reload}` to the pages through `usePortalOrg()`. The current organization is the one picked in the sidebar's switcher (remembered in `localStorage`), otherwise the first.
+- the **console** at `/admin` for instance admins: Overview, Customers, Sandboxes, Plans, Servers, Users and Settings, in `src/pages/admin/`, `src/pages/servers/` and `src/pages/users/`. `RequireAdmin` shows anyone else the not-found page.
+
+Instance admins land on `/admin`; one who belongs to no organization is sent there from `/` too. The old console paths (`/servers…`, `/clusters…`, `/nodes`, `/users…`, `/organizations…`) redirect under `/admin` for admins. Customers never see the words cluster, node or server: clusters are **regions**.
+
+`InstanceProvider` (`src/lib/instance.tsx`) loads `/v0/instance` once: the name in the sidebar, whether sign-up is open (the `/signup` page and the link on `/login`) and the billing mode.
 
 ## Content Security Policy
 
@@ -66,16 +77,16 @@ The Go server parses the embedded `docs/` folder at startup and exposes:
 
 `src/pages/docs.tsx` fetches a page and renders it with `react-markdown` and `remark-gfm`. There is no `rehype-raw`, so raw HTML in markdown is not rendered as HTML. `src/lib/docs-markdown.tsx` supplies the heading ids (one `github-slugger` per page, the ids GitHub would produce), the headings for the `On this page` list, code blocks (the library's `CodeBlock`, with a copy button), GitHub-style alert blocks, and the link component. The typography, the page list and the `On this page` list are library components: `Prose`, `SideNav` and `TableOfContents`. `src/lib/docs-links.ts` resolves a relative markdown link: a page under `docs/` becomes an internal `/docs/...` route, a file elsewhere in the repository becomes a GitHub link, and a URL stays external.
 
-The docs route is outside `RequireAuth`, so `/docs` is public. It uses the library's `DocsLayout` (a header bar, the page list on the left, no inset card), not the console's `SidebarLayout`; `src/components/docs-layout.tsx` fills it in and shows "Sign in" or "Console" in the header depending on the current session.
+The docs route is outside `RequireAuth`, so `/docs` is public. It uses the library's `DocsLayout` (a header bar, the page list on the left, no inset card), not the console's `SidebarLayout`; `src/components/docs-layout.tsx` fills it in and shows "Sign in", "Dashboard" (customers) or "Console" (instance admins) in the header depending on the current session.
 
 ## Add a page
 
-1. Add the route in `src/main.tsx`. Put console pages inside the `Console` route; wrap admin-only pages in `<RequireAdmin>`. Public pages (like the docs) go outside it.
-2. Add a sidebar item in `src/components/console-layout.tsx`: the main section (Overview, Servers), the **Organization** section for pages about the current organization (from `useOrganizations()`, with `orgPermissions` saying what the caller may do), or the **Instance** section for instance-admin pages. Pages are grouped by area under `src/pages/` (`servers/`, `organizations/`, `users/`).
-   Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges).
-3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Member and API key routes take the organization as `org`, which `request` sends as the `Lewbox-Organization` header.
-4. Use `useLoad` for reads and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts.
-5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header) and `renderAt` (the console's providers around your routes); `src/pages/organizations/api-keys.test.tsx` uses both. `src/lib/api.test.ts` covers the client itself.
+1. Add the route in `src/app.tsx`: inside the `Portal` route for a customer page, inside the `/admin` route for a console page. Public pages (like the docs) go outside `RequireAuth`.
+2. Add a sidebar item in `src/components/portal-layout.tsx` or `src/components/console-layout.tsx`. Both fill in `AppShell` (`src/components/app-shell.tsx`), which holds the logo, Docs and the account menu.
+   Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, charts from `@harlew-dev/ui/chart`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges, the sandbox table, limit meters, the usage chart).
+3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`. Money fields end in `_micros`; show them with `formatMoney` from `src/lib/format.ts`.
+4. Use `useLoad` for reads (`every` refreshes in the background; `refresh()` reloads without the loading state) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts.
+5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/me` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
 6. If the page is documentation, add it to `docs/README.md` so it appears in the nav, and link it with a relative `.md` path.
 
 ## Tests

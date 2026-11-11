@@ -24,7 +24,6 @@ import {
   ListboxOption,
   ListSkeleton,
   Notice,
-  PageHeader,
   Step,
   Steps,
   Table,
@@ -44,9 +43,8 @@ import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
 import { serverURL } from '../../lib/commands'
 import { formatDate, relativeTime } from '../../lib/format'
-import { useDocumentTitle } from '../../lib/use-document-title'
+import type { Permissions } from '../../lib/organizations'
 import { failureMessage, useLoad } from '../../lib/use-load'
-import { useOrganizationPage } from './organization-route'
 
 const statusColors: Record<api.AdminKey['status'], BadgeColor> = {
   active: 'lime',
@@ -58,46 +56,33 @@ function KeyStatus({ status }: { status: api.AdminKey['status'] }) {
   return <Badge color={statusColors[status]}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>
 }
 
-export function ApiKeysPage() {
-  const { org, can } = useOrganizationPage()
-  useDocumentTitle(`API keys · ${org.name}`)
-  const [createOpen, setCreateOpen] = useState(false)
+// An organization's management API keys (lba_…) for the Lewbox API. The
+// page around it owns the "Create API key" button and opens the dialog.
+export function AdminKeysSection({
+  org,
+  can,
+  createOpen,
+  onCreateClose,
+}: {
+  org: api.Organization
+  can: Permissions
+  createOpen: boolean
+  onCreateClose: () => void
+}) {
   const [revokeTarget, setRevokeTarget] = useState<api.AdminKey | null>(null)
-  const keys = useLoad(
-    () => (can.keys ? api.listAdminKeys(org.slug) : Promise.resolve({ data: [] })),
-    [org.slug, can.keys],
-  )
+  const keys = useLoad(() => api.listAdminKeys(org.slug), [org.slug])
   const list = keys.data?.data ?? []
-
-  if (!can.keys) {
-    return (
-      <>
-        <PageHeader title="API keys" />
-        <EmptyState
-          title="Only owners and admins see API keys"
-          description={`Ask an owner or admin of ${org.name} if you need one.`}
-        />
-      </>
-    )
-  }
 
   return (
     <>
-      <PageHeader
-        title="API keys"
-        description={`Keys for the Lewbox API, used from ${org.name}'s own backend. Each acts for this organization only.`}
-        actions={can.manage ? <Button onClick={() => setCreateOpen(true)}>Create API key</Button> : undefined}
-      />
-
       {keys.loading && !keys.data ? (
         <ListSkeleton label="Loading API keys" rows={3} />
       ) : keys.error.message ? (
         <ErrorNotice error={keys.error} onRetry={keys.reload} />
       ) : list.length === 0 ? (
         <EmptyState
-          title="No API keys"
-          description="Create a key for your backend to call the Lewbox API as this organization."
-          action={can.manage ? <Button onClick={() => setCreateOpen(true)}>Create API key</Button> : undefined}
+          title="No management API keys"
+          description="A key lets your own backend call the Lewbox API as this organization."
         />
       ) : (
         <Table>
@@ -168,12 +153,7 @@ export function ApiKeysPage() {
         </Table>
       )}
 
-      <CreateKeyDialog
-        open={createOpen}
-        org={org}
-        onClose={() => setCreateOpen(false)}
-        onCreated={keys.reload}
-      />
+      <CreateKeyDialog open={createOpen} org={org} onClose={onCreateClose} onCreated={keys.refresh} />
       <ConfirmationDialog
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}
@@ -186,7 +166,7 @@ export function ApiKeysPage() {
         }}
         onConfirmed={() => {
           toast.success('Key revoked.')
-          keys.reload()
+          keys.refresh()
         }}
       />
     </>
@@ -284,10 +264,10 @@ function CreateKey({
 
   return (
     <form onSubmit={submit}>
-      <DialogTitle>Create an API key</DialogTitle>
+      <DialogTitle>Create a management API key</DialogTitle>
       <DialogDescription>
-        For {org.name}'s backend: it can read the organization, its members and its keys. It
-        can't change members or keys, or reach anything outside this organization.
+        For your backend: it reads {org.name}, its members and keys through the Lewbox API. It can’t
+        change members or keys.
       </DialogDescription>
       <DialogBody>
         <FieldGroup>

@@ -1,5 +1,7 @@
 import { Logo } from '@harlew-dev/ui'
+import { useInstance } from '../lib/instance'
 
+// The instance's name, as its operator set it.
 export function BrandLogo({
   href = '/',
   className,
@@ -7,5 +9,6 @@ export function BrandLogo({
   href?: string
   className?: string
 }) {
-  return <Logo href={href} name="Lewbox" className={className} />
+  const { name } = useInstance()
+  return <Logo href={href} name={name} className={className} />
 }

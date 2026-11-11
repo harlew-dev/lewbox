@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type DependencyList } from 'react'
+import { useCallback, useEffect, useRef, useState, type DependencyList } from 'react'
 import type { ActionError } from '@harlew-dev/ui'
 import { ApiError } from './api'
 
@@ -13,12 +13,20 @@ export interface LoadState<T> {
   error: ActionError
   failure: unknown
   loading: boolean
+  // Loads again from scratch, showing the loading state.
   reload: () => void
+  // Loads again in the background, keeping what is shown until it answers.
+  refresh: () => void
 }
 
 let nextErrorKey = 0
 
-export function useLoad<T>(loader: () => Promise<T>, deps: DependencyList): LoadState<T> {
+// `every` refreshes in the background every so many milliseconds.
+export function useLoad<T>(
+  loader: () => Promise<T>,
+  deps: DependencyList,
+  { every }: { every?: number } = {},
+): LoadState<T> {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<ActionError>({ message: '', key: 0 })
   const [failure, setFailure] = useState<unknown>(null)
@@ -26,9 +34,13 @@ export function useLoad<T>(loader: () => Promise<T>, deps: DependencyList): Load
   const [tick, setTick] = useState(0)
 
   const reload = useCallback(() => setTick((value) => value + 1), [])
+  const latest = useRef(loader)
+  latest.current = loader
+  const generation = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    generation.current += 1
     setLoading(true)
     setData(null)
     setError({ message: '', key: 0 })
@@ -53,5 +65,29 @@ export function useLoad<T>(loader: () => Promise<T>, deps: DependencyList): Load
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, reload, tick])
 
-  return { data, error, failure, loading, reload }
+  const refresh = useCallback(() => {
+    const at = generation.current
+    latest
+      .current()
+      .then((value) => {
+        if (generation.current !== at) return
+        setData(value)
+        setError({ message: '', key: 0 })
+        setFailure(null)
+      })
+      .catch(() => {
+        // Keep showing the last answer; the next refresh tries again.
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!every) return
+    const timer = window.setInterval(refresh, every)
+    return () => window.clearInterval(timer)
+  }, [every, refresh])
+
+  // A refresh that answers after the component is gone is ignored.
+  useEffect(() => () => void (generation.current += 1), [])
+
+  return { data, error, failure, loading, reload, refresh }
 }

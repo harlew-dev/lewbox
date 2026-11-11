@@ -16,7 +16,8 @@ import { useState, type FormEvent } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
 import { BrandLogo } from '../components/brand-logo'
 import { ApiError } from '../lib/api'
-import { useAuth } from '../lib/auth'
+import { homeFor, useAuth } from '../lib/auth'
+import { useInstance } from '../lib/instance'
 import { safeNext } from '../lib/next'
 import { useDocumentTitle } from '../lib/use-document-title'
 
@@ -30,9 +31,10 @@ function signInMessage(failure: unknown): string {
 
 export function LoginPage() {
   useDocumentTitle('Sign in')
-  const { status, signIn } = useAuth()
+  const { status, user, signIn } = useAuth()
+  const instance = useInstance()
   const [searchParams] = useSearchParams()
-  const next = safeNext(searchParams.get('next'))
+  const next = searchParams.has('next') ? safeNext(searchParams.get('next')) : homeFor(user)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -57,8 +59,7 @@ export function LoginPage() {
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
         <BrandLogo href="/login" />
         <div className="space-y-2">
-          <Heading>Sign in to Lewbox</Heading>
-          <Text>Use your Lewbox account to manage your clusters.</Text>
+          <Heading>Sign in to {instance.name}</Heading>
         </div>
 
         <ErrorNotice error={action.error} />
@@ -93,7 +94,15 @@ export function LoginPage() {
         </form>
 
         <Text className="text-center">
-          Need help? Read the <TextLink href="/docs">documentation</TextLink>.
+          {instance.signup !== 'closed' ? (
+            <>
+              New here? <TextLink href="/signup">Create an account</TextLink>
+            </>
+          ) : (
+            <>
+              Need help? Read the <TextLink href="/docs">documentation</TextLink>.
+            </>
+          )}
         </Text>
       </div>
     </CenteredLayout>
