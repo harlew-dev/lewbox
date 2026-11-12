@@ -81,7 +81,7 @@ The docs route is outside `RequireAuth`, so `/docs` is public. It uses the libra
 
 ## Add a page
 
-1. Add the route in `src/app.tsx`: inside the `Portal` route for a customer page, inside the `/admin` route for a console page. Public pages (like the docs) go outside `RequireAuth`.
+1. Add the route in `src/app.tsx`: inside the `Portal` route for a customer page, inside the `/admin` route for a console page. Public pages (like the docs) go outside `RequireAuth`. Declare the page with `lazyPage(() => import('./pages/…'), 'NamePage')` so it gets its own chunk and the entry bundle stays small; only sign-in, sign-up, not-found and the layouts are imported directly.
 2. Add a sidebar item in `src/components/portal-layout.tsx` or `src/components/console-layout.tsx`. Both fill in `AppShell` (`src/components/app-shell.tsx`), which holds the logo, Docs and the account menu.
    Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, charts from `@harlew-dev/ui/chart`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges, the sandbox table, limit meters, the usage chart).
 3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`. Money fields end in `_micros`; show them with `formatMoney` from `src/lib/format.ts`.

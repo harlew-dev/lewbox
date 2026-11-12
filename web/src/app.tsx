@@ -1,31 +1,48 @@
+import { ListSkeleton } from '@harlew-dev/ui'
+import { lazy, Suspense, type ComponentType } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
 import { ConsoleLayout } from './components/console-layout'
 import { DocsLayout } from './components/docs-layout'
 import { PortalLayout } from './components/portal-layout'
 import { RequireAdmin, RequireAuth, useAuth } from './lib/auth'
-import { AccountPage } from './pages/account'
-import { CustomerDetailPage } from './pages/admin/customer-detail'
-import { CustomersPage } from './pages/admin/customers'
-import { OverviewPage } from './pages/admin/overview'
-import { PlansPage } from './pages/admin/plans'
-import { FleetSandboxesPage } from './pages/admin/sandboxes'
-import { AdminSettingsPage } from './pages/admin/settings'
-import { DocsPage } from './pages/docs'
 import { LoginPage } from './pages/login'
 import { NotFoundPage } from './pages/not-found'
-import { BillingPage } from './pages/portal/billing'
-import { HomePage } from './pages/portal/home'
-import { KeysPage } from './pages/portal/keys'
 import { PortalRoute } from './pages/portal/portal-route'
-import { SandboxesPage } from './pages/portal/sandboxes'
-import { SettingsPage } from './pages/portal/settings'
-import { TeamPage } from './pages/portal/team'
-import { UsagePage } from './pages/portal/usage'
-import { ClusterDetailPage } from './pages/servers/cluster-detail'
-import { ServersPage } from './pages/servers/servers'
 import { SignupPage } from './pages/signup'
-import { UserDetailPage } from './pages/users/user-detail'
-import { UsersPage } from './pages/users/users'
+
+// Pages other than sign-in and sign-up load on demand, so the entry chunk
+// holds only the shell; charts (recharts) and markdown load with the pages
+// that use them. The layout stays on screen while a page's chunk downloads.
+function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) {
+  const Lazy = lazy<ComponentType>(() => load().then((m) => ({ default: m[name] })))
+  return function Page() {
+    return (
+      <Suspense fallback={<ListSkeleton label="Loading" rows={4} />}>
+        <Lazy />
+      </Suspense>
+    )
+  }
+}
+
+const AccountPage = lazyPage(() => import('./pages/account'), 'AccountPage')
+const CustomerDetailPage = lazyPage(() => import('./pages/admin/customer-detail'), 'CustomerDetailPage')
+const CustomersPage = lazyPage(() => import('./pages/admin/customers'), 'CustomersPage')
+const OverviewPage = lazyPage(() => import('./pages/admin/overview'), 'OverviewPage')
+const PlansPage = lazyPage(() => import('./pages/admin/plans'), 'PlansPage')
+const FleetSandboxesPage = lazyPage(() => import('./pages/admin/sandboxes'), 'FleetSandboxesPage')
+const AdminSettingsPage = lazyPage(() => import('./pages/admin/settings'), 'AdminSettingsPage')
+const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
+const BillingPage = lazyPage(() => import('./pages/portal/billing'), 'BillingPage')
+const HomePage = lazyPage(() => import('./pages/portal/home'), 'HomePage')
+const KeysPage = lazyPage(() => import('./pages/portal/keys'), 'KeysPage')
+const SandboxesPage = lazyPage(() => import('./pages/portal/sandboxes'), 'SandboxesPage')
+const SettingsPage = lazyPage(() => import('./pages/portal/settings'), 'SettingsPage')
+const TeamPage = lazyPage(() => import('./pages/portal/team'), 'TeamPage')
+const UsagePage = lazyPage(() => import('./pages/portal/usage'), 'UsagePage')
+const ClusterDetailPage = lazyPage(() => import('./pages/servers/cluster-detail'), 'ClusterDetailPage')
+const ServersPage = lazyPage(() => import('./pages/servers/servers'), 'ServersPage')
+const UserDetailPage = lazyPage(() => import('./pages/users/user-detail'), 'UserDetailPage')
+const UsersPage = lazyPage(() => import('./pages/users/users'), 'UsersPage')
 
 // The customer portal. An instance admin who belongs to no organization
 // has nothing here and goes to the console.
