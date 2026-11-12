@@ -1,0 +1,70 @@
+# The VPS stack: Caddy (TLS, the only published ports) and the Lewbox
+# orchestrator. Lives in /opt/stack; setup.sh installs it from the repo.
+#
+# Settings come from /opt/stack/.env (DOMAIN, LEWBOX_TAG). lewbox-deploy
+# changes LEWBOX_TAG; don't run `docker compose up` with an empty tag.
+#
+# Other apps: give them their own compose project on the external `web`
+# network and a site file in /opt/stack/sites/<app>.caddy. Never publish
+# their ports: Docker's published ports bypass ufw.
+
+name: stack
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: "3" }
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in /opt/stack/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [web]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    logging: *logging
+
+  lewbox:
+    image: lewbox:${LEWBOX_TAG:?run lewbox-deploy vX.Y.Z first}
+    restart: unless-stopped
+    # Only on the internal network; Caddy reaches it as lewbox:8080.
+    volumes:
+      - /srv/lewbox:/data
+    environment:
+      LEWBOX_DB: /data/lewbox.db
+      LEWBOX_COOKIE_SECURE: always
+      LEWBOX_TRUSTED_ORIGINS: https://${DOMAIN}
+      # Caddy's network: its X-Forwarded-For gives Lewbox the real client IP.
+      LEWBOX_TRUSTED_PROXIES: 172.30.0.0/24
+    # The first admin. Only read while there are no accounts; setup.sh
+    # writes it, and you delete it after the first sign-in.
+    env_file:
+      - path: ./bootstrap.env
+        required: false
+    networks: [web]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    logging: *logging
+
+networks:
+  web:
+    external: true
+
+volumes:
+  caddy-data:
+  caddy-config:

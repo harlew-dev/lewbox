@@ -1,0 +1,10 @@
+# TLS for every site on this VPS. Certificates come from Let's Encrypt once
+# DNS points here. Add other apps as /opt/stack/sites/<app>.caddy.
+
+{$DOMAIN} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy lewbox:8080
+}
+
+import sites/*.caddy

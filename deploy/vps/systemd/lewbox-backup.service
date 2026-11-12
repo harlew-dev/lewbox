@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up the Lewbox database and keyring
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lewbox-backup daily

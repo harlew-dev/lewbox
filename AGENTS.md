@@ -29,6 +29,7 @@ Context for coding agents working in this repo. Read it before changing anything
 | `Makefile` | One entry point: build, test, run, Docker and the UI library |
 | `deploy/dev-cluster/` | Docker test bed (systemd + Docker-in-Docker nodes) and `e2e.sh` |
 | `deploy/docker/` | Smoke test for the orchestrator image (repo-root `Dockerfile`, `compose.yaml`) |
+| `deploy/vps/` | Production orchestrator on a VPS: `setup.sh`, `deploy.sh`, Compose with Caddy, release-based deploys, backups (see its README) |
 | `docs/` | Documentation books: `docs/consumer/` for customers, `docs/platform/` for operators (`docs/README.md` is the GitHub index). `docs/design/` holds design notes |
 
 ## Commands
