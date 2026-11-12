@@ -1,5 +1,7 @@
 # Phase 5: prices, credits and automatic suspension
 
+> **Dropped on 2026-11-12, not built** (DECISIONS D24). You asked for no billing: plans only set limits, and the operator assigns them. This page is kept as a record of what was considered.
+
 **Goal:** the operator can put a price on compute and either just show customers what they've spent, or require prepaid credits and stop customers who run out. No payment provider: credits are added by the operator (console, CLI or API from their own billing system). See DECISIONS D12.
 
 ## Money

@@ -90,10 +90,6 @@ type Organization struct {
 	Status       string
 	CreatedAt    time.Time
 	Team         sql.NullString
-	PlanID       sql.NullString
-	MaxSandboxes sql.NullInt64
-	MaxVcpus     sql.NullInt64
-	MaxMemoryMb  sql.NullInt64
 	StatusReason string
 }
 
@@ -160,6 +156,16 @@ type Session struct {
 type Setting struct {
 	Key   string
 	Value string
+}
+
+type Subscription struct {
+	OrgID        string
+	ClusterID    string
+	PlanID       string
+	MaxSandboxes sql.NullInt64
+	MaxVcpus     sql.NullInt64
+	MaxMemoryMb  sql.NullInt64
+	CreatedAt    time.Time
 }
 
 type UsageHourly struct {

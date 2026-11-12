@@ -172,9 +172,13 @@ type LimitsUsed struct {
 	MemoryMB  int64   `json:"memory_mb"`
 }
 
-// RegionLimits is one region's use and the quota Lewbox last pushed there.
+// RegionLimits is one subscribed region's plan, limits, live use and the
+// quota Lewbox last pushed there.
 type RegionLimits struct {
 	Slug     string             `json:"slug"`
+	Name     string             `json:"name"`
+	Plan     PlanRef            `json:"plan"`
+	Limits   Limits             `json:"limits"`
 	Used     LimitsUsed         `json:"used"`
 	Quota    *aerolvm.TeamQuota `json:"quota"`
 	Blocked  bool               `json:"blocked"`
@@ -182,18 +186,19 @@ type RegionLimits struct {
 	Error    string             `json:"error"`
 }
 
-// LimitsReport is returned by Limits: effective limits, live use and the
-// per-region quotas.
+// LimitsReport is returned by Limits: one entry per subscribed region.
 type LimitsReport struct {
-	Limits  Limits         `json:"limits"`
-	Used    LimitsUsed     `json:"used"`
 	Regions []RegionLimits `json:"regions"`
 }
 
-// Limits returns an organization's limits and live use, in total and per
-// region.
+// Limits returns an organization's subscribed regions with their plan,
+// limits, live use and pushed quota.
 func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, error) {
 	c, err := s.orgFor(ctx, orgRef, accessRead)
+	if err != nil {
+		return LimitsReport{}, err
+	}
+	subs, err := s.subscriptionsByCluster(ctx, c.org.ID)
 	if err != nil {
 		return LimitsReport{}, err
 	}
@@ -206,13 +211,8 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 		return LimitsReport{}, fmt.Errorf("sum sandboxes: %w", err)
 	}
 	usedByCluster := make(map[string]LimitsUsed, len(rows))
-	var total LimitsUsed
 	for _, row := range rows {
-		used := LimitsUsed{Sandboxes: row.Sandboxes, Vcpus: row.Vcpus, MemoryMB: row.MemoryMb}
-		usedByCluster[row.ClusterID] = used
-		total.Sandboxes += used.Sandboxes
-		total.Vcpus += used.Vcpus
-		total.MemoryMB += used.MemoryMB
+		usedByCluster[row.ClusterID] = LimitsUsed{Sandboxes: row.Sandboxes, Vcpus: row.Vcpus, MemoryMB: row.MemoryMb}
 	}
 	states, err := s.q.ListQuotaStates(ctx, c.org.ID)
 	if err != nil {
@@ -226,13 +226,23 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 	if err != nil {
 		return LimitsReport{}, fmt.Errorf("list clusters: %w", err)
 	}
-	out := LimitsReport{
-		Limits:  effectiveLimits(c.org, plans),
-		Used:    total,
-		Regions: make([]RegionLimits, 0, len(clusters)),
-	}
+	out := LimitsReport{Regions: make([]RegionLimits, 0, len(subs))}
 	for _, cluster := range clusters {
-		region := RegionLimits{Slug: cluster.Slug, Used: usedByCluster[cluster.ID]}
+		sub, ok := subs[cluster.ID]
+		if !ok {
+			continue
+		}
+		plan, ok := plans[sub.PlanID]
+		if !ok {
+			continue
+		}
+		region := RegionLimits{
+			Slug:   cluster.Slug,
+			Name:   cluster.Name,
+			Plan:   PlanRef{Slug: plan.Slug, Name: plan.Name},
+			Limits: effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb),
+			Used:   usedByCluster[cluster.ID],
+		}
 		if state, ok := stateByCluster[cluster.ID]; ok {
 			at := state.PushedAt.UTC()
 			region.PushedAt = &at

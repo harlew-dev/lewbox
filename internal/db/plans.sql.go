@@ -11,39 +11,6 @@ import (
 	"time"
 )
 
-const countOrganizationsByPlan = `-- name: CountOrganizationsByPlan :many
-SELECT plan_id, COUNT(*) AS organizations FROM organizations
-WHERE plan_id IS NOT NULL GROUP BY plan_id
-`
-
-type CountOrganizationsByPlanRow struct {
-	PlanID        sql.NullString
-	Organizations int64
-}
-
-func (q *Queries) CountOrganizationsByPlan(ctx context.Context) ([]CountOrganizationsByPlanRow, error) {
-	rows, err := q.db.QueryContext(ctx, countOrganizationsByPlan)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CountOrganizationsByPlanRow
-	for rows.Next() {
-		var i CountOrganizationsByPlanRow
-		if err := rows.Scan(&i.PlanID, &i.Organizations); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const createPlan = `-- name: CreatePlan :one
 INSERT INTO plans (id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -86,14 +53,14 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, e
 const deletePlan = `-- name: DeletePlan :execrows
 DELETE FROM plans
 WHERE plans.id = ?1
-  AND NOT EXISTS (SELECT 1 FROM organizations WHERE organizations.plan_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE subscriptions.plan_id = ?1)
   AND NOT EXISTS (
     SELECT 1 FROM settings
     WHERE settings.key = 'default_plan' AND json_extract(settings.value, '$') = ?1
   )
 `
 
-// Refuses a plan an organization uses or that is the default. The guards are
+// Refuses a plan a subscription uses or that is the default. The guards are
 // in the statement, so a plan that becomes used is not removed.
 func (q *Queries) DeletePlan(ctx context.Context, planID string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deletePlan, planID)

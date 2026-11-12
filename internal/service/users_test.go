@@ -456,7 +456,7 @@ func TestPermissions(t *testing.T) {
 	if _, err := s.ListNodes(plainCtx, ListNodesRequest{}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.ListRegions(plainCtx); err != nil {
+	if _, err := s.ListRegions(plainCtx, ""); err != nil {
 		t.Errorf("plain user list regions: %v", err)
 	}
 	if _, err := s.AddNode(plainCtx, AddNodeRequest{Name: "n1", URL: "https://n1.example"}); err != nil {

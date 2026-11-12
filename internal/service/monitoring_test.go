@@ -278,6 +278,9 @@ func TestOverview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	for _, org := range []struct{ slug, status string }{{"pending-co", orgPending}, {"suspended-co", orgSuspended}} {
 		if _, err := s.q.CreateOrganization(context.Background(), db.CreateOrganizationParams{
 			ID:        uuid.NewV7().String(),

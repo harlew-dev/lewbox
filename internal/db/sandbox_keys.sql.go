@@ -173,6 +173,44 @@ func (q *Queries) ListLiveSandboxKeysByCluster(ctx context.Context, clusterID st
 	return items, nil
 }
 
+const listLiveSandboxKeysByOrg = `-- name: ListLiveSandboxKeysByOrg :many
+SELECT id, org_id, cluster_id, name, upstream_id, last4, created_by, created_at, expires_at, revoked_at FROM sandbox_keys WHERE org_id = ? AND revoked_at IS NULL
+`
+
+func (q *Queries) ListLiveSandboxKeysByOrg(ctx context.Context, orgID string) ([]SandboxKey, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveSandboxKeysByOrg, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SandboxKey
+	for rows.Next() {
+		var i SandboxKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ClusterID,
+			&i.Name,
+			&i.UpstreamID,
+			&i.Last4,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSandboxKeys = `-- name: ListSandboxKeys :many
 SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email,
        COALESCE(users.instance_admin, 0) AS created_by_admin

@@ -20,7 +20,7 @@ type Plan struct {
 	MaxSandboxes  *int64    `json:"max_sandboxes"`
 	MaxVcpus      *int64    `json:"max_vcpus"`
 	MaxMemoryMB   *int64    `json:"max_memory_mb"`
-	Organizations int       `json:"organizations"`
+	Subscriptions int       `json:"subscriptions"`
 	Default       bool      `json:"default"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -58,7 +58,7 @@ func (s *Service) ListPlans(ctx context.Context) (PlanList, error) {
 	if err != nil {
 		return PlanList{}, fmt.Errorf("list plans: %w", err)
 	}
-	counts, err := s.planOrganizationCounts(ctx)
+	counts, err := s.planSubscriptionCounts(ctx)
 	if err != nil {
 		return PlanList{}, err
 	}
@@ -68,7 +68,7 @@ func (s *Service) ListPlans(ctx context.Context) (PlanList, error) {
 	}
 	out := PlanList{Data: make([]Plan, 0, len(rows))}
 	for _, row := range rows {
-		out.Data = append(out.Data, toPlan(row, counts[row.ID], row.Slug == settings.DefaultPlan))
+		out.Data = append(out.Data, toPlan(row, counts[row.ID], isDefaultPlan(settings, row.Slug)))
 	}
 	return out, nil
 }
@@ -82,7 +82,7 @@ func (s *Service) GetPlan(ctx context.Context, ref string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	counts, err := s.planOrganizationCounts(ctx)
+	counts, err := s.planSubscriptionCounts(ctx)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -90,7 +90,7 @@ func (s *Service) GetPlan(ctx context.Context, ref string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return toPlan(row, counts[row.ID], row.Slug == settings.DefaultPlan), nil
+	return toPlan(row, counts[row.ID], isDefaultPlan(settings, row.Slug)), nil
 }
 
 // CreatePlan adds a plan. Instance admins only.
@@ -137,7 +137,7 @@ func (s *Service) CreatePlan(ctx context.Context, req CreatePlanRequest) (Plan, 
 	if err != nil {
 		return Plan{}, err
 	}
-	return toPlan(row, 0, row.Slug == settings.DefaultPlan), nil
+	return toPlan(row, 0, isDefaultPlan(settings, row.Slug)), nil
 }
 
 // UpdatePlan changes a plan by ID or slug. Instance admins only.
@@ -202,7 +202,7 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 			s.log.Warn("quota sync failed", "plan", updated.Slug, "err", err)
 		}
 	}
-	counts, err := s.planOrganizationCounts(ctx)
+	counts, err := s.planSubscriptionCounts(ctx)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -210,10 +210,10 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 	if err != nil {
 		return Plan{}, err
 	}
-	return toPlan(updated, counts[updated.ID], updated.Slug == settings.DefaultPlan), nil
+	return toPlan(updated, counts[updated.ID], isDefaultPlan(settings, updated.Slug)), nil
 }
 
-// DeletePlan removes a plan that no organization uses and that is not the
+// DeletePlan removes a plan that no subscription uses and that is not the
 // default. Instance admins only. The guards are in the DELETE, so a row that
 // becomes used between the lookup and the delete is not removed.
 func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
@@ -229,12 +229,12 @@ func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
 		return Plan{}, fmt.Errorf("delete plan: %w", err)
 	}
 	if n == 0 {
-		counts, err := s.planOrganizationCounts(ctx)
+		counts, err := s.planSubscriptionCounts(ctx)
 		if err != nil {
 			return Plan{}, err
 		}
 		if count := counts[row.ID]; count > 0 {
-			return Plan{}, conflict("plan %q is used by %d organization(s); move them to another plan first", row.Slug, count)
+			return Plan{}, conflict("plan %q is used by %d subscription(s); move them to another plan first", row.Slug, count)
 		}
 		return Plan{}, conflict("plan %q is the default plan; choose another default first", row.Slug)
 	}
@@ -265,26 +265,7 @@ func (s *Service) findPlan(ctx context.Context, ref string) (db.Plan, error) {
 	return row, nil
 }
 
-// defaultPlan is the plan new sign-ups and organizations get.
-func (s *Service) defaultPlan(ctx context.Context) (db.Plan, error) {
-	settings, err := s.getSettings(ctx)
-	if err != nil {
-		return db.Plan{}, err
-	}
-	if settings.DefaultPlan == "" {
-		return db.Plan{}, unavailable("this instance has no default plan: set one with lewbox settings set --default-plan <slug>")
-	}
-	row, err := s.q.GetPlanBySlug(ctx, settings.DefaultPlan)
-	if errors.Is(err, sql.ErrNoRows) {
-		return db.Plan{}, unavailable("the default plan %q no longer exists: set one with lewbox settings set --default-plan <slug>", settings.DefaultPlan)
-	}
-	if err != nil {
-		return db.Plan{}, fmt.Errorf("get default plan: %w", err)
-	}
-	return row, nil
-}
-
-// planRows maps plan IDs to rows, for turning organizations into responses.
+// planRows maps plan IDs to rows, for turning subscriptions into responses.
 func (s *Service) planRows(ctx context.Context) (map[string]db.Plan, error) {
 	rows, err := s.q.ListPlans(ctx)
 	if err != nil {
@@ -297,22 +278,24 @@ func (s *Service) planRows(ctx context.Context) (map[string]db.Plan, error) {
 	return plans, nil
 }
 
-// planOrganizationCounts maps plan IDs to how many organizations use them.
-func (s *Service) planOrganizationCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountOrganizationsByPlan(ctx)
+// planSubscriptionCounts maps plan IDs to how many subscriptions use them.
+func (s *Service) planSubscriptionCounts(ctx context.Context) (map[string]int, error) {
+	rows, err := s.q.CountSubscriptionsByPlan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("count organizations by plan: %w", err)
+		return nil, fmt.Errorf("count subscriptions by plan: %w", err)
 	}
 	counts := make(map[string]int, len(rows))
 	for _, row := range rows {
-		if row.PlanID.Valid {
-			counts[row.PlanID.String] = int(row.Organizations)
-		}
+		counts[row.PlanID] = int(row.Subscriptions)
 	}
 	return counts, nil
 }
 
-func toPlan(row db.Plan, organizations int, isDefault bool) Plan {
+func isDefaultPlan(settings Settings, slug string) bool {
+	return settings.DefaultPlan != nil && *settings.DefaultPlan == slug
+}
+
+func toPlan(row db.Plan, subscriptions int, isDefault bool) Plan {
 	return Plan{
 		ID:            row.ID,
 		Slug:          row.Slug,
@@ -320,7 +303,7 @@ func toPlan(row db.Plan, organizations int, isDefault bool) Plan {
 		MaxSandboxes:  nullInt(row.MaxSandboxes),
 		MaxVcpus:      nullInt(row.MaxVcpus),
 		MaxMemoryMB:   nullInt(row.MaxMemoryMb),
-		Organizations: organizations,
+		Subscriptions: subscriptions,
 		Default:       isDefault,
 		CreatedAt:     row.CreatedAt.UTC(),
 	}

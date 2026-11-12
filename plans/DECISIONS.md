@@ -106,6 +106,8 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D12. Billing is a credit ledger with no payment provider
 
+> **Superseded by D24** (2026-11-12): no billing at all. Never built.
+
 **Chosen.** Prices per vCPU-hour and GiB-hour (defaults $0.05 and $0.016, the E2B/Daytona level). Billing mode `off`, `show` (track and display cost) or `enforce` (prepaid credits; at zero the customer is suspended and their sandboxes stopped; topping up restores them). Credits come from the operator (console, CLI, API), an optional sign-up credit, and an optional monthly grant per plan. Every ledger entry has a unique reference, so retries never double-charge or double-credit.
 
 **Why.** Reselling compute needs metering and a way to stop non-payers; taking card payments is a separate decision (Stripe account, tax, invoices) you'll want to make yourself.
@@ -172,6 +174,8 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D21. Plans have no price (your call, 2026-11-12)
 
+> Moot after D24: there's no billing to price.
+
 **Chosen.** Plans only set limits. Money is purely usage-based (vCPU-hours and GiB-hours from credits, D12). The "monthly credits per plan" idea was dropped.
 
 **Other options.** A monthly price per plan, charged from credits per region subscription. A fixed monthly charge per subscription would slot into the same ledger.
@@ -181,6 +185,52 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Chosen.** AerolVM v0.7.0 node certificates last 90 days and renew themselves at two-thirds of that (`internal/cluster/cert_renew.go`). Lewbox's health checks read each node's `aerolvm_cluster_mtls_cert_not_after_unix` metric and warn when one is within 14 days of expiry, so a silently failing renewal shows up before the cluster splits.
 
 **Why.** AerolVM PR #986 (an open plan) says older join paths never renew. v0.7.0's built-in join, which Lewbox uses, does. Watching costs one metrics call per node per check.
+
+## D23. Customers' snapshots are listed with a read-only token per region
+
+**Chosen.** When someone opens the Snapshots page, Lewbox mints a one-hour `viewer` token for each member team it needs (D26), keeps it in memory only (reused for 50 minutes), and lists that team's snapshots on every node of the region, caching the result for 30 s. Deleting mints a one-hour `runner` token for the snapshot's member team, deletes, and revokes it. Nothing is stored.
+
+**Why.** AerolVM v0.7.0's snapshot list doesn't say who owns a snapshot, is per node, and the admin token can't address a customer's snapshot by name. A team-bound token sees exactly that team's snapshots.
+
+**Other options.** Only list snapshots that were pushed to a registry, and infer the team from the `tenant-<hash>` path segment. That needs a registry set up on every cluster.
+
+**Caveats.** Listing costs a token mint per member team per hour and one call per node per page view. No snapshot sizes.
+
+## D24. No billing: plans only set limits (your call, 2026-11-12)
+
+**Chosen.** There are no prices, credits, balances or automatic suspensions for non-payment (Phase 5 was dropped before it was built). Plans are limit sets that the operator assigns per region. Usage (vCPU-hours, GiB-hours, sandbox-hours) is still recorded, for charts and so you can see who uses what. Customer accounts normally come from you: the console's **New customer** form creates the account, its organization and its region plans in one go. Self sign-up still exists but defaults to `closed`.
+
+**Why.** You said you don't need to take payments, just plans that set limits, assigned by an admin.
+
+**Other options.** The design is kept in `05-billing.md`: a credits ledger with idempotent references, hourly usage charges, and suspension at zero. Usage is already metered hourly per customer and region, so it would slot in later without schema changes to usage.
+
+**Caveats.** Nothing stops a customer using their plan's limits around the clock. Limits are the only control, plus Suspend.
+
+## D25. A workspace's plan is split between its members (your call, 2026-11-12)
+
+**Chosen.** Each region's plan belongs to the workspace and is divided into fixed member shares. Owners and admins set shares; members without one split the rest equally (one member gets everything; 4 members on 4 GB get 1 GB each). Explicit shares can't add up to more than the plan, and AerolVM enforces each share exactly. A member whose share of something is 0 is blocked in that region until an owner gives them some.
+
+**Why.** You wanted per-member limits inside a workspace (4 GB workspace, 1 GB each) and chose a fixed split over shared caps, so the workspace total can never be exceeded, not even briefly.
+
+**Other options.** Caps plus a shared total: each member gets "their use + what's left in the workspace", updated every sync. More flexible (an idle member's share is usable by others), with the brief-overshoot race D10 described.
+
+**Caveats.** An idle member's share sits unused. With small plans, an equal split can round to 0 (2 sandboxes between 4 members blocks two of them until the owner sets shares).
+
+## D26. Each member has their own AerolVM team (your call, 2026-11-12)
+
+**Chosen.** AerolVM can only cap teams, so every workspace member gets a team, and their keys are bound to it. A member's keys see only that member's sandboxes and snapshots. Owners and admins see and stop everyone's from the portal.
+
+**Caveats.** Members can't share a sandbox through the SDK. One member can't attach to another's sandbox with their own key.
+
+## D27. Shares are set per region (your call, 2026-11-12)
+
+**Chosen.** A member's share is set separately in each region where the workspace has a plan.
+
+## D28. "Workspace" in the UI, "organization" in the code
+
+**Chosen.** Customers and the console call a customer's unit a **workspace**, your word for it. The API, CLI and database keep `organization` (`/v0/organizations`, `lewbox org`), which were already built and documented.
+
+**Other options.** Rename the API and CLI too (`/v0/workspaces`, `lewbox workspace`). That's cleaner for API users, and a mechanical change best done before the first release if you want it.
 
 ---
 

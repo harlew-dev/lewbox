@@ -479,7 +479,7 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	if err != nil || me.Via != "admin_key" || me.Organization == nil || me.Organization.Slug != "acme" {
 		t.Fatalf("me with key = %+v, %v", me, err)
 	}
-	if me.Organization.Team != "" || me.Organization.Overrides != nil || me.Organization.Plan == nil {
+	if me.Organization.Team != "" || len(me.Organization.Regions) != 0 {
 		t.Errorf("a key sees admin fields: %+v", me.Organization)
 	}
 	if org, err := keyed.GetOrganization(ctx, ""); err != nil || org.Slug != "acme" {
@@ -509,6 +509,9 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -613,6 +616,9 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	h.fake.AddSandbox(org.Team, aerolvm.Sandbox{
 		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
 		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
@@ -702,10 +708,14 @@ func TestCustomerBackendsAgree(t *testing.T) {
 	getCustomer := func(ctx context.Context, b backend.Backend) (any, error) {
 		return b.GetOrganization(ctx, "customer")
 	}
-	setOverrides := func(n *int64) callFunc {
+	listSubscriptions := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListSubscriptions(ctx, "customer")
+	}
+	setSubscription := func(limits service.OptionalInt) callFunc {
 		return func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.UpdateOrganization(ctx, "customer", service.UpdateOrganizationRequest{
-				MaxSandboxes: service.OptionalInt{Set: true, Value: n},
+			return b.SetSubscription(ctx, "customer", "eu-west", service.SetSubscriptionRequest{
+				Plan:         "pro",
+				MaxSandboxes: limits,
 			})
 		}
 	}
@@ -743,15 +753,17 @@ func TestCustomerBackendsAgree(t *testing.T) {
 			})
 		}),
 		{
-			name: "create an organization on the plan",
+			name: "create an organization",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "customer", Plan: "pro"})
+				return b.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "customer"})
 			},
 			remote:  getCustomer,
 			compare: true,
 		},
-		both("override a limit", setOverrides(intPtr(10))),
-		both("clear a limit", setOverrides(nil)),
+		both("subscribe it to the plan in a region", setSubscription(service.OptionalInt{})),
+		both("list subscriptions", listSubscriptions),
+		both("override a limit", setSubscription(service.OptionalInt{Set: true, Value: intPtr(10)})),
+		both("clear a limit", setSubscription(service.OptionalInt{Set: true})),
 		both("suspend the organization", func(ctx context.Context, b backend.Backend) (any, error) {
 			status := "suspended"
 			return b.UpdateOrganization(ctx, "customer", service.UpdateOrganizationRequest{Status: &status})
@@ -777,7 +789,7 @@ func TestCustomerBackendsAgree(t *testing.T) {
 			compare: true,
 		},
 		both("list regions", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.ListRegions(ctx)
+			return b.ListRegions(ctx, "")
 		}),
 		both("listing by status", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{Status: "active"})

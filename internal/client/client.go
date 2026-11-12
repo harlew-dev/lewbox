@@ -267,10 +267,10 @@ func (c *Client) UpdateOrganization(ctx context.Context, ref string, req service
 	return out, err
 }
 
-// ListRegions returns the clusters customers can use.
-func (c *Client) ListRegions(ctx context.Context) (service.RegionList, error) {
+// ListRegions returns the regions a caller can use.
+func (c *Client) ListRegions(ctx context.Context, org string) (service.RegionList, error) {
 	var out service.RegionList
-	err := c.do(ctx, http.MethodGet, "/v0/regions", nil, &out, defaultTimeout)
+	err := c.doOrg(ctx, org, http.MethodGet, "/v0/regions", nil, &out)
 	return out, err
 }
 
@@ -316,10 +316,32 @@ func (c *Client) UpdatePlan(ctx context.Context, ref string, req service.UpdateP
 	return out, err
 }
 
-// DeletePlan removes a plan that no organization uses.
+// DeletePlan removes a plan that no subscription uses.
 func (c *Client) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
 	var out service.Plan
 	err := c.do(ctx, http.MethodDelete, "/v0/plans/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ListSubscriptions returns an organization's subscriptions.
+func (c *Client) ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error) {
+	var out service.SubscriptionList
+	err := c.doOrg(ctx, org, http.MethodGet, "/v0/subscriptions", nil, &out)
+	return out, err
+}
+
+// SetSubscription creates or changes a subscription.
+func (c *Client) SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error) {
+	var out service.Subscription
+	err := c.doOrg(ctx, org, http.MethodPut, "/v0/subscriptions/"+url.PathEscape(region), req, &out)
+	return out, err
+}
+
+// DeleteSubscription removes a subscription.
+func (c *Client) DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error) {
+	path := "/v0/subscriptions/" + url.PathEscape(region) + "?force=" + strconv.FormatBool(force)
+	var out service.Subscription
+	err := c.doOrg(ctx, org, http.MethodDelete, path, nil, &out)
 	return out, err
 }
 

@@ -77,7 +77,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
-	cluster, err := s.sandboxRegion(ctx, req.Region)
+	cluster, err := s.sandboxRegion(ctx, c.org.ID, req.Region)
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
@@ -280,16 +280,21 @@ func upstreamLifetime(d time.Duration) string {
 	return fmt.Sprintf("%dh", (d+time.Hour-1)/time.Hour)
 }
 
-// sandboxRegion finds the cluster behind ref. An empty ref means the only
-// ready region.
-func (s *Service) sandboxRegion(ctx context.Context, ref string) (db.Cluster, error) {
+// sandboxRegion finds the cluster behind ref, which must be one the
+// organization is subscribed to. An empty ref means its only ready subscribed
+// region.
+func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Cluster, error) {
 	rows, err := s.q.ListClusters(ctx)
 	if err != nil {
 		return db.Cluster{}, fmt.Errorf("list clusters: %w", err)
 	}
+	subs, err := s.subscriptionsByCluster(ctx, orgID)
+	if err != nil {
+		return db.Cluster{}, err
+	}
 	ready := make([]db.Cluster, 0, len(rows))
 	for _, row := range rows {
-		if regionReady(row.Status) {
+		if _, ok := subs[row.ID]; ok && regionReady(row.Status) {
 			ready = append(ready, row)
 		}
 	}
@@ -297,7 +302,7 @@ func (s *Service) sandboxRegion(ctx context.Context, ref string) (db.Cluster, er
 	if ref == "" {
 		switch len(ready) {
 		case 0:
-			return db.Cluster{}, precondition(nil, "no region is available: ask the operator to add a ready cluster")
+			return db.Cluster{}, precondition(nil, "your account has no plan in any region yet; ask your provider")
 		case 1:
 			return ready[0], nil
 		default:
@@ -310,6 +315,9 @@ func (s *Service) sandboxRegion(ctx context.Context, ref string) (db.Cluster, er
 		}
 		if !regionReady(row.Status) {
 			return db.Cluster{}, precondition(nil, "region %q is %s", row.Slug, row.Status)
+		}
+		if _, ok := subs[row.ID]; !ok {
+			return db.Cluster{}, precondition(nil, "your account has no plan in region %q; ask your provider", row.Slug)
 		}
 		return row, nil
 	}

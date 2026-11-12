@@ -351,6 +351,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newLimitsCmd(a),
 		newRegionCmd(a),
 		newPlanCmd(a),
+		newSubscriptionCmd(a),
 		newSettingsCmd(a),
 		newUpdateCmd(a),
 		newVersionCmd(),

@@ -76,7 +76,7 @@ API responses carry `Cache-Control: no-store`.
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/regions` | signed in, or a key | `{data: [Region]}`: clusters that are `ready` or `degraded`, ordered by slug. No admin fields |
+| `GET /v0/regions` | signed in, or a key | `{data: [Region]}`: clusters that are `ready` or `degraded`, ordered by slug. Admins get every one; anyone else gets the regions their organization is subscribed to, with `plan` and `limits`. No admin fields |
 
 ### Settings
 
@@ -84,8 +84,8 @@ Instance admins only.
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/settings` | admin | `{instance_name, signup, default_plan}` |
-| `PATCH /v0/settings` | admin | `{instance_name, signup, default_plan}`; only the fields set change. `signup` is `open`, `approval` or `closed`; `default_plan` is a plan slug |
+| `GET /v0/settings` | admin | `{instance_name, signup, default_plan, default_regions}` |
+| `PATCH /v0/settings` | admin | `{instance_name, signup, default_plan, default_regions}`; only the fields set change. `signup` is `open`, `approval` or `closed`; `default_plan` is a plan slug or `none`; `default_regions` is a list of cluster slugs (`[]` clears it) |
 
 ### Plans
 
@@ -97,7 +97,7 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `POST /v0/plans` | admin | `{slug, name, max_sandboxes, max_vcpus, max_memory_mb}` → `201` Plan |
 | `GET /v0/plans/{ref}` | admin | Plan, by ID or slug |
 | `PATCH /v0/plans/{ref}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
-| `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while organizations use it or it is the default plan |
+| `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while a subscription uses it or it is the default plan |
 
 ### Clusters
 
@@ -142,9 +142,9 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | Route | Who | |
 |---|---|---|
 | `GET /v0/organizations?user={ref}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
-| `POST /v0/organizations` | admin | `{slug, name, owner, plan}` → `201` Organization. `owner` (an email or ID) defaults to you; `plan` (a slug) defaults to the instance's default plan |
+| `POST /v0/organizations` | admin | `{slug, name, owner}` → `201` Organization. `owner` (an email or ID) defaults to you. Give it a plan with `PUT /v0/subscriptions/{region}` |
 | `GET /v0/organizations/{ref}` | its members, admins, its keys | Organization |
-| `PATCH /v0/organizations/{ref}` | owner or admin; plan, limits and status: admin | `{name}` renames. Instance admins can also set `{plan, max_sandboxes, max_vcpus, max_memory_mb, status}`. A `null` limit on an organization falls back to the plan's; a limit is a positive integer and `0` is refused; `status` is `active` or `suspended` → Organization |
+| `PATCH /v0/organizations/{ref}` | owner or admin; status: admin | `{name}` renames. Instance admins can also set `{status}`; `status` is `active` or `suspended` → Organization |
 | `GET /v0/organization` | as for the header's, or the key's own | Organization |
 | `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
@@ -154,7 +154,7 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
 | `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
 | `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
-| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active or the region is not ready; a cluster failure is `502` and stores nothing |
+| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready subscribed region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active, is not subscribed to the region, or the region is not ready; a cluster failure is `502` and stores nothing |
 | `DELETE /v0/sandbox-keys/{ref}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `502` and the key stays live |
 
 "Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
@@ -169,9 +169,19 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 | `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
-| `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: effective limits, live use, per-region quota and last push |
+| `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
 
-Suspending an organization pushes a blocking quota to every region on the next change and stops its running sandboxes on the next sync pass. Stopped sandboxes still count against limits, as AerolVM counts them.
+Suspending an organization pushes a blocking quota where it has used compute and stops its running sandboxes on the next sync pass; the sync also stops sandboxes in a region it is no longer subscribed to. Stopped sandboxes still count against limits, as AerolVM counts them.
+
+### Subscriptions
+
+The organization comes from the `Lewbox-Organization` header. Only instance admins change them; members may list them.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/subscriptions` | its members, admins, its keys | `{data: [Subscription]}`, by region slug |
+| `PUT /v0/subscriptions/{region}` | admin | `{plan, max_sandboxes, max_vcpus, max_memory_mb}` → Subscription. `{region}` is a cluster slug or ID; `plan` is a slug or ID. An absent override keeps the current one (`null` on a create), `null` clears it to the plan's; `0` is refused. Pushes the quota at once (best effort) |
+| `DELETE /v0/subscriptions/{region}?force=true` | admin | Unsubscribe → the Subscription. Revokes the organization's live keys there (refusing with `502` unless `force`), pushes the blocking quota and stops its running sandboxes |
 
 ### Docs
 
@@ -238,22 +248,24 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "status": "active",
   "status_reason": "",
   "team": "lbx-01a1cb3429a574c396915394d021b0f2",
-  "plan": {"slug": "free", "name": "Free"},
-  "limits": {"sandboxes": 2, "vcpus": 2, "memory_mb": 4096},
-  "overrides": {"sandboxes": null, "vcpus": null, "memory_mb": null},
+  "regions": [{"slug": "eu-west", "name": "EU West", "plan": {"slug": "free", "name": "Free"}}],
   "members": 1,
   "role": "owner",
   "created_at": "2026-11-11T15:22:35.8Z"
 }
 ```
 
-`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `limits` are the effective limits: an override if set, otherwise the plan's; `null` is unlimited. `team` and `overrides` are only present for instance admins. `role` is your role (or the listed account's) when it is a member.
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `regions` lists the subscriptions' regions by slug (empty when there are none). `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
 
-**Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use.
+**Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 
-**Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, organizations, default, created_at}`. A `null` limit is unlimited; `organizations` is how many organizations use it.
+**Subscription**: `{region, plan, limits, overrides, created_at}`. `region` is a Region; `limits` are the effective limits (the plan's, with the override); `overrides` (`{sandboxes, vcpus, memory_mb}`) is only present for instance admins. A `null` limit is unlimited or, on an override, the plan's value.
 
-**Settings**: `{instance_name, signup, default_plan}`. `signup` is `open`, `approval` or `closed`.
+**Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, subscriptions, default, created_at}`. A `null` limit is unlimited; `subscriptions` is how many subscriptions use it.
+
+**Settings**: `{instance_name, signup, default_plan, default_regions}`. `signup` is `open`, `approval` or `closed`; `default_plan` is a plan slug or `null`; `default_regions` is a list of cluster slugs.
+
+**LimitsReport**: `{regions: [{slug, name, plan, limits, used, quota, blocked, pushed_at, error}]}`, one entry per subscribed region. `used` is `{sandboxes, vcpus, memory_mb}`; `quota` is `null` when none was pushed; `error` is the last push error.
 
 **Instance**: `{name, signup}`; public.
 

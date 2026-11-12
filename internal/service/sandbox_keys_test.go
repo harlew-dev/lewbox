@@ -46,6 +46,9 @@ func newSandboxFixture(t *testing.T, extra ...Option) sandboxFixture {
 	f.fake = newClusterFake(t)
 	setMembers(f.fake, "node-a")
 	addTestCluster(t, s, f.fake, "eu-west")
+	if _, err := s.SetSubscription(f.root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -132,8 +135,23 @@ func TestSandboxKeyRegionDefault(t *testing.T) {
 	second := newClusterFake(t)
 	setMembers(second, "node-b")
 	addTestCluster(t, f.s, second, "us-east")
+	// A region without a subscription is refused, and does not become the
+	// default.
+	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two", Region: "us-east"})
+	se := wantCode(t, err, CodePrecondition)
+	if !strings.Contains(se.Message, "no plan in region") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if out, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "again", Region: "eu-west"}); err != nil || out.Region.Slug != "eu-west" {
+		t.Errorf("default region key = %+v, %v", out, err)
+	}
+
+	// With two subscribed regions the caller must choose.
+	if _, err := f.s.SetSubscription(f.root, "acme", "us-east", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two"})
-	se := wantCode(t, err, CodeInvalid)
+	se = wantCode(t, err, CodeInvalid)
 	if !strings.Contains(se.Message, "--region") {
 		t.Errorf("message = %q", se.Message)
 	}

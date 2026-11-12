@@ -12,7 +12,7 @@ lewbox region list
 lewbox key create laptop --region eu-west
 ```
 
-`--region` is optional when the instance has exactly one ready region. The key lasts 90 days unless you pass `--expires-in 30d` or `--never-expires`.
+`--region` is optional when you are subscribed to exactly one ready region. The regions you can use come from your provider: a key is refused in a region where your organization has no plan. The key lasts 90 days unless you pass `--expires-in 30d` or `--never-expires`.
 
 `create` prints the token once, with the settings to paste:
 
@@ -40,4 +40,4 @@ lewbox key revoke laptop
 
 `list` shows live keys first, then revoked ones. Revoking stops the token at once on servers and within a few seconds on workers. A member can revoke only the keys they created; owners and admins can revoke any key in the organization.
 
-Keys are refused while your organization is waiting for approval or suspended, and for a region that is not ready.
+Keys are refused while your organization is waiting for approval or suspended, and in a region where your organization has no plan (or that is not ready). Ask your provider to assign a plan in the region you want.

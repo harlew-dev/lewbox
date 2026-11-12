@@ -26,7 +26,7 @@ LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh   # ~10 min, real AerolVM in Docker, i
 ## 2. Cut the release
 
 ```bash
-git tag -a v0.2.0 -m "v0.2.0: customers, plans, sandbox keys, usage, monitoring, billing"
+git tag -a v0.2.0 -m "v0.2.0: customers, region plans, sandbox keys, usage, monitoring"
 make release VERSION=v0.2.0
 ls release/      # lewbox_linux_amd64  lewbox_linux_arm64  release.json  checksums.txt
 ```
@@ -131,16 +131,16 @@ A region is any cluster in `ready` or `degraded` state; customers see it by its 
 In the console (`/admin`):
 
 1. **Plans**: edit `free` (default: 2 sandboxes, 2 vCPU, 4 GB), add paid plans.
-2. **Settings**: instance name; sign-up `approval` (recommended for launch: you approve each new customer on **Customers → Pending**) or `open`; default plan; billing `off` / `show` / `enforce`, prices (defaults $0.05 per vCPU-hour, $0.016 per GiB-hour), currency, sign-up credits.
-3. **Customers**: approve, change plans, override limits, add credits.
+2. **Customers → New customer**: email, password, organization name, and a plan for each region. Send them the sign-in URL and password.
+3. **Settings** (optional): instance name; self sign-up stays `closed` unless you want it (`approval` lets people sign up and wait for you; `open` lets them straight in with the default plan in the default regions).
 
-The same from the CLI: `lewbox settings set --signup approval --default-plan free`, `lewbox plan create pro --name Pro --max-sandboxes 20 --max-vcpus 40 --max-memory 80GB`, `lewbox credits add 25 --org acme`.
+The same from the CLI: `lewbox plan create pro --name Pro --max-sandboxes 20 --max-vcpus 40 --max-memory 80GB`, `lewbox user create dev@acme.dev`, `lewbox org create acme --name Acme --owner dev@acme.dev`, `lewbox subscription set eu-west --plan pro --org acme`.
 
 ## 6. Smoke test on the live servers
 
 **By hand, as a customer** (a private browser window):
 
-1. Open `https://lewbox.example.com/signup`, create an account. With `approval`, approve it in the console.
+1. Create a test customer in the console (**Customers → New customer**) with a plan in the region, and sign in as it.
 2. **API keys → Create API key**, pick the region, copy the env vars.
 3. Run the TypeScript or Python snippet from the dialog on your laptop. The sandbox appears under **Sandboxes** within ~15 s, and **Home** turns green.
 4. **Usage** shows numbers after a minute; **Sandboxes → Stop/Delete** works.
@@ -153,7 +153,7 @@ LEWBOX_URL=https://lewbox.example.com LEWBOX_REGION=eu-west \
 LEWBOX_ADMIN_EMAIL=you@example.com LEWBOX_ADMIN_PASSWORD='…' ./customers.sh
 ```
 
-It needs `curl` and `jq`, and your machine must reach the region's endpoint. It flips billing to `enforce` briefly; run it before you have paying customers, or skip it on a busy instance.
+It needs `curl` and `jq`, and your machine must reach the region's endpoint. It opens sign-up briefly while it runs; run it before launch, or on a quiet instance.
 
 ## 7. Upgrade
 
@@ -170,5 +170,5 @@ Migrations run on start. Nodes update themselves: `lewbox update` (CLI), `lewbox
 
 - `journalctl -u lewbox` for `cluster sync failed` / `push quota failed` warnings.
 - **Servers → cluster**: uptime bars, memory and disk free per node.
-- **Customers**: pending sign-ups; usage per customer.
+- **Customers**: usage per customer and region.
 - Known limits and their reasons are in [DECISIONS.md](DECISIONS.md); what was and wasn't verified is in [STATUS.md](STATUS.md).

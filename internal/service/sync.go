@@ -85,7 +85,23 @@ func (s *Service) Sync(ctx context.Context) error {
 	for _, org := range orgs {
 		if org.Status == orgSuspended && (org.StatusReason == statusReasonAdmin || org.StatusReason == "credits") {
 			s.stopOrganizationSandboxes(ctx, org)
+			continue
 		}
+		subs, err := s.subscriptionsByCluster(ctx, org.ID)
+		if err != nil {
+			s.log.Warn("list subscriptions failed", "organization", org.Slug, "err", err)
+			continue
+		}
+		if len(subs) == len(clusters) {
+			continue
+		}
+		unsubscribed := make(map[string]bool, len(clusters)-len(subs))
+		for _, cluster := range clusters {
+			if _, ok := subs[cluster.ID]; !ok {
+				unsubscribed[cluster.ID] = true
+			}
+		}
+		s.stopSandboxes(ctx, org, unsubscribed)
 	}
 	return errors.Join(errs...)
 }
@@ -219,41 +235,40 @@ func (s *Service) recordSyncError(ctx context.Context, id string, err error) {
 	}
 }
 
-// sandboxUse is one organization's or one region's share of the mirror.
-type sandboxUse struct {
-	sandboxes int64
-	vcpus     float64
-	memoryMB  int64
-}
-
-func (u *sandboxUse) add(n sandboxUse) {
-	u.sandboxes += n.sandboxes
-	u.vcpus += n.vcpus
-	u.memoryMB += n.memoryMB
-}
-
-// syncOrganizationQuotas computes and pushes one organization's limits across
-// every region. Errors are recorded per cluster and never fail the caller.
+// syncOrganizationQuotas pushes one organization's quota on every cluster it
+// is subscribed to or has used. Errors are recorded per cluster and never
+// fail the caller.
 func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organization) error {
+	if !org.Team.Valid || org.Team.String == "" {
+		return nil
+	}
 	clusters, err := s.q.ListClusters(ctx)
 	if err != nil {
 		return fmt.Errorf("list clusters: %w", err)
+	}
+	subs, err := s.subscriptionsByCluster(ctx, org.ID)
+	if err != nil {
+		return err
 	}
 	plans, err := s.planRows(ctx)
 	if err != nil {
 		return err
 	}
-	limits := effectiveLimits(org, plans)
 	rows, err := s.q.SumSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
 	if err != nil {
 		return fmt.Errorf("sum sandboxes: %w", err)
 	}
-	used := make(map[string]sandboxUse, len(rows))
-	var total sandboxUse
+	used := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		u := sandboxUse{sandboxes: row.Sandboxes, vcpus: row.Vcpus, memoryMB: row.MemoryMb}
-		used[row.ClusterID] = u
-		total.add(u)
+		used[row.ClusterID] = true
+	}
+	keys, err := s.q.ListLiveSandboxKeysByOrg(ctx, org.ID)
+	if err != nil {
+		return fmt.Errorf("list sandbox keys: %w", err)
+	}
+	keyed := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		keyed[key.ClusterID] = true
 	}
 	states, err := s.q.ListQuotaStates(ctx, org.ID)
 	if err != nil {
@@ -266,54 +281,44 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 
 	now := s.now()
 	for _, cluster := range clusters {
-		if !org.Team.Valid || org.Team.String == "" {
+		sub, subscribed := subs[cluster.ID]
+		state, haveState := stateByCluster[cluster.ID]
+		if !subscribed && !used[cluster.ID] && !keyed[cluster.ID] && !haveState {
 			continue
 		}
-		quota, remove := organizationQuota(org.Status, limits, used[cluster.ID], total)
-		state, ok := stateByCluster[cluster.ID]
-		if !ok {
-			state = db.QuotaState{}
+		limits := Limits{}
+		if subscribed {
+			plan, ok := plans[sub.PlanID]
+			if !ok {
+				continue
+			}
+			limits = effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb)
 		}
-		s.pushQuota(ctx, org, cluster, quota, remove, state, ok, now)
+		quota, remove := subscriptionQuota(org.Status, subscribed, limits)
+		s.pushQuota(ctx, org, cluster, quota, remove, state, haveState, now)
 	}
 	return nil
 }
 
-// organizationQuota is the quota an organization should have on one cluster.
-// It returns remove for "no quota", which means every kind is unlimited.
-func organizationQuota(status string, limits Limits, used, total sandboxUse) (aerolvm.TeamQuota, bool) {
-	if status != orgActive {
+// subscriptionQuota is the quota an organization should have on one cluster.
+// A region the organization is not subscribed to, or an organization that is
+// not active, is blocked; all three limits unlimited means no quota.
+func subscriptionQuota(status string, subscribed bool, limits Limits) (aerolvm.TeamQuota, bool) {
+	if !subscribed || status != orgActive {
 		return blockingQuota(), false
 	}
-	limited := limits.Sandboxes != nil || limits.Vcpus != nil || limits.MemoryMB != nil
-	if !limited {
+	if limits.Sandboxes == nil && limits.Vcpus == nil && limits.MemoryMB == nil {
 		return aerolvm.TeamQuota{}, true
 	}
 	quota := aerolvm.TeamQuota{}
-	blocked := false
 	if limits.Sandboxes != nil {
-		n := used.sandboxes + max(0, *limits.Sandboxes-total.sandboxes)
-		if n == 0 {
-			blocked = true
-		}
-		quota.MaxSandboxes = int(n)
+		quota.MaxSandboxes = int(*limits.Sandboxes)
 	}
 	if limits.Vcpus != nil {
-		n := used.vcpus + max(0, float64(*limits.Vcpus)-total.vcpus)
-		if n == 0 {
-			blocked = true
-		}
-		quota.MaxCPU = n
+		quota.MaxCPU = float64(*limits.Vcpus)
 	}
 	if limits.MemoryMB != nil {
-		n := used.memoryMB + max(0, *limits.MemoryMB-total.memoryMB)
-		if n == 0 {
-			blocked = true
-		}
-		quota.MaxMemoryMB = int(n)
-	}
-	if blocked {
-		return blockingQuota(), false
+		quota.MaxMemoryMB = int(*limits.MemoryMB)
 	}
 	return quota, false
 }
@@ -368,12 +373,21 @@ func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db
 // stopOrganizationSandboxes stops every running sandbox of a suspended
 // organization, so it stops accruing compute.
 func (s *Service) stopOrganizationSandboxes(ctx context.Context, org db.Organization) {
+	s.stopSandboxes(ctx, org, nil)
+}
+
+// stopSandboxes stops an organization's running sandboxes, restricted to
+// only's clusters when it is not nil.
+func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only map[string]bool) {
 	rows, err := s.q.ListStartedSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
 	if err != nil {
 		s.log.Warn("list started sandboxes failed", "organization", org.Slug, "err", err)
 		return
 	}
 	for _, row := range rows {
+		if only != nil && !only[row.Sandbox.ClusterID] {
+			continue
+		}
 		cluster, err := s.findCluster(ctx, row.Sandbox.ClusterID)
 		if err != nil {
 			s.log.Warn("find sandbox cluster failed", "sandbox", row.Sandbox.ID, "err", err)
@@ -397,15 +411,22 @@ func (s *Service) stopOrganizationSandboxes(ctx context.Context, org db.Organiza
 	}
 }
 
-// syncPlanQuotas pushes the new limits to every organization on a plan.
+// syncPlanQuotas pushes the new limits to every subscription on a plan.
 func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
-	orgs, err := s.q.ListOrganizations(ctx)
+	subs, err := s.q.ListSubscriptionsByPlan(ctx, planID)
 	if err != nil {
-		return fmt.Errorf("list organizations: %w", err)
+		return fmt.Errorf("list subscriptions: %w", err)
 	}
 	var errs []error
-	for _, org := range orgs {
-		if !org.PlanID.Valid || org.PlanID.String != planID {
+	seen := make(map[string]bool, len(subs))
+	for _, sub := range subs {
+		if seen[sub.OrgID] {
+			continue
+		}
+		seen[sub.OrgID] = true
+		org, err := s.q.GetOrganizationByID(ctx, sub.OrgID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("get organization %q: %w", sub.OrgID, err))
 			continue
 		}
 		if err := s.syncOrganizationQuotas(ctx, org); err != nil {

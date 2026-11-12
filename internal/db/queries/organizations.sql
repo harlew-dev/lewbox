@@ -1,6 +1,6 @@
 -- name: CreateOrganization :one
-INSERT INTO organizations (id, slug, name, status, created_at, team, plan_id)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO organizations (id, slug, name, status, created_at, team)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetOrganizationByID :one
@@ -11,9 +11,6 @@ SELECT * FROM organizations WHERE slug = ?;
 
 -- name: ListOrganizations :many
 SELECT * FROM organizations ORDER BY slug;
-
--- name: ListOrganizationsByPlan :many
-SELECT * FROM organizations WHERE plan_id = ? ORDER BY slug;
 
 -- name: ListOrganizationsForUser :many
 SELECT sqlc.embed(organizations), memberships.role
@@ -33,15 +30,6 @@ UPDATE organizations SET name = ? WHERE id = ? RETURNING *;
 
 -- name: SetOrganizationStatus :one
 UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING *;
-
--- name: SetOrganizationPlan :one
-UPDATE organizations SET plan_id = ? WHERE id = ? RETURNING *;
-
--- name: SetOrganizationOverrides :one
-UPDATE organizations
-SET max_sandboxes = ?, max_vcpus = ?, max_memory_mb = ?
-WHERE id = ?
-RETURNING *;
 
 -- name: DeleteOrganization :exec
 DELETE FROM organizations WHERE id = ?;

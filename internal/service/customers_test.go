@@ -51,18 +51,19 @@ func TestSignupModes(t *testing.T) {
 		org.Status != orgActive || org.Role != roleOwner {
 		t.Errorf("signup organization = %+v", org)
 	}
-	if org.Plan == nil || org.Plan.Slug != "free" || org.Limits.Sandboxes == nil || *org.Limits.Sandboxes != 2 {
-		t.Errorf("plan and limits = %+v, %+v", org.Plan, org.Limits)
+	// No default regions are set, so the new organization has no plan yet.
+	if len(org.Regions) != 0 {
+		t.Errorf("plan and regions = %+v", org.Regions)
 	}
-	// Members do not see the team or the raw overrides.
-	if org.Team != "" || org.Overrides != nil {
+	// Members do not see the team.
+	if org.Team != "" {
 		t.Errorf("member sees admin fields: %+v", org)
 	}
 	adminOrg, err := s.GetOrganization(localCtx(), org.Slug)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(adminOrg.Team, "lbx-") || adminOrg.Overrides == nil {
+	if !strings.HasPrefix(adminOrg.Team, "lbx-") {
 		t.Errorf("admin organization = %+v", adminOrg)
 	}
 
@@ -177,16 +178,69 @@ func TestSignupTakenEmail(t *testing.T) {
 	}
 }
 
-func TestPlanCRUD(t *testing.T) {
-	s := newTestService(t)
+func TestSignupSubscribesDefaults(t *testing.T) {
+	s := newClusterService(t)
 	createUser(t, s, "root@example.com", true)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	addTestCluster(t, s, fake, "eu-west")
+	setSignup(t, s, signupOpen)
+
+	plan := "free"
+	regions := []string{"eu-west"}
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegions: &regions}); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@example.com", Password: testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Authenticate(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userCtx := WithPrincipal(context.Background(), p)
+	orgs, err := s.ListOrganizations(userCtx, ListOrganizationsRequest{})
+	if err != nil || len(orgs.Data) != 1 {
+		t.Fatalf("signup organizations = %+v, %v", orgs, err)
+	}
+	org := orgs.Data[0]
+	if len(org.Regions) != 1 || org.Regions[0].Slug != "eu-west" || org.Regions[0].Plan.Slug != "free" {
+		t.Errorf("signup regions = %+v", org.Regions)
+	}
+
+	// With no default regions, the next customer has none.
+	none := []string{}
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultRegions: &none}); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err = s.Signup(context.Background(), SignupRequest{Email: "bob@example.com", Password: testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.Authenticate(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgs, err = s.ListOrganizations(WithPrincipal(context.Background(), p), ListOrganizationsRequest{})
+	if err != nil || len(orgs.Data) != 1 || len(orgs.Data[0].Regions) != 0 {
+		t.Errorf("second signup = %+v, %v", orgs, err)
+	}
+}
+
+func TestPlanCRUD(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	addTestCluster(t, s, fake, "eu-west")
 
 	plans, err := s.ListPlans(localCtx())
 	if err != nil || len(plans.Data) != 1 {
 		t.Fatalf("plans = %+v, %v", plans, err)
 	}
 	free := plans.Data[0]
-	if free.Slug != "free" || !free.Default || free.Organizations != 0 || free.MaxSandboxes == nil || *free.MaxSandboxes != 2 {
+	if free.Slug != "free" || !free.Default || free.Subscriptions != 0 || free.MaxSandboxes == nil || *free.MaxSandboxes != 2 {
 		t.Errorf("free plan = %+v", free)
 	}
 
@@ -227,8 +281,11 @@ func TestPlanCRUD(t *testing.T) {
 		wantCode(t, err, CodeInvalid)
 	}
 
-	// An organization on the plan keeps it alive.
-	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Plan: "pro"}); err != nil {
+	// A subscription on the plan keeps it alive.
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "pro"}); err != nil {
 		t.Fatal(err)
 	}
 	plans, err = s.ListPlans(localCtx())
@@ -236,7 +293,7 @@ func TestPlanCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, plan := range plans.Data {
-		if plan.Slug == "pro" && plan.Organizations != 1 {
+		if plan.Slug == "pro" && plan.Subscriptions != 1 {
 			t.Errorf("pro plan = %+v", plan)
 		}
 	}
@@ -254,61 +311,72 @@ func TestPlanCRUD(t *testing.T) {
 	}
 }
 
-func TestOrganizationLimitsAndPlan(t *testing.T) {
-	s := newTestService(t)
+func TestSubscriptionLimitsAndStatus(t *testing.T) {
+	s := newClusterService(t)
 	createUser(t, s, "root@example.com", true)
 	createUser(t, s, "owner@example.com", false)
 	ownerCtx := userCtx(t, s, "owner@example.com")
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	addTestCluster(t, s, fake, "eu-west")
 
 	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if org.Plan == nil || org.Plan.Slug != "free" || org.Limits.Sandboxes == nil || *org.Limits.Sandboxes != 2 {
+	if len(org.Regions) != 0 {
 		t.Fatalf("organization = %+v", org)
 	}
 
-	// An override wins; clearing it falls back to the plan.
-	updated, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{
+	// The operator assigns a plan and an override; clearing the override
+	// falls back to the plan.
+	sub, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{
+		Plan:         "free",
 		MaxSandboxes: OptionalInt{Set: true, Value: intValue(10)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Limits.Sandboxes == nil || *updated.Limits.Sandboxes != 10 || updated.Overrides == nil || updated.Overrides.Sandboxes == nil {
-		t.Errorf("override = %+v", updated)
+	if sub.Plan.Slug != "free" || sub.Limits.Sandboxes == nil || *sub.Limits.Sandboxes != 10 || sub.Overrides == nil || sub.Overrides.Sandboxes == nil {
+		t.Errorf("override = %+v", sub)
 	}
-	updated, err = s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{
+	sub, err = s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{
+		Plan:         "free",
 		MaxSandboxes: OptionalInt{Set: true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Limits.Sandboxes == nil || *updated.Limits.Sandboxes != 2 || updated.Overrides.Sandboxes != nil {
-		t.Errorf("cleared override = %+v", updated)
+	if sub.Limits.Sandboxes == nil || *sub.Limits.Sandboxes != 2 || sub.Overrides.Sandboxes != nil {
+		t.Errorf("cleared override = %+v", sub)
+	}
+	if org, err := s.GetOrganization(localCtx(), "acme"); err != nil || len(org.Regions) != 1 || org.Regions[0].Plan.Slug != "free" {
+		t.Fatalf("organization regions = %+v, %v", org, err)
 	}
 
 	if _, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro", MaxSandboxes: intValue(50)}); err != nil {
 		t.Fatal(err)
 	}
-	plan := "pro"
-	updated, err = s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Plan: &plan})
-	if err != nil || updated.Plan == nil || updated.Plan.Slug != "pro" || *updated.Limits.Sandboxes != 50 {
-		t.Fatalf("plan change = %+v, %v", updated, err)
+	sub, err = s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "pro"})
+	if err != nil || sub.Plan.Slug != "pro" || *sub.Limits.Sandboxes != 50 {
+		t.Fatalf("plan change = %+v, %v", sub, err)
 	}
 
-	// Owners cannot change the plan, limits or status.
-	if _, err := s.UpdateOrganization(ownerCtx, "acme", UpdateOrganizationRequest{Plan: &plan}); err != nil {
+	// Owners cannot change the plan in a region or the status.
+	if _, err := s.SetSubscription(ownerCtx, "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.UpdateOrganization(ownerCtx, "acme", UpdateOrganizationRequest{
-		MaxSandboxes: OptionalInt{Set: true, Value: intValue(99)},
-	}); err != nil {
+	if _, err := s.DeleteSubscription(ownerCtx, "acme", "eu-west", false); err != nil {
 		wantCode(t, err, CodeForbidden)
+	}
+
+	report, err := s.Limits(localCtx(), "acme")
+	if err != nil || len(report.Regions) != 1 || report.Regions[0].Plan.Slug != "pro" || *report.Regions[0].Limits.Sandboxes != 50 {
+		t.Fatalf("limits = %+v, %v", report, err)
 	}
 
 	suspended := "suspended"
-	updated, err = s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &suspended})
+	updated, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &suspended})
 	if err != nil || updated.Status != orgSuspended || updated.StatusReason != statusReasonAdmin {
 		t.Fatalf("suspend = %+v, %v", updated, err)
 	}
@@ -365,22 +433,21 @@ func TestCustomerRoutesNeedAnInstanceAdmin(t *testing.T) {
 		})
 	}
 
-	// Regions are for customers, without the cluster's admin fields.
+	// Regions are scoped to an organization's subscriptions.
 	fake := newClusterFake(t)
 	setMembers(fake, "node-a")
 	addTestCluster(t, s, fake, "eu-west")
-	regions, err := s.ListRegions(plainCtx)
-	if err != nil || len(regions.Data) != 1 {
-		t.Fatalf("regions = %+v, %v", regions, err)
-	}
-	r := regions.Data[0]
-	if r.Slug != "eu-west" || r.Status != "ready" || r.EndpointURL == "" || r.Runtime != "docker" {
-		t.Errorf("region = %+v", r)
+	regions, err := s.ListRegions(plainCtx, "")
+	if err != nil || len(regions.Data) != 0 {
+		t.Fatalf("regions without an organization = %+v, %v", regions, err)
 	}
 
-	// An organization's API key sees them too.
+	// An organization's API key sees its subscribed regions, with the plan.
 	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(localCtx(), org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
 	key, err := s.CreateAdminKey(localCtx(), org.Slug, CreateAdminKeyRequest{Name: "backend"})
@@ -392,8 +459,10 @@ func TestCustomerRoutesNeedAnInstanceAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyCtx := WithPrincipal(context.Background(), keyPrincipal)
-	if regions, err := s.ListRegions(keyCtx); err != nil || len(regions.Data) != 1 {
+	if regions, err := s.ListRegions(keyCtx, ""); err != nil || len(regions.Data) != 1 {
 		t.Errorf("regions with a key = %+v, %v", regions, err)
+	} else if regions.Data[0].Plan == nil || regions.Data[0].Plan.Slug != "free" || regions.Data[0].Limits == nil {
+		t.Errorf("region plan = %+v", regions.Data[0])
 	}
 }
 
@@ -430,8 +499,11 @@ func TestSignupHasItsOwnRateLimit(t *testing.T) {
 }
 
 func TestLimitsArePositive(t *testing.T) {
-	s := newTestService(t)
+	s := newClusterService(t)
 	createUser(t, s, "root@example.com", true)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	addTestCluster(t, s, fake, "eu-west")
 	zero, negative := int64(0), int64(-1)
 
 	for _, n := range []*int64{&zero, &negative} {
@@ -451,14 +523,17 @@ func TestLimitsArePositive(t *testing.T) {
 			t.Errorf("update plan message = %q", se.Message)
 		}
 	}
-	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Plan: "pro"}); err != nil {
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, n := range []*int64{&zero, &negative} {
-		_, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{MaxSandboxes: OptionalInt{Set: true, Value: n}})
+		_, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{
+			Plan:         "pro",
+			MaxSandboxes: OptionalInt{Set: true, Value: n},
+		})
 		se := wantCode(t, err, CodeInvalid)
 		if !strings.Contains(se.Message, "at least 1") || !strings.Contains(se.Message, "plan's limit") {
-			t.Errorf("organization message = %q", se.Message)
+			t.Errorf("subscription message = %q", se.Message)
 		}
 	}
 }
@@ -497,7 +572,7 @@ func TestDefaultPlanStoredAsID(t *testing.T) {
 		t.Fatalf("renamed plan = %+v, %v", updated, err)
 	}
 	settings, err := s.GetSettings(localCtx())
-	if err != nil || settings.DefaultPlan != "paid" {
+	if err != nil || settings.DefaultPlan == nil || *settings.DefaultPlan != "paid" {
 		t.Errorf("settings default plan = %+v, %v", settings, err)
 	}
 }
@@ -542,8 +617,8 @@ func TestUpdateOrganizationValidatesBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "Changed"
-	_, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Name: &name, Plan: strPtr("missing")})
-	wantCode(t, err, CodeNotFound)
+	_, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Name: &name, Status: strPtr("gone")})
+	wantCode(t, err, CodeInvalid)
 	org, err := s.GetOrganization(localCtx(), "acme")
 	if err != nil || org.Name != "Acme" {
 		t.Errorf("organization after a failed patch = %+v, %v", org, err)
@@ -569,7 +644,7 @@ func TestOptionalIntJSON(t *testing.T) {
 		want string
 	}{
 		{UpdateOrganizationRequest{}, `{}`},
-		{UpdateOrganizationRequest{MaxSandboxes: OptionalInt{Set: true}}, `{"max_sandboxes":null}`},
+		{SetSubscriptionRequest{Plan: "pro", MaxSandboxes: OptionalInt{Set: true}}, `{"plan":"pro","max_sandboxes":null}`},
 		{UpdatePlanRequest{MaxVcpus: OptionalInt{Set: true, Value: intValue(5)}}, `{"max_vcpus":5}`},
 		{UpdatePlanRequest{Name: strPtr("Pro")}, `{"name":"Pro"}`},
 	} {
@@ -586,8 +661,11 @@ func TestOptionalIntJSON(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 func TestDeletePlanGuardsAreInTheStatement(t *testing.T) {
-	s := newTestService(t)
+	s := newClusterService(t)
 	createUser(t, s, "root@example.com", true)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	addTestCluster(t, s, fake, "eu-west")
 	free, err := s.findPlan(localCtx(), "free")
 	if err != nil {
 		t.Fatal(err)
@@ -599,7 +677,10 @@ func TestDeletePlanGuardsAreInTheStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Plan: "pro"}); err != nil {
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "pro"}); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := s.q.DeletePlan(context.Background(), pro.ID); err != nil || n != 0 {

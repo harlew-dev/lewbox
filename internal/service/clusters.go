@@ -305,23 +305,24 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 		return Cluster{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
 	keys, err := s.q.ListLiveSandboxKeysByCluster(ctx, row.ID)
-	if err != nil && !force {
-		return Cluster{}, sandboxKeysNotRevoked(0, row.Slug)
-	}
-	if token, err := s.clusterToken(row); err == nil {
-		client := s.aerolvmClient(row.AdminURL, token)
-		failed := 0
-		for _, key := range keys {
-			if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
-				failed++
-			}
+	if err != nil {
+		if !force {
+			return Cluster{}, sandboxKeysNotRevoked(0, row.Slug)
 		}
-		_ = client.RevokeToken(ctx, row.AdminTokenID)
+		keys = nil
+	}
+	if len(keys) > 0 {
+		failed, ok := s.revokeKeys(ctx, row, keys)
+		if !ok {
+			failed = len(keys)
+		}
 		if failed > 0 && !force {
 			return Cluster{}, sandboxKeysNotRevoked(failed, row.Slug)
 		}
-	} else if len(keys) > 0 && !force {
-		return Cluster{}, sandboxKeysNotRevoked(len(keys), row.Slug)
+	}
+	if token, err := s.clusterToken(row); err == nil {
+		client := s.aerolvmClient(row.AdminURL, token)
+		_ = client.RevokeToken(ctx, row.AdminTokenID)
 	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
 	if err != nil {
@@ -335,6 +336,23 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 
 func sandboxKeysNotRevoked(n int, slug string) error {
 	return unavailable("could not revoke %d sandbox keys on %q; fix the connection and try again, or pass force to remove it anyway", n, slug)
+}
+
+// revokeKeys revokes live sandbox keys on one cluster and reports how many
+// failed. ok is false when the cluster's admin token cannot be opened, so
+// every key must be treated as failed (and the caller can force).
+func (s *Service) revokeKeys(ctx context.Context, cluster db.Cluster, keys []db.SandboxKey) (failed int, ok bool) {
+	token, err := s.clusterToken(cluster)
+	if err != nil {
+		return len(keys), false
+	}
+	client := s.aerolvmClient(cluster.AdminURL, token)
+	for _, key := range keys {
+		if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
+			failed++
+		}
+	}
+	return failed, true
 }
 
 // ResolveCluster finds a cluster by its ID or slug, or by the name or ID of

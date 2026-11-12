@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -16,25 +17,30 @@ import (
 
 // Organization is a business using Lewbox (MVP §2). Role is the role of the
 // account the list or lookup is about (the caller, or ListOrganizations'
-// User) when it is a member. Team and Overrides are only shown to instance
+// User) when it is a member. Team and VcpuHours30d are only shown to instance
 // admins.
 type Organization struct {
-	ID           string    `json:"id"`
-	Slug         string    `json:"slug"`
-	Name         string    `json:"name"`
-	Status       string    `json:"status"` // pending | active | suspended
-	StatusReason string    `json:"status_reason"`
-	Team         string    `json:"team,omitempty"`
-	Plan         *PlanRef  `json:"plan,omitempty"`
-	Limits       Limits    `json:"limits"`
-	Overrides    *Limits   `json:"overrides,omitempty"`
-	Members      int       `json:"members"`
-	Role         string    `json:"role,omitempty"`
-	VcpuHours30d *float64  `json:"vcpu_hours_30d,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           string               `json:"id"`
+	Slug         string               `json:"slug"`
+	Name         string               `json:"name"`
+	Status       string               `json:"status"` // pending | active | suspended
+	StatusReason string               `json:"status_reason"`
+	Team         string               `json:"team,omitempty"`
+	Regions      []OrganizationRegion `json:"regions"`
+	Members      int                  `json:"members"`
+	Role         string               `json:"role,omitempty"`
+	VcpuHours30d *float64             `json:"vcpu_hours_30d,omitempty"`
+	CreatedAt    time.Time            `json:"created_at"`
 }
 
-// PlanRef names the plan an organization is on.
+// OrganizationRegion is one region an organization is subscribed to.
+type OrganizationRegion struct {
+	Slug string  `json:"slug"`
+	Name string  `json:"name"`
+	Plan PlanRef `json:"plan"`
+}
+
+// PlanRef names a plan.
 type PlanRef struct {
 	Slug string `json:"slug"`
 	Name string `json:"name"`
@@ -61,25 +67,18 @@ type ListOrganizationsRequest struct {
 }
 
 // CreateOrganizationRequest is the input to CreateOrganization. Owner is an
-// account's email or ID; it defaults to the caller's account. Plan is a plan
-// slug or ID and defaults to the instance's default plan.
+// account's email or ID; it defaults to the caller's account.
 type CreateOrganizationRequest struct {
 	Slug  string `json:"slug"`
 	Name  string `json:"name"`
 	Owner string `json:"owner"`
-	Plan  string `json:"plan"`
 }
 
 // UpdateOrganizationRequest is the input to UpdateOrganization. Only the
-// fields that are set change. Plan, the limits and status are for instance
-// admins; a null limit falls back to the plan's.
+// fields that are set change. Status is for instance admins.
 type UpdateOrganizationRequest struct {
-	Name         *string     `json:"name,omitempty"`
-	Status       *string     `json:"status,omitempty"`
-	Plan         *string     `json:"plan,omitempty"`
-	MaxSandboxes OptionalInt `json:"max_sandboxes,omitzero"`
-	MaxVcpus     OptionalInt `json:"max_vcpus,omitzero"`
-	MaxMemoryMB  OptionalInt `json:"max_memory_mb,omitzero"`
+	Name   *string `json:"name,omitempty"`
+	Status *string `json:"status,omitempty"`
 }
 
 // Member is an account's membership in an organization.
@@ -259,7 +258,7 @@ func (s *Service) toOrganization(ctx context.Context, row db.Organization, role 
 	if err != nil {
 		return Organization{}, err
 	}
-	plans, err := s.planRows(ctx)
+	subs, err := s.subscriptionIndex(ctx)
 	if err != nil {
 		return Organization{}, err
 	}
@@ -269,7 +268,7 @@ func (s *Service) toOrganization(ctx context.Context, row db.Organization, role 
 			return Organization{}, err
 		}
 	}
-	return toOrganization(row, role, counts, plans, usage, admin), nil
+	return toOrganization(row, role, counts, subs, usage, admin), nil
 }
 
 // vcpuHoursByOrg sums each organization's metered vCPUs over the last 30 days.
@@ -285,44 +284,94 @@ func (s *Service) vcpuHoursByOrg(ctx context.Context) (map[string]float64, error
 	return out, nil
 }
 
-// effectiveLimits is an organization's effective limits: an override if it is
-// set, otherwise the plan's value. A nil value is unlimited.
-func effectiveLimits(row db.Organization, plans map[string]db.Plan) Limits {
-	var limits Limits
-	if row.PlanID.Valid {
-		if plan, ok := plans[row.PlanID.String]; ok {
-			limits = Limits{
-				Sandboxes: nullInt(plan.MaxSandboxes),
-				Vcpus:     nullInt(plan.MaxVcpus),
-				MemoryMB:  nullInt(plan.MaxMemoryMb),
-			}
-		}
+// subscriptionIndex is every subscription with the plans and clusters it
+// names, for turning organizations and subscriptions into responses.
+type subscriptionIndex struct {
+	byOrg    map[string][]db.Subscription
+	plans    map[string]db.Plan
+	clusters map[string]db.Cluster
+}
+
+func (s *Service) subscriptionIndex(ctx context.Context) (subscriptionIndex, error) {
+	subs, err := s.q.ListAllSubscriptions(ctx)
+	if err != nil {
+		return subscriptionIndex{}, fmt.Errorf("list subscriptions: %w", err)
 	}
-	if row.MaxSandboxes.Valid {
-		v := row.MaxSandboxes.Int64
+	plans, err := s.planRows(ctx)
+	if err != nil {
+		return subscriptionIndex{}, err
+	}
+	clusters, err := s.clustersByID(ctx)
+	if err != nil {
+		return subscriptionIndex{}, err
+	}
+	x := subscriptionIndex{
+		byOrg:    make(map[string][]db.Subscription, len(subs)),
+		plans:    plans,
+		clusters: clusters,
+	}
+	for _, sub := range subs {
+		x.byOrg[sub.OrgID] = append(x.byOrg[sub.OrgID], sub)
+	}
+	return x, nil
+}
+
+// regions lists an organization's subscribed regions, by slug.
+func (x subscriptionIndex) regions(orgID string) []OrganizationRegion {
+	subs := x.byOrg[orgID]
+	out := make([]OrganizationRegion, 0, len(subs))
+	for _, sub := range subs {
+		cluster, ok := x.clusters[sub.ClusterID]
+		if !ok {
+			continue
+		}
+		plan, ok := x.plans[sub.PlanID]
+		if !ok {
+			continue
+		}
+		out = append(out, OrganizationRegion{
+			Slug: cluster.Slug,
+			Name: cluster.Name,
+			Plan: PlanRef{Slug: plan.Slug, Name: plan.Name},
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
+	return out
+}
+
+// effectiveLimits is one subscription's limits: an override if it is set,
+// otherwise the plan's value. A nil value is unlimited.
+func effectiveLimits(plan db.Plan, maxSandboxes, maxVcpus, maxMemoryMB sql.NullInt64) Limits {
+	limits := Limits{
+		Sandboxes: nullInt(plan.MaxSandboxes),
+		Vcpus:     nullInt(plan.MaxVcpus),
+		MemoryMB:  nullInt(plan.MaxMemoryMb),
+	}
+	if maxSandboxes.Valid {
+		v := maxSandboxes.Int64
 		limits.Sandboxes = &v
 	}
-	if row.MaxVcpus.Valid {
-		v := row.MaxVcpus.Int64
+	if maxVcpus.Valid {
+		v := maxVcpus.Int64
 		limits.Vcpus = &v
 	}
-	if row.MaxMemoryMb.Valid {
-		v := row.MaxMemoryMb.Int64
+	if maxMemoryMB.Valid {
+		v := maxMemoryMB.Int64
 		limits.MemoryMB = &v
 	}
 	return limits
 }
 
 // toOrganization renders an organization. admin decides whether to include
-// the fields only instance admins see: team, the raw limit overrides and
-// recent vCPU-hours.
-func toOrganization(row db.Organization, role string, counts map[string]int, plans map[string]db.Plan, usage map[string]float64, admin bool) Organization {
+// the fields only instance admins see: team and recent vCPU-hours.
+func toOrganization(row db.Organization, role string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool) Organization {
 	org := Organization{
 		ID:           row.ID,
 		Slug:         row.Slug,
 		Name:         row.Name,
 		Status:       row.Status,
 		StatusReason: row.StatusReason,
+		Regions:      subs.regions(row.ID),
 		Members:      counts[row.ID],
 		Role:         role,
 		CreatedAt:    row.CreatedAt.UTC(),
@@ -330,19 +379,7 @@ func toOrganization(row db.Organization, role string, counts map[string]int, pla
 	if row.Team.Valid {
 		org.Team = row.Team.String
 	}
-	if row.PlanID.Valid {
-		if plan, ok := plans[row.PlanID.String]; ok {
-			org.Plan = &PlanRef{Slug: plan.Slug, Name: plan.Name}
-		}
-	}
-	org.Limits = effectiveLimits(row, plans)
-	overrides := Limits{
-		Sandboxes: nullInt(row.MaxSandboxes),
-		Vcpus:     nullInt(row.MaxVcpus),
-		MemoryMB:  nullInt(row.MaxMemoryMb),
-	}
 	if admin {
-		org.Overrides = &overrides
 		hours := usage[row.ID]
 		org.VcpuHours30d = &hours
 	} else {
@@ -370,7 +407,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	if err != nil {
 		return OrganizationList{}, err
 	}
-	plans, err := s.planRows(ctx)
+	subs, err := s.subscriptionIndex(ctx)
 	if err != nil {
 		return OrganizationList{}, err
 	}
@@ -393,7 +430,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		if err != nil {
 			return OrganizationList{}, fmt.Errorf("get organization: %w", err)
 		}
-		if org := toOrganization(row, "", counts, plans, nil, false); keep(org) {
+		if org := toOrganization(row, "", counts, subs, nil, false); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 		return out, nil
@@ -407,11 +444,11 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		if err != nil {
 			return OrganizationList{}, err
 		}
-		return s.organizationsOf(ctx, user.ID, counts, plans, usage, p.InstanceAdmin, keep)
+		return s.organizationsOf(ctx, user.ID, counts, subs, usage, p.InstanceAdmin, keep)
 	}
 
 	if !p.InstanceAdmin {
-		return s.organizationsOf(ctx, p.UserID, counts, plans, nil, false, keep)
+		return s.organizationsOf(ctx, p.UserID, counts, subs, nil, false, keep)
 	}
 	rows, err := s.q.ListOrganizations(ctx)
 	if err != nil {
@@ -428,21 +465,21 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		}
 	}
 	for _, r := range rows {
-		if org := toOrganization(r, roles[r.ID], counts, plans, usage, true); keep(org) {
+		if org := toOrganization(r, roles[r.ID], counts, subs, usage, true); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, plans map[string]db.Plan, usage map[string]float64, admin bool, keep func(Organization) bool) (OrganizationList, error) {
+func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool, keep func(Organization) bool) (OrganizationList, error) {
 	rows, err := s.q.ListOrganizationsForUser(ctx, userID)
 	if err != nil {
 		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
 	}
 	out := OrganizationList{Data: make([]Organization, 0, len(rows))}
 	for _, r := range rows {
-		if org := toOrganization(r.Organization, r.Role, counts, plans, usage, admin); keep(org) {
+		if org := toOrganization(r.Organization, r.Role, counts, subs, usage, admin); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 	}
@@ -480,16 +517,6 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 		ownerID = p.UserID
 	}
 
-	var plan db.Plan
-	if ref := strings.TrimSpace(req.Plan); ref != "" {
-		plan, err = s.findPlan(ctx, ref)
-	} else {
-		plan, err = s.defaultPlan(ctx)
-	}
-	if err != nil {
-		return Organization{}, err
-	}
-
 	id := uuid.NewV7().String()
 	row, err := s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
 		ID:        id,
@@ -498,7 +525,6 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 		Status:    orgActive,
 		CreatedAt: s.now(),
 		Team:      sql.NullString{String: teamForID(id), Valid: true},
-		PlanID:    sql.NullString{String: plan.ID, Valid: true},
 	})
 	if db.IsUniqueViolation(err) {
 		return Organization{}, conflict("an organization with slug %q already exists", slug)
@@ -570,13 +596,12 @@ func (s *Service) GetOrganization(ctx context.Context, ref string) (Organization
 }
 
 // UpdateOrganization renames an organization (owners, admins, instance
-// admins), or changes its plan, limits or status (instance admins only). A
-// suspended or pending organization's admin keys stop working, and its
-// members can only read it.
+// admins), or changes its status (instance admins only). A suspended or
+// pending organization's admin keys stop working, and its members can only
+// read it.
 func (s *Service) UpdateOrganization(ctx context.Context, ref string, req UpdateOrganizationRequest) (Organization, error) {
-	if req.Name == nil && req.Status == nil && req.Plan == nil &&
-		!req.MaxSandboxes.Set && !req.MaxVcpus.Set && !req.MaxMemoryMB.Set {
-		return Organization{}, invalid("nothing to change: set name, status, plan or a limit")
+	if req.Name == nil && req.Status == nil {
+		return Organization{}, invalid("nothing to change: set name or status")
 	}
 	// orgFor lets instance admins act on a suspended organization, so they
 	// can restore it.
@@ -584,10 +609,9 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 	if err != nil {
 		return Organization{}, err
 	}
-	adminOnly := req.Status != nil || req.Plan != nil ||
-		req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set
+	adminOnly := req.Status != nil
 	if adminOnly && !c.p.InstanceAdmin {
-		return Organization{}, forbidden("only an instance admin can change an organization's plan, limits or status")
+		return Organization{}, forbidden("only an instance admin can change an organization's status")
 	}
 	// Validate every field before the first write, so a failed request never
 	// half-applies.
@@ -605,30 +629,6 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		case orgActive, orgSuspended:
 		default:
 			return Organization{}, invalid("status must be active or suspended")
-		}
-	}
-	var plan db.Plan
-	if req.Plan != nil {
-		if plan, err = s.findPlan(ctx, *req.Plan); err != nil {
-			return Organization{}, err
-		}
-	}
-	sandboxes := row.MaxSandboxes
-	vcpus := row.MaxVcpus
-	memory := row.MaxMemoryMb
-	if req.MaxSandboxes.Set {
-		if sandboxes, err = limitValue(req.MaxSandboxes.Value, "max_sandboxes", "to use the plan's limit"); err != nil {
-			return Organization{}, err
-		}
-	}
-	if req.MaxVcpus.Set {
-		if vcpus, err = limitValue(req.MaxVcpus.Value, "max_vcpus", "to use the plan's limit"); err != nil {
-			return Organization{}, err
-		}
-	}
-	if req.MaxMemoryMB.Set {
-		if memory, err = limitValue(req.MaxMemoryMB.Value, "max_memory_mb", "to use the plan's limit"); err != nil {
-			return Organization{}, err
 		}
 	}
 
@@ -650,26 +650,6 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		})
 		if err != nil {
 			return Organization{}, fmt.Errorf("set organization status: %w", err)
-		}
-	}
-	if req.Plan != nil {
-		row, err = s.q.SetOrganizationPlan(ctx, db.SetOrganizationPlanParams{
-			PlanID: sql.NullString{String: plan.ID, Valid: true},
-			ID:     row.ID,
-		})
-		if err != nil {
-			return Organization{}, fmt.Errorf("set organization plan: %w", err)
-		}
-	}
-	if req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set {
-		row, err = s.q.SetOrganizationOverrides(ctx, db.SetOrganizationOverridesParams{
-			MaxSandboxes: sandboxes,
-			MaxVcpus:     vcpus,
-			MaxMemoryMb:  memory,
-			ID:           row.ID,
-		})
-		if err != nil {
-			return Organization{}, fmt.Errorf("set organization limits: %w", err)
 		}
 	}
 	if adminOnly {

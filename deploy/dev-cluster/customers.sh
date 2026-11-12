@@ -4,7 +4,7 @@
 #   ./dev.sh up && ./dev.sh cluster && ./customers.sh
 #
 # Or against a real instance (see plans/RELEASING.md). It changes settings
-# while it runs and puts them back on exit; it leaves two test customers and
+# while it runs and puts them back on exit; it leaves three test customers and
 # an e2e-<time> plan behind:
 #
 #   LEWBOX_URL=https://lewbox.example.com LEWBOX_REGION=eu-west \
@@ -12,7 +12,7 @@
 #
 # Sign-up, a sandbox key, a sandbox run with that key straight on the cluster,
 # Lewbox's mirror and isolation, the plan's limit enforced by AerolVM, stop and
-# delete from Lewbox, usage, monitoring, suspension, credits and revocation.
+# delete from Lewbox, usage, monitoring, suspension and revocation.
 # e2e.sh runs it too. Each step prints PASS or FAIL; it exits 1 on a failure.
 set -euo pipefail
 
@@ -40,7 +40,7 @@ tok=$(curl -fsS -X POST "$API/v0/auth/login" -H 'Content-Type: application/json'
 admin() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' "$API$p" "$@"; }
 
 # Put the operator's settings back however the run ends.
-ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan} + (if has("billing") then {billing} else {} end)')
+ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan, default_regions}')
 trap 'admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not restore settings: $ORIGINAL" >&2; rm -rf "$JAR"' EXIT
 
 # A customer: a browser session cookie, and their organization in the header.
@@ -73,8 +73,8 @@ step "the operator opens sign-up on a plan of 2 sandboxes"
 plan="e2e-$RUN"
 p=$(admin POST /v0/plans -d "{\"slug\":\"$plan\",\"name\":\"E2E\",\"max_sandboxes\":2,\"max_vcpus\":4,\"max_memory_mb\":4096}")
 expect "plan created" ".slug == \"$plan\" and .max_sandboxes == 2" "$p"
-s=$(admin PATCH /v0/settings -d "{\"signup\":\"open\",\"default_plan\":\"$plan\"}")
-expect "sign-up open, plan is the default" ".signup == \"open\" and .default_plan == \"$plan\"" "$s"
+s=$(admin PATCH /v0/settings -d "{\"signup\":\"open\",\"default_plan\":\"$plan\",\"default_regions\":[\"$CLUSTER\"]}")
+expect "sign-up open, plan and region are the defaults" ".signup == \"open\" and .default_plan == \"$plan\" and .default_regions == [\"$CLUSTER\"]" "$s"
 expect "the public instance info says so" '.signup == "open"' "$(curl -fsS "$API/v0/instance")"
 
 step "two customers sign up and get organizations of their own on that plan"
@@ -85,10 +85,10 @@ for who in a b; do
 	ORG[$who]=$(jq -r '.organizations[0].slug' <<<"$me")
 	expect "$who owns an active organization" '(.organizations | length == 1) and .organizations[0].role == "owner" and .organizations[0].status == "active"' "$me"
 	o=$(cust "$who" GET "/v0/organizations/${ORG[$who]}")
-	expect "$who is on $plan, and can't see its team" ".plan.slug == \"$plan\" and .limits.sandboxes == 2 and (.team == null)" "$o"
+	expect "$who is subscribed to $plan in $CLUSTER, and can't see its team" "(.regions | length == 1) and .regions[0].slug == \"$CLUSTER\" and .regions[0].plan.slug == \"$plan\" and (.team == null)" "$o"
 done
 [[ $(code -b "$JAR/a" "$API/v0/clusters") == 403 ]] && pass "a customer can't list clusters" || fail "clusters visible to a customer"
-expect "a customer sees the region" "[.data[] | select(.slug == \"$CLUSTER\")] | length == 1" "$(cust a GET /v0/regions)"
+expect "a customer sees its subscribed region with the plan" "[.data[] | select(.slug == \"$CLUSTER\" and .plan.slug == \"$plan\")] | length == 1" "$(cust a GET /v0/regions)"
 
 step "each customer creates a sandbox key for the region"
 for who in a b; do
@@ -100,6 +100,22 @@ done
 expect "the key list never shows a token" '[.. | strings | select(startswith("avm_") and length > 20)] | length == 0' "$(cust a GET /v0/sandbox-keys)"
 eventually 30 "a's key works on the cluster" whoami_is a 200
 eventually 30 "b's key works on the cluster" whoami_is b 200
+
+step "a customer gets no region until the operator assigns one"
+admin PATCH /v0/settings -d '{"default_regions":[]}' >/dev/null
+r=$(cust c POST /v0/auth/signup -d "{\"email\":\"c-$RUN@e2e.dev\",\"password\":\"customer-password-123\"}")
+expect "c signed up" ".user.email == \"c-$RUN@e2e.dev\"" "$r"
+ORG[c]=$(cust c GET /v0/me | jq -r '.organizations[0].slug')
+expect "c sees no regions" '.data == []' "$(cust c GET /v0/regions)"
+c_code=$(code -X POST -b "$JAR/c" -H "Lewbox-Organization: ${ORG[c]}" -H 'Content-Type: application/json' \
+	"$API/v0/sandbox-keys" -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
+[[ $c_code == 412 ]] && pass "c's key is refused with 412" || fail "c's key got $c_code, want 412"
+sub=$(admin PUT "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: ${ORG[c]}" -d "{\"plan\":\"$plan\"}")
+expect "the operator subscribed c in $CLUSTER" ".region.slug == \"$CLUSTER\" and .plan.slug == \"$plan\" and .limits.sandboxes == 2" "$sub"
+expect "c sees the region now" "[.data[] | select(.slug == \"$CLUSTER\" and .plan.slug == \"$plan\")] | length == 1" "$(cust c GET /v0/regions)"
+k=$(cust c POST /v0/sandbox-keys -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
+KEY[c]=$(jq -r .token <<<"$k")
+eventually 30 "c's key works after the subscription" whoami_is c 200
 
 step "a runs a sandbox with its key, straight on the cluster (no Lewbox in the path)"
 create_ok a && pass "sandbox started" || { cat "$JAR/created" >&2; fail "create"; }
@@ -128,7 +144,9 @@ cust a DELETE "/v0/sandboxes/$id1?region=$CLUSTER" >/dev/null && pass "deleted"
 step "usage is recorded and the operator sees the fleet"
 eventually 60 "a has usage" has_usage a
 expect "overview counts customers and running sandboxes" '.customers.total >= 2 and .sandboxes.running >= 1' "$(admin GET /v0/overview)"
-expect "the cluster has health history" '(.cluster.days | length == 30) and ([.cluster.days[] | select(.uptime != null)] | length >= 1) and (.nodes | length >= 1)' "$(admin GET "/v0/clusters/$CLUSTER/health?days=30")"
+# The first health sample comes with the first check after the orchestrator starts.
+has_health() { admin GET "/v0/clusters/$CLUSTER/health?days=30" | jq -e '(.cluster.days | length == 30) and ([.cluster.days[] | select(.uptime != null)] | length >= 1) and (.nodes | length >= 1)'; }
+eventually 90 "the cluster has health history" has_health
 expect "and node metrics" '[.nodes[].data[]] | length >= 1' "$(admin GET "/v0/clusters/$CLUSTER/metrics?range=24h")"
 [[ $(code -b "$JAR/a" "$API/v0/overview") == 403 ]] && pass "customers can't see the overview" || fail "overview visible to a customer"
 
@@ -141,20 +159,11 @@ cust a DELETE "/v0/sandboxes/$id2?region=$CLUSTER" >/dev/null
 eventually 60 "creates work again after restore" create_ok a
 id3=$(jq -r .id "$JAR/created")
 
-step "billing: with credits enforced, an empty balance suspends; a top-up restores"
-admin PATCH /v0/settings -d '{"billing":"enforce"}' >/dev/null
-eventually 60 "a is suspended for credits" org_is "${ORG[a]}" '.status == "suspended" and .status_reason == "credits"'
-cr=$(admin POST /v0/credits -H "Lewbox-Organization: ${ORG[a]}" -d "{\"amount_micros\":5000000,\"note\":\"e2e\",\"reference\":\"e2e-$RUN\"}")
-expect "credits added" '.amount_micros == 5000000' "$cr"
-[[ $(code -X POST -H "Authorization: Bearer $tok" -H "Lewbox-Organization: ${ORG[a]}" -H 'Content-Type: application/json' "$API/v0/credits" -d "{\"amount_micros\":1,\"reference\":\"e2e-$RUN\"}") == 409 ]] && pass "the same reference can't credit twice" || fail "duplicate reference accepted"
-eventually 60 "a is active again" org_is "${ORG[a]}" '.status == "active"'
-expect "a sees its balance" '.balance_micros > 0' "$(cust a GET /v0/credits)"
-admin PATCH /v0/settings -d '{"billing":"off"}' >/dev/null
-
 step "revoking a key locks it out of the cluster"
 cust a DELETE "/v0/sandboxes/$id3?region=$CLUSTER" >/dev/null || true
 cust a DELETE /v0/sandbox-keys/e2e >/dev/null && pass "revoked in Lewbox"
 eventually 30 "the cluster answers 401" whoami_is a 401
 cust b DELETE /v0/sandbox-keys/e2e >/dev/null
+cust c DELETE /v0/sandbox-keys/e2e >/dev/null
 
 printf '\n\033[32mcustomer journey passed\033[0m\n'

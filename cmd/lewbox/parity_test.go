@@ -165,6 +165,23 @@ func (e *env) sameOrg(org string, args []string, method, path string, wantStatus
 	return out
 }
 
+// sameOrgBody is sameOrg with a request body.
+func (e *env) sameOrgBody(org string, args []string, method, path, body string, wantStatus int) string {
+	e.t.Helper()
+	out, errOut, code := e.cli(args...)
+	if code != 0 {
+		e.t.Fatalf("lewbox %v: exit %d, stderr %s", args, code, errOut)
+	}
+	status, got := e.httpOrg(org, method, path, body)
+	if status != wantStatus {
+		e.t.Fatalf("%s %s: status %d, want %d (body %s)", method, path, status, wantStatus, got)
+	}
+	if out != got {
+		e.t.Fatalf("lewbox %v and %s %s differ:\ncli:  %s\nhttp: %s", args, method, path, out, got)
+	}
+	return out
+}
+
 // sameError asserts a CLI failure prints the HTTP error body on stderr.
 func (e *env) sameError(args []string, method, path, body string, wantStatus int) {
 	e.t.Helper()
@@ -525,6 +542,9 @@ func TestSandboxKeys(t *testing.T) {
 	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
 		t.Fatalf("org create: %s", errOut)
 	}
+	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
+		t.Fatalf("subscription set: %s", errOut)
+	}
 	if got := e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200); got != `{"data":[]}`+"\n" {
 		t.Errorf("empty key list = %q", got)
 	}
@@ -613,6 +633,9 @@ func TestSandboxesAndUsage(t *testing.T) {
 	var org service.Organization
 	if err := json.Unmarshal([]byte(out), &org); err != nil {
 		t.Fatal(err)
+	}
+	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
+		t.Fatalf("subscription set: %s", errOut)
 	}
 	fake.AddSandbox(org.Team, aerolvm.Sandbox{
 		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
@@ -703,6 +726,12 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 		"PATCH", "/v0/settings", `{"signup":"approval"}`, 200)
 	e.same([]string{"settings", "set", "--name", "Acme Sandboxes", "--default-plan", "free"},
 		"PATCH", "/v0/settings", `{"instance_name":"Acme Sandboxes","default_plan":"free"}`, 200)
+	e.same([]string{"settings", "set", "--default-regions", "none"},
+		"PATCH", "/v0/settings", `{"default_regions":[]}`, 200)
+	e.same([]string{"settings", "set", "--default-plan", "none"},
+		"PATCH", "/v0/settings", `{"default_plan":"none"}`, 200)
+	e.same([]string{"settings", "set", "--default-plan", "free"},
+		"PATCH", "/v0/settings", `{"default_plan":"free"}`, 200)
 
 	// A sign-up waits for approval, then the operator approves it.
 	status, body := e.httpWith("POST", "/v0/auth/signup",
@@ -716,7 +745,7 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	if err := json.Unmarshal([]byte(pending), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Data) != 1 || list.Data[0].Status != "pending" || list.Data[0].Plan == nil || list.Data[0].Plan.Slug != "free" {
+	if len(list.Data) != 1 || list.Data[0].Status != "pending" || len(list.Data[0].Regions) != 0 {
 		t.Fatalf("pending = %s", pending)
 	}
 	e.same([]string{"org", "approve", list.Data[0].Slug},
@@ -747,31 +776,81 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	}
 	e.sameError([]string{"plan", "show", "small"}, "GET", "/v0/plans/small", "", 404)
 
-	// A plan an organization uses, and an organization's limits.
-	if _, errOut, code := e.cli("plan", "create", "pro", "--max-sandboxes", "50"); code != 0 {
-		t.Fatalf("plan create pro: %s", errOut)
-	}
-	created, errOut, code := e.cli("org", "create", "acme", "--plan", "free")
+	// An organization has no plan until the operator subscribes it.
+	created, errOut, code := e.cli("org", "create", "acme")
 	if code != 0 {
 		t.Fatalf("org create: %s", errOut)
 	}
 	if got := e.same([]string{"org", "get", "acme"}, "GET", "/v0/organizations/acme", "", 200); got != created {
 		t.Errorf("org get = %s, want the create output %s", got, created)
 	}
-	updated := e.same([]string{"org", "update", "acme", "--plan", "pro", "--max-sandboxes", "10"},
-		"PATCH", "/v0/organizations/acme", `{"plan":"pro","max_sandboxes":10}`, 200)
-	if !strings.Contains(updated, `"slug":"pro"`) || !strings.Contains(updated, `"sandboxes":10`) || !strings.Contains(updated, `"team":"lbx-`) {
-		t.Errorf("updated organization = %s", updated)
+	if strings.Contains(created, `"plan"`) || !strings.Contains(created, `"regions":[]`) {
+		t.Errorf("new organization = %s", created)
 	}
-	e.same([]string{"org", "update", "acme", "--max-sandboxes", "plan"},
-		"PATCH", "/v0/organizations/acme", `{"max_sandboxes":null}`, 200)
-	if _, errOut, code := e.cli("org", "update", "acme", "--max-sandboxes", "unlimited"); code != 2 || !strings.Contains(errOut, "plan without that limit") {
-		t.Errorf("org update unlimited: exit %d stderr %s", code, errOut)
-	}
-	if _, errOut, code := e.cli("plan", "update", "pro", "--max-sandboxes", "0"); code != 2 || !strings.Contains(errOut, "positive") {
+	e.same([]string{"org", "update", "acme", "--name", "Acme Inc"},
+		"PATCH", "/v0/organizations/acme", `{"name":"Acme Inc"}`, 200)
+	if _, errOut, code := e.cli("plan", "update", "small", "--max-sandboxes", "0"); code != 2 || !strings.Contains(errOut, "positive") {
 		t.Errorf("plan update zero: exit %d stderr %s", code, errOut)
 	}
 	e.same([]string{"org", "list", "--status", "active"}, "GET", "/v0/organizations?status=active", "", 200)
+}
+
+// TestSubscriptions exercises per-region plans through the CLI and HTTP.
+func TestSubscriptions(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_subscription_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+
+	// With no subscription, a key there is refused.
+	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west")
+	if code != 1 || out != "" {
+		t.Fatalf("key create without a subscription: exit %d stdout %q", code, out)
+	}
+	status, got := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"laptop","region":"eu-west"}`)
+	if status != http.StatusPreconditionFailed || errOut != got {
+		t.Fatalf("key create without a subscription: status %d error %q, want 412 %q", status, errOut, got)
+	}
+	if got := e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("empty subscription list = %q", got)
+	}
+
+	created := e.sameOrgBody("acme", []string{"subscription", "set", "eu-west", "--plan", "free", "--max-sandboxes", "1", "--org", "acme"},
+		"PUT", "/v0/subscriptions/eu-west", `{"plan":"free","max_sandboxes":1}`, 200)
+	e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200)
+	e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
+	regions := e.sameOrg("acme", []string{"region", "list", "--org", "acme"}, "GET", "/v0/regions", 200)
+	if !strings.Contains(regions, `"slug":"eu-west"`) {
+		t.Errorf("regions = %s", regions)
+	}
+
+	// A subscribed key works.
+	if _, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west"); code != 0 {
+		t.Fatalf("key create: %s", errOut)
+	}
+
+	// Removing the subscription returns the same object either way.
+	out, errOut, code = e.cli("subscription", "remove", "eu-west", "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("subscription remove: exit %d: %s", code, errOut)
+	}
+	if out != created {
+		t.Fatalf("subscription remove = %s, want the set output %s", out, created)
+	}
+	if got := e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("subscription list after remove = %q", got)
+	}
 }
 
 func TestLoginWithAdminKey(t *testing.T) {

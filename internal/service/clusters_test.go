@@ -689,7 +689,7 @@ func TestClusterPermissions(t *testing.T) {
 	if _, err := s.ListClusters(plainCtx); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.ListRegions(plainCtx); err != nil {
+	if _, err := s.ListRegions(plainCtx, ""); err != nil {
 		t.Errorf("plain user list regions: %v", err)
 	}
 	if _, err := s.AddCluster(plainCtx, clusterRequest(fake, "plain")); err != nil {

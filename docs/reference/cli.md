@@ -3,7 +3,7 @@ title: CLI reference
 description: Every lewbox command, its flags, and what it does.
 ---
 
-`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
+`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `subscriptions`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
 
 ***
 
@@ -291,17 +291,17 @@ Deletes the account, its sessions and its memberships. Asks to confirm. The last
 
 See [Organizations and API keys](../accounts/organizations-and-api-keys.md).
 
-### `lewbox org create SLUG [--name NAME] [--owner EMAIL] [--plan SLUG]`
+### `lewbox org create SLUG [--name NAME] [--owner EMAIL]`
 
-Creates an organization. Instance admins only. The owner defaults to you (none in local mode); the plan defaults to the instance's default plan.
+Creates an organization. Instance admins only. The owner defaults to you (none in local mode). It has no plan until you assign one with `lewbox subscription set`.
 
 ### `lewbox org list [--user ID|EMAIL] [--status STATUS]` · `lewbox org get [ID|SLUG]`
 
 Lists the organizations you can see (instance admins: all of them), or one. `--user` lists that account's organizations and its role in each; `--status` keeps `pending`, `active` or `suspended` ones. `get` with no argument shows `--org`, the context's default, or an API key's own.
 
-### `lewbox org update ID|SLUG [--name NAME] [--plan SLUG] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
+### `lewbox org update ID|SLUG [--name NAME]`
 
-Renames an organization (owners, admins and instance admins) or, for instance admins, re-plans it or sets its own limits. Limits take a positive number; `plan` falls back to the plan's limit, and `unlimited` is refused. `--max-memory` takes `4096`, `4096MB` or `4GB`.
+Renames an organization. Owners, admins and instance admins. Plans and limits are set per region with `lewbox subscription set`.
 
 ### `lewbox org suspend ID|SLUG` · `lewbox org restore ID|SLUG` · `lewbox org approve ID|SLUG`
 
@@ -325,7 +325,7 @@ Lists the keys, revoked ones included, with their status and last use; or revoke
 
 ### `lewbox key create NAME [--region SLUG] [--expires-in DUR | --never-expires]`
 
-Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the only ready region. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
+Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the only ready region the organization is subscribed to; without a plan in the region the key is refused with `412`. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
 
 ### `lewbox key list` · `lewbox key revoke ID|NAME`
 
@@ -337,9 +337,9 @@ Lists the keys, live ones first and revoked ones included; or revokes one, which
 
 See [Customers, plans and limits](../accounts/customers-and-plans.md).
 
-### `lewbox region list`
+### `lewbox region list [--org SLUG]`
 
-The clusters customers can use: ready or degraded ones, with their endpoint, runtime and status. Any signed-in account or API key.
+The regions a caller can use. Instance admins see every ready or degraded cluster; everyone else sees the regions their organization is subscribed to, with the plan and limits there. Any signed-in account or API key.
 
 ### `lewbox sandbox list [--region SLUG] [--status STATUS] [--all]`
 
@@ -353,17 +353,21 @@ Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--re
 
 Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Members see their organization's; instance admins the whole fleet unless they choose one.
 
-### `lewbox limits`
+### `lewbox limits [--org SLUG]`
 
-The organization's effective limits, live use, and the quota Lewbox has pushed to each region, with the last push time and error.
+Each subscribed region's plan, limits and live use, and the quota Lewbox has pushed there, with the last push time and error.
 
-### `lewbox settings` · `lewbox settings set [--name NAME] [--signup MODE] [--default-plan SLUG]`
+### `lewbox settings` · `lewbox settings set [--name NAME] [--signup MODE] [--default-plan SLUG|none] [--default-regions SLUG,SLUG|none]`
 
-Shows the instance settings, or changes them. Instance admins only. `--signup` is `open`, `approval` or `closed`; `--default-plan` is the plan new sign-ups get.
+Shows the instance settings, or changes them. Instance admins only. `--signup` is `open`, `approval` or `closed`; `--default-plan` is the plan new sign-ups get, or `none`; `--default-regions` is a comma-separated list of regions new sign-ups get, or `none`.
+
+### `lewbox subscription list [--org SLUG]` · `lewbox subscription set REGION --plan SLUG [--max-sandboxes N|plan] [--max-vcpus N|plan] [--max-memory SIZE|plan] [--org SLUG]` · `lewbox subscription remove REGION [--force] [--org SLUG] [--yes]`
+
+An organization's plans per region. Instance admins only; members may list them. `set` creates or changes the subscription and pushes its quota at once; an absent limit keeps the current override and `plan` clears it. `remove` revokes the organization's live keys in that region, blocks new sandboxes and stops its running ones; `--force` removes it even if a key revoke fails. `remove` asks to confirm.
 
 ### `lewbox plan list` · `lewbox plan show ID|SLUG`
 
-Every plan with its limits, organization count and whether it is the default, or one plan.
+Every plan with its limits, subscription count and whether it is the default, or one plan.
 
 ### `lewbox plan create SLUG [--name NAME] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
 
@@ -375,4 +379,4 @@ Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB
 
 ### `lewbox plan delete ID|SLUG`
 
-Deletes a plan no organization uses and that is not the default. Asks to confirm.
+Deletes a plan no subscription uses and that is not the default. Asks to confirm.

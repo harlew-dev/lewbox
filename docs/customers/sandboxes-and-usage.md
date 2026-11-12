@@ -45,4 +45,4 @@ Lewbox records usage in hourly buckets per organization and region. It samples e
 lewbox limits
 ```
 
-This shows your effective limits (the plan, with any override), live use, and the quota Lewbox has pushed to each region's AerolVM. A shared limit means the headroom is available in every region at once. Your quota and use are also on the organization's page in the portal.
+This shows each region your organization is subscribed to: the plan and its limits (with any override), live use, and the quota Lewbox has pushed to that region's AerolVM. Limits are per region; there is no shared pool. Your quota and use are also on the organization's page in the portal.

@@ -50,7 +50,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Sign in](accounts/sign-in.md) | `lewbox login`, contexts, scripts and CI |
 | [Manage accounts](accounts/manage-accounts.md) | Instance admins and regular accounts, passwords, disabling |
 | [Organizations and API keys](accounts/organizations-and-api-keys.md) | Organizations, member roles, and `lba_` API keys for your backend |
-| [Customers, plans and limits](accounts/customers-and-plans.md) | Sign-up, plans, approvals, suspension, per-organization limits, regions |
+| [Customers, plans and limits](accounts/customers-and-plans.md) | Sign-up, plans, per-region subscriptions, approvals, suspension, regions |
 
 ## For customers
 

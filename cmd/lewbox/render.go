@@ -42,6 +42,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderRegions(w, data.Data)
 	case service.PlanList:
 		return renderPlans(w, data.Data)
+	case service.SubscriptionList:
+		return renderSubscriptions(w, data.Data)
+	case service.Subscription:
+		return renderSubscription(w, data)
 	case service.MemberList:
 		return renderMembers(w, data.Data, now)
 	case service.AdminKeyList:
@@ -143,13 +147,13 @@ func renderJoinToken(w io.Writer, j service.JoinToken, now time.Time) error {
 // account's role, when it is a member.
 func renderOrganizations(w io.Writer, orgs []service.Organization) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tPLAN\tMEMBERS\tROLE")
+	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tREGIONS\tMEMBERS\tROLE")
 	for _, o := range orgs {
-		plan := ""
-		if o.Plan != nil {
-			plan = o.Plan.Slug
+		regions := make([]string, 0, len(o.Regions))
+		for _, region := range o.Regions {
+			regions = append(regions, region.Slug)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, dash(plan), o.Members, dash(o.Role))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, dash(strings.Join(regions, ",")), o.Members, dash(o.Role))
 	}
 	return tw.Flush()
 }
@@ -167,14 +171,31 @@ func renderRegions(w io.Writer, regions []service.Region) error {
 // renderPlans prints a plan table. A limit of "-" is unlimited.
 func renderPlans(w io.Writer, plans []service.Plan) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "SLUG\tNAME\tSANDBOXES\tVCPUS\tMEMORY\tORGS\tDEFAULT")
+	fmt.Fprintln(tw, "SLUG\tNAME\tSANDBOXES\tVCPUS\tMEMORY\tSUBSCRIPTIONS\tDEFAULT")
 	for _, p := range plans {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			p.Slug, p.Name,
 			limitText(p.MaxSandboxes, ""), limitText(p.MaxVcpus, ""), limitText(p.MaxMemoryMB, "MB"),
-			p.Organizations, yesNo(p.Default))
+			p.Subscriptions, yesNo(p.Default))
 	}
 	return tw.Flush()
+}
+
+// renderSubscriptions prints one organization's subscriptions by region.
+func renderSubscriptions(w io.Writer, subs []service.Subscription) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "REGION\tNAME\tPLAN\tSANDBOXES\tVCPUS\tMEMORY\tCREATED")
+	for _, s := range subs {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.Region.Slug, s.Region.Name, s.Plan.Slug,
+			limitText(s.Limits.Sandboxes, ""), limitText(s.Limits.Vcpus, ""), limitText(s.Limits.MemoryMB, "MB"),
+			relativeTime(s.CreatedAt, time.Now()))
+	}
+	return tw.Flush()
+}
+
+func renderSubscription(w io.Writer, s service.Subscription) error {
+	return renderObject(w, s, time.Now())
 }
 
 func limitText(n *int64, unit string) string {
@@ -293,14 +314,11 @@ func renderUsage(w io.Writer, u service.Usage) error {
 	return tw.Flush()
 }
 
-// renderLimits prints effective limits, live use and per-region quotas.
+// renderLimits prints each subscribed region's plan, limits, live use and
+// pushed quota.
 func renderLimits(w io.Writer, l service.LimitsReport) error {
-	fmt.Fprintf(w, "limits: %s sandboxes, %s vCPUs, %s MB\n",
-		limitText(l.Limits.Sandboxes, ""), limitText(l.Limits.Vcpus, ""), limitText(l.Limits.MemoryMB, ""))
-	fmt.Fprintf(w, "used: %d sandboxes, %g vCPUs, %d MB\n", l.Used.Sandboxes, l.Used.Vcpus, l.Used.MemoryMB)
-
 	tw := newTable(w)
-	fmt.Fprintln(tw, "REGION\tSANDBOXES\tVCPUS\tMEMORY_MB\tQUOTA\tBLOCKED\tPUSHED\tERROR")
+	fmt.Fprintln(tw, "REGION\tPLAN\tLIMITS\tUSED\tQUOTA\tBLOCKED\tPUSHED\tERROR")
 	for _, r := range l.Regions {
 		quota := "none"
 		if r.Quota != nil {
@@ -311,8 +329,11 @@ func renderLimits(w io.Writer, l service.LimitsReport) error {
 		if r.PushedAt != nil {
 			pushed = relativeTime(*r.PushedAt, time.Now())
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%g\t%d\t%s\t%s\t%s\t%s\n",
-			r.Slug, r.Used.Sandboxes, r.Used.Vcpus, r.Used.MemoryMB, quota, yesNo(r.Blocked), pushed, dash(r.Error))
+		used := fmt.Sprintf("%d sandboxes, %g vCPUs, %d MB", r.Used.Sandboxes, r.Used.Vcpus, r.Used.MemoryMB)
+		limits := fmt.Sprintf("%s sandboxes, %s vCPUs, %s MB",
+			limitText(r.Limits.Sandboxes, ""), limitText(r.Limits.Vcpus, ""), limitText(r.Limits.MemoryMB, ""))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.Slug, r.Plan.Slug, limits, used, quota, yesNo(r.Blocked), pushed, dash(r.Error))
 	}
 	return tw.Flush()
 }

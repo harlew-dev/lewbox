@@ -97,15 +97,15 @@ func newRegionCmd(a *app) *cobra.Command {
 	region := &cobra.Command{
 		Use:     "region",
 		Aliases: []string{"regions"},
-		Short:   "List the clusters customers can use",
+		Short:   "List the regions customers can use",
 	}
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List regions (GET /v0/regions)",
 		Args:    usageArgs(cobra.NoArgs),
-		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListRegions(ctx)
+		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
+			return b.ListRegions(ctx, org)
 		}),
 	}
 	region.AddCommand(list)
@@ -122,7 +122,7 @@ func newSettingsCmd(a *app) *cobra.Command {
 		}),
 	}
 
-	var name, signup, defaultPlan string
+	var name, signup, defaultPlan, defaultRegions string
 	set := &cobra.Command{
 		Use:   "set",
 		Short: "Change the instance settings (PATCH /v0/settings)",
@@ -138,8 +138,18 @@ func newSettingsCmd(a *app) *cobra.Command {
 			if cmd.Flags().Changed("default-plan") {
 				req.DefaultPlan = &defaultPlan
 			}
-			if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil {
-				return usagef("nothing to change: pass --name, --signup or --default-plan")
+			if cmd.Flags().Changed("default-regions") {
+				regions := []string{}
+				raw := strings.TrimSpace(defaultRegions)
+				if raw != "" && !strings.EqualFold(raw, "none") {
+					for _, slug := range strings.Split(raw, ",") {
+						regions = append(regions, strings.TrimSpace(slug))
+					}
+				}
+				req.DefaultRegions = &regions
+			}
+			if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegions == nil {
+				return usagef("nothing to change: pass --name, --signup, --default-plan or --default-regions")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
 				return b.UpdateSettings(ctx, req)
@@ -148,10 +158,79 @@ func newSettingsCmd(a *app) *cobra.Command {
 	}
 	set.Flags().StringVar(&name, "name", "", "the instance's display name")
 	set.Flags().StringVar(&signup, "signup", "", "open, approval or closed")
-	set.Flags().StringVar(&defaultPlan, "default-plan", "", "the plan new sign-ups get, by slug")
+	set.Flags().StringVar(&defaultPlan, "default-plan", "", "the plan new sign-ups get, by slug, or none")
+	set.Flags().StringVar(&defaultRegions, "default-regions", "", "comma-separated region slugs new sign-ups get, or none")
 
 	settings.AddCommand(set)
 	return settings
+}
+
+func newSubscriptionCmd(a *app) *cobra.Command {
+	subscription := &cobra.Command{
+		Use:     "subscription",
+		Aliases: []string{"subscriptions"},
+		Short:   "Assign a plan to an organization in a region (--org)",
+	}
+
+	list := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List an organization's subscriptions (GET /v0/subscriptions)",
+		Args:    usageArgs(cobra.NoArgs),
+		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
+			return b.ListSubscriptions(ctx, org)
+		}),
+	}
+
+	var setPlan, setSandboxes, setVcpus, setMemory string
+	set := &cobra.Command{
+		Use:   "set <region>",
+		Short: "Create or change a subscription (PUT /v0/subscriptions/{region})",
+		Args:  usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("plan") {
+				return usagef("pass --plan <slug>")
+			}
+			req := service.SetSubscriptionRequest{Plan: setPlan}
+			var err error
+			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", setSandboxes, orgLimits, parseCountLimit); err != nil {
+				return err
+			}
+			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", setVcpus, orgLimits, parseCountLimit); err != nil {
+				return err
+			}
+			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", setMemory, orgLimits, parseMemoryLimit); err != nil {
+				return err
+			}
+			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
+				return b.SetSubscription(ctx, org, args[0], req)
+			})(cmd, args)
+		},
+	}
+	set.Flags().StringVar(&setPlan, "plan", "", "the plan's slug (required)")
+	set.Flags().StringVar(&setSandboxes, "max-sandboxes", "", "maximum sandboxes: a positive number, or plan (the plan's limit)")
+	set.Flags().StringVar(&setVcpus, "max-vcpus", "", "maximum vCPUs: a positive number, or plan (the plan's limit)")
+	set.Flags().StringVar(&setMemory, "max-memory", "", "maximum memory: a positive size such as 4096, 4096MB or 4GB, or plan (the plan's limit)")
+
+	var force bool
+	remove := &cobra.Command{
+		Use:     "remove <region>",
+		Aliases: []string{"rm", "delete"},
+		Short:   "Remove a subscription and block the organization there (DELETE /v0/subscriptions/{region})",
+		Args:    usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := a.confirm(fmt.Sprintf("Remove the plan in %q? Its keys there stop working.", args[0])); err != nil {
+				return err
+			}
+			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
+				return b.DeleteSubscription(ctx, org, args[0], force)
+			})(cmd, args)
+		},
+	}
+	remove.Flags().BoolVar(&force, "force", false, "remove it even if its sandbox keys cannot be revoked")
+
+	subscription.AddCommand(list, set, remove)
+	return subscription
 }
 
 func newPlanCmd(a *app) *cobra.Command {

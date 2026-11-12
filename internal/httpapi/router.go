@@ -302,7 +302,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	mux.HandleFunc("GET "+Prefix+"/regions", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.ListRegions(r.Context())
+		resp, err := svc.ListRegions(r.Context(), r.Header.Get(OrganizationHeader))
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -509,6 +509,33 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 
 	mux.HandleFunc("GET "+Prefix+"/limits", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.Limits(r.Context(), r.Header.Get(OrganizationHeader))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// Subscriptions are the operator's assignment of a plan in one region.
+	mux.HandleFunc("GET "+Prefix+"/subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListSubscriptions(r.Context(), r.Header.Get(OrganizationHeader))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// {region} is a cluster ID or slug.
+	mux.HandleFunc("PUT "+Prefix+"/subscriptions/{region}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.SetSubscriptionRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.SetSubscription(r.Context(), r.Header.Get(OrganizationHeader), r.PathValue("region"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/subscriptions/{region}", func(w http.ResponseWriter, r *http.Request) {
+		force, err := queryBool(r, "force")
+		if err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.DeleteSubscription(r.Context(), r.Header.Get(OrganizationHeader), r.PathValue("region"), force)
 		respond(w, log, http.StatusOK, resp, err)
 	})
 

@@ -33,6 +33,9 @@ func newSyncFixture(t *testing.T) syncFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.SetSubscription(localCtx(), org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	return syncFixture{s: s, clock: clock, fake: fake, org: org}
 }
 
@@ -206,7 +209,7 @@ func TestUsageZeroFillsBuckets(t *testing.T) {
 	}
 }
 
-func TestQuotaHeadroomIsShared(t *testing.T) {
+func TestQuotaPerSubscription(t *testing.T) {
 	clock := &testClock{at: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)}
 	s := newClusterService(t, WithClock(func() time.Time { return clock.at }))
 	first := newClusterFake(t)
@@ -219,30 +222,57 @@ func TestQuotaHeadroomIsShared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.AddSandbox(org.Team, startedSandbox("sb-1", 1, 512))
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
 	clock.advance(15 * time.Second)
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
 	eu := first.QuotaPushes(org.Team)
+	if len(eu) != 1 || eu[0].MaxSandboxes != 2 || eu[0].MaxCPU != 2 || eu[0].MaxMemoryMB != 4096 {
+		t.Fatalf("eu pushes = %+v", eu)
+	}
+	// A region the organization never used is left alone.
+	if us := second.QuotaPushes(org.Team); len(us) != 0 {
+		t.Errorf("unused region pushes = %+v", us)
+	}
+
+	// A sandbox in an unsubscribed region gets the blocking quota.
+	second.AddSandbox(org.Team, startedSandbox("sb-1", 1, 512))
+	clock.advance(15 * time.Second)
+	if err := s.Sync(localCtx()); err != nil {
+		t.Fatal(err)
+	}
 	us := second.QuotaPushes(org.Team)
-	if len(eu) != 1 || len(us) != 1 {
-		t.Fatalf("pushes: eu=%v us=%v", eu, us)
+	if len(us) != 1 || us[0].MaxCPU != blockingCPU || us[0].MaxMemoryMB != blockingMemoryMB {
+		t.Errorf("unsubscribed region pushes = %+v", us)
 	}
-	// Free plan: 2 sandboxes, 2 vCPUs, 4096 MB. Use one sandbox in eu-west,
-	// so its quota is 2 and the empty region gets 1.
-	if eu[0].MaxSandboxes != 2 || us[0].MaxSandboxes != 1 {
-		t.Errorf("sandbox quotas = %+v / %+v", eu[0], us[0])
+	list, err := s.ListSandboxes(localCtx(), ListSandboxesRequest{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if eu[0].MaxCPU != 2 || us[0].MaxCPU != 1 {
-		t.Errorf("cpu quotas = %+v / %+v", eu[0], us[0])
+	if len(list.Data) != 1 || list.Data[0].Status != "stopped" {
+		t.Errorf("unsubscribed sandbox = %+v", list.Data)
 	}
+
 	// A second pass with nothing changed does not push again.
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(first.QuotaPushes(org.Team)); got != 1 {
 		t.Errorf("unchanged quota pushed %d times", got)
+	}
+
+	// An unlimited plan deletes the quota instead.
+	if _, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "open", Name: "Open"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "open"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.QuotaDeletes(org.Team); got != 1 {
+		t.Errorf("quota deletes = %d, want 1", got)
 	}
 }
 
@@ -257,7 +287,8 @@ func TestQuotaBlocksAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	pushes := f.fake.QuotaPushes(f.org.Team)
-	if len(pushes) != 1 || pushes[0].MaxCPU != blockingCPU || pushes[0].MaxMemoryMB != blockingMemoryMB {
+	last := pushes[len(pushes)-1]
+	if last.MaxCPU != blockingCPU || last.MaxMemoryMB != blockingMemoryMB {
 		t.Fatalf("blocking pushes = %+v", pushes)
 	}
 
@@ -267,10 +298,10 @@ func TestQuotaBlocksAndDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := orgActive
-	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &active, Plan: &open.Slug, MaxSandboxes: OptionalInt{Set: true}}); err != nil {
+	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &active}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.s.Sync(localCtx()); err != nil {
+	if _, err := f.s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: open.Slug}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.fake.QuotaDeletes(f.org.Team); got != 1 {
@@ -362,8 +393,14 @@ func TestLimitsHidesRegionErrorsFromCustomers(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.fake.Stop()
-	// The sync records the push failure, which contains the region's URL.
-	_ = f.s.Sync(localCtx())
+	// A changed quota makes the sync record the push failure, which contains
+	// the region's URL.
+	if _, err := f.s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{
+		Plan:         "free",
+		MaxSandboxes: OptionalInt{Set: true, Value: intValue(1)},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	admin, err := f.s.Limits(localCtx(), "acme")
 	if err != nil {

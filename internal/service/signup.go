@@ -56,10 +56,6 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 	if retry, ok := s.signupLimiter.allowIP(now, clientIPFrom(ctx)); !ok {
 		return "", SessionResponse{}, signupRateLimited(retry)
 	}
-	plan, err := s.defaultPlan(ctx)
-	if err != nil {
-		return "", SessionResponse{}, err
-	}
 
 	user, err := s.createUser(ctx, CreateUserRequest{Email: req.Email, Password: req.Password})
 	if err != nil {
@@ -93,11 +89,14 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 	if settings.Signup == signupApproval {
 		status = orgPending
 	}
-	org, err := s.createSignupOrganization(ctx, local, name, status, plan.ID)
+	org, err := s.createSignupOrganization(ctx, local, name, status)
 	if err != nil {
 		return "", SessionResponse{}, err
 	}
 	orgID = org.ID
+	if err := s.subscribeDefaults(ctx, org.ID); err != nil {
+		return "", SessionResponse{}, err
+	}
 
 	if _, err := s.q.CreateMembership(ctx, db.CreateMembershipParams{
 		ID:        uuid.NewV7().String(),
@@ -118,7 +117,7 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 }
 
 // createSignupOrganization picks an unused slug and creates the organization.
-func (s *Service) createSignupOrganization(ctx context.Context, local, name, status, planID string) (db.Organization, error) {
+func (s *Service) createSignupOrganization(ctx context.Context, local, name, status string) (db.Organization, error) {
 	var err error
 	for range signupAttempts {
 		suffix, serr := signupSuffix()
@@ -137,7 +136,6 @@ func (s *Service) createSignupOrganization(ctx context.Context, local, name, sta
 			Status:    status,
 			CreatedAt: s.now(),
 			Team:      sql.NullString{String: teamForID(id), Valid: true},
-			PlanID:    sql.NullString{String: planID, Valid: true},
 		})
 		if db.IsUniqueViolation(cerr) {
 			err = cerr
@@ -149,6 +147,43 @@ func (s *Service) createSignupOrganization(ctx context.Context, local, name, sta
 		return row, nil
 	}
 	return db.Organization{}, fmt.Errorf("no unique organization slug after %d attempts: %w", signupAttempts, err)
+}
+
+// subscribeDefaults gives a new organization the default plan in each default
+// region that still exists. With no default plan or regions, it gets none.
+func (s *Service) subscribeDefaults(ctx context.Context, orgID string) error {
+	settings, err := s.getSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if settings.DefaultPlan == nil || len(settings.DefaultRegions) == 0 {
+		return nil
+	}
+	plan, err := s.findPlan(ctx, *settings.DefaultPlan)
+	if err != nil {
+		if se, ok := errors.AsType[*Error](err); ok && se.Code == CodeNotFound {
+			return nil
+		}
+		return err
+	}
+	for _, slug := range settings.DefaultRegions {
+		cluster, err := s.q.GetClusterBySlug(ctx, slug)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("get cluster %q: %w", slug, err)
+		}
+		if _, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+			OrgID:     orgID,
+			ClusterID: cluster.ID,
+			PlanID:    plan.ID,
+			CreatedAt: s.now(),
+		}); err != nil {
+			return fmt.Errorf("subscribe %q: %w", slug, err)
+		}
+	}
+	return nil
 }
 
 // signupOrganizationName defaults the display name from the email.

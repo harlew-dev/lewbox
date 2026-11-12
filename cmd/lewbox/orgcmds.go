@@ -57,24 +57,22 @@ func newOrgCmd(a *app) *cobra.Command {
 		Short:   "Manage organizations",
 	}
 
-	var createName, createOwner, createPlan string
+	var createName, createOwner string
 	create := &cobra.Command{
 		Use:   "create <slug>",
 		Short: "Create an organization (POST /v0/organizations)",
-		Long:  "Create an organization. Instance admins only. The owner defaults to you (none in local mode).",
+		Long:  "Create an organization. Instance admins only. The owner defaults to you (none in local mode). Give it a plan in a region with `lewbox subscription set`.",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.CreateOrganization(ctx, service.CreateOrganizationRequest{
 				Slug:  args[0],
 				Name:  createName,
 				Owner: createOwner,
-				Plan:  createPlan,
 			})
 		}),
 	}
 	create.Flags().StringVar(&createName, "name", "", "a display name (default: the slug)")
 	create.Flags().StringVar(&createOwner, "owner", "", "the first owner's email (default: you)")
-	create.Flags().StringVar(&createPlan, "plan", "", "the plan's slug (default: the instance's default plan)")
 
 	var listUser, listStatus string
 	list := &cobra.Command{
@@ -102,34 +100,18 @@ func newOrgCmd(a *app) *cobra.Command {
 		}),
 	}
 
-	var (
-		updateName, updatePlan, updateSandboxes, updateVcpus, updateMemory string
-	)
+	var updateName string
 	update := &cobra.Command{
 		Use:   "update <id|slug>",
-		Short: "Change an organization (PATCH /v0/organizations/{id|slug})",
+		Short: "Rename an organization (PATCH /v0/organizations/{id|slug})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateOrganizationRequest{}
 			if cmd.Flags().Changed("name") {
 				req.Name = &updateName
 			}
-			if cmd.Flags().Changed("plan") {
-				req.Plan = &updatePlan
-			}
-			var err error
-			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, orgLimits, parseCountLimit); err != nil {
-				return err
-			}
-			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, orgLimits, parseCountLimit); err != nil {
-				return err
-			}
-			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, orgLimits, parseMemoryLimit); err != nil {
-				return err
-			}
-			if req.Name == nil && req.Plan == nil &&
-				!req.MaxSandboxes.Set && !req.MaxVcpus.Set && !req.MaxMemoryMB.Set {
-				return usagef("nothing to change: pass --name, --plan, --max-sandboxes, --max-vcpus or --max-memory")
+			if req.Name == nil {
+				return usagef("nothing to change: pass --name")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 				return b.UpdateOrganization(ctx, args[0], req)
@@ -137,10 +119,6 @@ func newOrgCmd(a *app) *cobra.Command {
 		},
 	}
 	update.Flags().StringVar(&updateName, "name", "", "the new display name")
-	update.Flags().StringVar(&updatePlan, "plan", "", "the plan's slug")
-	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes: a positive number, or plan (the plan's limit)")
-	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs: a positive number, or plan (the plan's limit)")
-	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: a positive size such as 4096, 4096MB or 4GB, or plan (the plan's limit)")
 
 	status := func(use, short, value, question string) *cobra.Command {
 		return &cobra.Command{

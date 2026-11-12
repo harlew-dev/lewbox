@@ -45,7 +45,7 @@ type Backend interface {
 	GetOrganization(ctx context.Context, ref string) (service.Organization, error)
 	UpdateOrganization(ctx context.Context, ref string, req service.UpdateOrganizationRequest) (service.Organization, error)
 
-	ListRegions(ctx context.Context) (service.RegionList, error)
+	ListRegions(ctx context.Context, org string) (service.RegionList, error)
 	GetSettings(ctx context.Context) (service.Settings, error)
 	UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error)
 	ListPlans(ctx context.Context) (service.PlanList, error)
@@ -53,6 +53,10 @@ type Backend interface {
 	CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error)
 	UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error)
 	DeletePlan(ctx context.Context, ref string) (service.Plan, error)
+
+	ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error)
+	SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error)
+	DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error)
 
 	ListMembers(ctx context.Context, org string) (service.MemberList, error)
 	AddMember(ctx context.Context, org string, req service.AddMemberRequest) (service.Member, error)
@@ -225,9 +229,9 @@ func (l Local) UpdateOrganization(ctx context.Context, ref string, req service.U
 	return l.Svc.UpdateOrganization(l.withPrincipal(ctx), ref, req)
 }
 
-// ListRegions returns the clusters customers can use.
-func (l Local) ListRegions(ctx context.Context) (service.RegionList, error) {
-	return l.Svc.ListRegions(l.withPrincipal(ctx))
+// ListRegions returns the regions a caller can use.
+func (l Local) ListRegions(ctx context.Context, org string) (service.RegionList, error) {
+	return l.Svc.ListRegions(l.withPrincipal(ctx), org)
 }
 
 // GetSettings returns the instance settings.
@@ -260,9 +264,24 @@ func (l Local) UpdatePlan(ctx context.Context, ref string, req service.UpdatePla
 	return l.Svc.UpdatePlan(l.withPrincipal(ctx), ref, req)
 }
 
-// DeletePlan removes a plan that no organization uses.
+// DeletePlan removes a plan that no subscription uses.
 func (l Local) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
 	return l.Svc.DeletePlan(l.withPrincipal(ctx), ref)
+}
+
+// ListSubscriptions returns an organization's subscriptions.
+func (l Local) ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error) {
+	return l.Svc.ListSubscriptions(l.withPrincipal(ctx), org)
+}
+
+// SetSubscription creates or changes a subscription.
+func (l Local) SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error) {
+	return l.Svc.SetSubscription(l.withPrincipal(ctx), org, region, req)
+}
+
+// DeleteSubscription removes a subscription.
+func (l Local) DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error) {
+	return l.Svc.DeleteSubscription(l.withPrincipal(ctx), org, region, force)
 }
 
 // ListMembers returns an organization's members.
