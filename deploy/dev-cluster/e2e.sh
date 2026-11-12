@@ -137,6 +137,9 @@ done
 $found || fail "egress-restricted sandbox's container not found on either node"
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
+step "the customer journey (customers.sh)"
+"$HERE/customers.sh" || fail "customer journey"
+
 step "node add is safe to run again"
 out=$(lb node-2 node add node-2 --cluster node-1 --json) || fail "re-run of node add failed"
 expect "re-run reports node-2" '.name == "node-2"' "$out"
