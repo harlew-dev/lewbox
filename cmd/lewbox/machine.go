@@ -153,7 +153,7 @@ func sleepContext(ctx context.Context, d time.Duration) {
 // uses sudo for the steps that need it.
 func (a *app) refuseRoot() error {
 	if a.host().euid() == 0 && os.Getenv("LEWBOX_ALLOW_ROOT") != "1" {
-		return preconditionError("running as root is not supported: run as your own user and let lewbox use sudo (set LEWBOX_ALLOW_ROOT=1 to override)")
+		return preconditionError("running as root is not supported: run lewbox as a normal user that can use sudo (on a root-only server: adduser lewbox && usermod -aG sudo lewbox, then log in as that user and install the CLI there). To override, put the variable on the same command: LEWBOX_ALLOW_ROOT=1 lewbox …")
 	}
 	return nil
 }

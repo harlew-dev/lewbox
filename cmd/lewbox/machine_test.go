@@ -348,7 +348,7 @@ func TestInstallRefusesRoot(t *testing.T) {
 	h := newHarness(t, "http://127.0.0.1:1")
 	h.hd.euid = func() int { return 0 }
 	_, errOut, code := h.runCLI("", "install", "--dry-run", "--from", from, "--public-host", "10.0.0.7")
-	if code != 1 || !strings.Contains(errOut, "running as root") {
+	if code != 1 || !strings.Contains(errOut, "running as root") || !strings.Contains(errOut, "LEWBOX_ALLOW_ROOT=1 lewbox") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	t.Setenv("LEWBOX_ALLOW_ROOT", "1")

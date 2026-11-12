@@ -23,7 +23,7 @@ Every error Lewbox prints says what failed. Add `--json` to get the machine-read
 
 ## Installing
 
-**`running as root is not supported`**: run `lewbox` as your own user. It uses `sudo` for the steps that need root.
+**`running as root is not supported`**: run `lewbox` as a normal user that can use `sudo`. It uses `sudo` for the steps that need root. On a server that only has `root`, [create a user](../setup/install-the-cli.md#first-a-normal-user-with-sudo), log in as it, and install `lewbox` there. To override, the variable must be on the same command: `LEWBOX_ALLOW_ROOT=1 lewbox install …`, not `LEWBOX_ALLOW_ROOT=1 && lewbox …`.
 
 **``sudo -n true` failed``**: outside a terminal, `sudo` can't prompt for a password. Run `sudo -v` in a terminal first, or allow passwordless `sudo` for this user.
 

@@ -7,10 +7,10 @@ description: Keep the orchestrator running as a systemd service behind TLS, and 
 
 ## Run it as a service
 
-Create a user and a data folder for it:
+Create a system account for the service, with its data folder. It has no password, no login shell and no `sudo`. Keep it separate from the `lewbox` login user you work as ([Install the CLI](install-the-cli.md#first-a-normal-user-with-sudo)):
 
 ```bash
-sudo useradd --system --create-home --home-dir /var/lib/lewbox lewbox
+sudo useradd --system --create-home --home-dir /var/lib/lewbox --shell /usr/sbin/nologin lewbox-server
 sudo install -m 0755 lewbox /usr/local/bin/lewbox
 ```
 
@@ -23,7 +23,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=lewbox
+User=lewbox-server
 Environment=LEWBOX_DB=/var/lib/lewbox/lewbox.db
 Environment=LEWBOX_KEYRING_FILE=/var/lib/lewbox/keyring.key
 ExecStart=/usr/local/bin/lewbox serve --listen 127.0.0.1:8080
@@ -40,7 +40,7 @@ sudo systemctl enable --now lewbox
 journalctl -u lewbox -f            # logs are JSON lines
 ```
 
-To create the first admin, run `sudo -u lewbox LEWBOX_DB=/var/lib/lewbox/lewbox.db LEWBOX_KEYRING_FILE=/var/lib/lewbox/keyring.key lewbox user create you@example.com --instance-admin`. Or use the bootstrap variables from [Run the orchestrator](run-the-orchestrator.md#create-the-first-admin).
+To create the first admin, run `sudo -u lewbox-server LEWBOX_DB=/var/lib/lewbox/lewbox.db LEWBOX_KEYRING_FILE=/var/lib/lewbox/keyring.key lewbox user create you@example.com --instance-admin`. Or use the bootstrap variables from [Run the orchestrator](run-the-orchestrator.md#create-the-first-admin).
 
 > [!NOTE]
 > `lewbox orchestrator enable` will write this unit for you; it's planned, not built yet.

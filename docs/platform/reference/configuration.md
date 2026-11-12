@@ -41,7 +41,7 @@ Flags win over environment variables, which win over saved settings, which win o
 | `LEWBOX_AEROLVM_FROM` | `--from` | Folder of AerolVM release files, as `DIR/<tag>/install.sh`, `checksums.txt`, `sandboxd_linux_<arch>`, `toolboxd_linux_<arch>`, `caddy_linux_<arch>` and `aerolvm_linux_<arch>`. Nothing is downloaded |
 | `LEWBOX_RELEASE_URL` | | Where Lewbox releases are read from. Default `https://github.com/harlew-dev/lewbox/releases` |
 | `LEWBOX_RELEASE_FROM` | `--release-from` | A folder holding one Lewbox release: `release.json`, `checksums.txt`, `lewbox_<os>_<arch>` |
-| `LEWBOX_ALLOW_ROOT=1` | | Allow running as root. Not recommended |
+| `LEWBOX_ALLOW_ROOT=1` | | Allow running as root. Not recommended. Set it on the same command (`LEWBOX_ALLOW_ROOT=1 lewbox install …`) or `export` it |
 
 ## Files
 

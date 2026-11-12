@@ -5,7 +5,7 @@ description: Run Lewbox and a working AerolVM node on one Linux machine in about
 
 Lewbox runs AerolVM sandbox clusters for you: it installs AerolVM on your machines, joins them into clusters, and keeps track of them from one server. This page gets you from nothing to a running node on a single Linux machine.
 
-You need a Linux machine with systemd and `sudo` (a VM is fine). See [Requirements](../setup/requirements.md) for the details.
+You need a Linux machine with systemd (a VM is fine), and a **normal user that can use `sudo`**: Lewbox refuses to run as root. If your server only gives you `root`, [create a user first](../setup/install-the-cli.md#first-a-normal-user-with-sudo). See [Requirements](../setup/requirements.md) for the details.
 
 ## 1. Install the CLI
 
@@ -23,7 +23,7 @@ export PATH="$HOME/.local/bin:$PATH"
 lewbox version
 ```
 
-This machine runs the orchestrator, so use the release: it includes the web console. On other nodes, the shorter `go install` route in [Install the CLI](../setup/install-the-cli.md) is enough.
+The release includes the web console, which this machine needs because it runs the orchestrator. Install it the same way on every node. `go install` also works on nodes, but only with Go 1.21 or later, which Ubuntu 22.04's `golang-go` isn't (see [Install the CLI](../setup/install-the-cli.md#with-go)).
 
 ## 2. Start the orchestrator
 

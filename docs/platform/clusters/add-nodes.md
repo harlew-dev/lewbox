@@ -7,7 +7,7 @@ Adding a node is the same two commands as [starting a cluster](start-a-cluster.m
 
 ## Join a machine
 
-On the new machine, signed in as an instance admin:
+On the new machine, as a normal user with `sudo` (not root; see [Install the CLI](../setup/install-the-cli.md#first-a-normal-user-with-sudo)), signed in to Lewbox as an instance admin:
 
 ```bash
 lewbox login https://lewbox.example.com

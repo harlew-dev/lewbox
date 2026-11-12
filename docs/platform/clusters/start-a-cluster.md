@@ -9,6 +9,7 @@ On the machine that will be the cluster's first node, you run `lewbox install` a
 
 - The orchestrator is running and you have an admin account. See [Run the orchestrator](../setup/run-the-orchestrator.md).
 - The machine meets the [requirements](../setup/requirements.md), and `lewbox` is installed on it ([Install the CLI](../setup/install-the-cli.md)).
+- You're logged in as a normal user that can use `sudo`, not as root. If the server only has `root`, [create a user first](../setup/install-the-cli.md#first-a-normal-user-with-sudo).
 
 ## 1. Sign in
 
