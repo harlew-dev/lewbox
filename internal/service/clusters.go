@@ -358,6 +358,15 @@ func (s *Service) revokeKeys(ctx context.Context, cluster db.Cluster, keys []db.
 	for _, key := range keys {
 		if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
 			failed++
+			continue
+		}
+		// The token is dead upstream, so the portal must stop showing it live.
+		if _, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
+			RevokedAt: sql.NullTime{Time: s.now(), Valid: true},
+			OrgID:     key.OrgID,
+			ID:        key.ID,
+		}); err != nil {
+			s.log.Warn("mark sandbox key revoked failed", "key", key.ID, "err", err)
 		}
 	}
 	return failed, true

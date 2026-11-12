@@ -29,6 +29,10 @@ func TestDeleteSubscription(t *testing.T) {
 	if !found {
 		t.Errorf("revoked tokens = %v, want the key's", f.fake.Revoked())
 	}
+	keys, err := f.s.ListSandboxKeys(f.owner, "acme")
+	if err != nil || len(keys.Data) != 1 || keys.Data[0].RevokedAt == nil {
+		t.Errorf("keys after remove = %+v, %v; want the key marked revoked", keys.Data, err)
+	}
 	subs, err := f.s.ListSubscriptions(f.root, "acme")
 	if err != nil || len(subs.Data) != 0 {
 		t.Errorf("subscriptions after remove = %+v, %v", subs, err)
