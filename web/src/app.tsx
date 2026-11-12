@@ -1,8 +1,9 @@
 import { ListSkeleton } from '@harlew-dev/ui'
-import { lazy, Suspense, type ComponentType } from 'react'
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router'
 import { ConsoleLayout } from './components/console-layout'
 import { DocsLayout } from './components/docs-layout'
+import { CenteredLoading } from './components/loading'
 import { PortalLayout } from './components/portal-layout'
 import { RequireAdmin, RequireAuth, useAuth } from './lib/auth'
 import { LoginPage } from './pages/login'
@@ -14,16 +15,56 @@ import { SignupPage } from './pages/signup'
 // Pages other than sign-in and sign-up load on demand, so the entry chunk
 // holds only the shell; charts (recharts) and markdown load with the pages
 // that use them. The layout stays on screen while a page's chunk downloads.
-function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) {
-  const Lazy = lazy<ComponentType>(() => load().then((m) => ({ default: m[name] })))
-  return function Page() {
+// Standalone pages (onboarding, setup) draw their own layout, so they pass a
+// fallback in the same centred frame instead of the dashboard's skeleton.
+//
+// `preload()` fetches a page's chunk ahead of time. A page whose chunk has
+// already arrived renders straight away: React.lazy would still suspend once
+// on first render, and flash the fallback between two steps.
+type LazyPage = ComponentType & { preload: () => void }
+
+function lazyPage<K extends string>(
+  load: () => Promise<Record<K, ComponentType>>,
+  name: K,
+  fallback: ReactNode = <ListSkeleton label="Loading" rows={4} />,
+): LazyPage {
+  let loaded: ComponentType | undefined
+  let loading: Promise<ComponentType> | undefined
+  const loadPage = () =>
+    (loading ??= load().then(
+      (m) => (loaded = m[name]),
+      (failure: unknown) => {
+        loading = undefined
+        throw failure
+      },
+    ))
+  const Lazy = lazy(() => loadPage().then((page) => ({ default: page })))
+  function Page() {
+    // Decided once per mount, so a page never swaps from Lazy to the loaded
+    // component (and remounts) while it is open.
+    const [Ready] = useState(() => loaded)
+    if (Ready) return <Ready />
     return (
-      <Suspense fallback={<ListSkeleton label="Loading" rows={4} />}>
+      <Suspense fallback={fallback}>
         <Lazy />
       </Suspense>
     )
   }
+  Page.preload = () => void loadPage().catch(() => {})
+  return Page
 }
+
+// Loads the chunks of the pages a step leads to while it is open, so moving
+// on doesn't wait for a download.
+function Preload({ pages, children }: { pages: LazyPage[]; children: ReactNode }) {
+  useEffect(() => {
+    // The pages are module-level constants, so once per mount is enough.
+    for (const page of pages) page.preload()
+  }, [])
+  return <>{children}</>
+}
+
+const centred = <CenteredLoading />
 
 const AccountPage = lazyPage(() => import('./pages/account'), 'AccountPage')
 const WorkspaceDetailPage = lazyPage(() => import('./pages/admin/workspace-detail'), 'WorkspaceDetailPage')
@@ -34,9 +75,9 @@ const FleetSandboxesPage = lazyPage(() => import('./pages/admin/sandboxes'), 'Fl
 const AdminSettingsPage = lazyPage(() => import('./pages/admin/settings'), 'AdminSettingsPage')
 const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
 const PlatformDocsPage = lazyPage(() => import('./pages/docs'), 'PlatformDocsPage')
-const OnboardingPage = lazyPage(() => import('./pages/onboarding/onboarding'), 'OnboardingPage')
-const GettingStartedPage = lazyPage(() => import('./pages/onboarding/getting-started'), 'GettingStartedPage')
-const SetupPage = lazyPage(() => import('./pages/setup'), 'SetupPage')
+const OnboardingPage = lazyPage(() => import('./pages/onboarding/onboarding'), 'OnboardingPage', centred)
+const GettingStartedPage = lazyPage(() => import('./pages/onboarding/getting-started'), 'GettingStartedPage', centred)
+const SetupPage = lazyPage(() => import('./pages/setup'), 'SetupPage', centred)
 const HomePage = lazyPage(() => import('./pages/portal/home'), 'HomePage')
 const KeysPage = lazyPage(() => import('./pages/portal/keys'), 'KeysPage')
 const SandboxesPage = lazyPage(() => import('./pages/portal/sandboxes'), 'SandboxesPage')
@@ -118,8 +159,22 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
-      <Route path="/setup/:token" element={<SetupPage />} />
+      <Route
+        path="/signup"
+        element={
+          <Preload pages={[OnboardingPage]}>
+            <SignupPage />
+          </Preload>
+        }
+      />
+      <Route
+        path="/setup/:token"
+        element={
+          <Preload pages={[OnboardingPage]}>
+            <SetupPage />
+          </Preload>
+        }
+      />
 
       <Route element={<DocsLayout book="consumer" />}>
         <Route path="/docs" element={<DocsPage />} />
@@ -138,8 +193,22 @@ export function App() {
           </RequireAuth>
         }
       >
-        <Route path="/onboarding" element={<OnboardingPage />} />
-        <Route path="/onboarding/getting-started" element={<GettingStartedPage />} />
+        <Route
+          path="/onboarding"
+          element={
+            <Preload pages={[GettingStartedPage]}>
+              <OnboardingPage />
+            </Preload>
+          }
+        />
+        <Route
+          path="/onboarding/getting-started"
+          element={
+            <Preload pages={[HomePage]}>
+              <GettingStartedPage />
+            </Preload>
+          }
+        />
 
         <Route element={<Portal />}>
           <Route index element={<HomePage />} />

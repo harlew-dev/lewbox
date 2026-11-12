@@ -3,7 +3,6 @@ import {
   CenteredLayout,
   ErrorNotice,
   Heading,
-  ListSkeleton,
   Text,
   TextButton,
   TextLink,
@@ -12,6 +11,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { BrandLogo } from '../components/brand-logo'
+import { Spinner } from '../components/loading'
 import { SignupFields } from '../components/signup-fields'
 import { ApiError } from '../lib/api'
 import * as api from '../lib/api'
@@ -60,7 +60,7 @@ export function SetupPage() {
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
         <BrandLogo href="/login" />
         {info.loading && !info.data ? (
-          <ListSkeleton label="Loading" rows={2} />
+          <Spinner />
         ) : info.failure instanceof ApiError && info.failure.status === 404 ? (
           <div className="space-y-2">
             <Heading>Set up your account</Heading>

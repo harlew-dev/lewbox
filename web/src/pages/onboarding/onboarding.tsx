@@ -5,7 +5,6 @@ import {
   Heading,
   Input,
   Label,
-  ListSkeleton,
   Notice,
   Text,
   useAction,
@@ -19,6 +18,7 @@ import { useInstance } from '../../lib/instance'
 import { useOrganizations } from '../../lib/organizations'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
+import { Spinner } from '../../components/loading'
 import { OnboardingChrome } from './chrome'
 
 const setupKey = 'lewbox:setup'
@@ -105,7 +105,7 @@ export function OnboardingPage() {
   if (!instance.loaded) {
     return (
       <OnboardingChrome>
-        <ListSkeleton label="Loading" rows={3} />
+        <Spinner />
       </OnboardingChrome>
     )
   }

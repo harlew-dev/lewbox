@@ -9,13 +9,13 @@ import {
 import { Navigate, useLocation } from 'react-router'
 import {
   Button,
-  ListSkeleton,
   StatusPage,
   TextLink,
 } from '@harlew-dev/ui'
 import * as api from './api'
 import type { MeOrganization, User } from './api'
 import { NotFoundPage } from '../pages/not-found'
+import { Spinner } from '../components/loading'
 
 type Status = 'loading' | 'authenticated' | 'guest' | 'error'
 
@@ -146,8 +146,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (status === 'loading') {
     return (
-      <div className="mx-auto max-w-6xl px-6 py-16">
-        <ListSkeleton label="Loading your session" rows={2} />
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner label="Loading your session" />
       </div>
     )
   }

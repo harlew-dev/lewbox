@@ -3,7 +3,6 @@ import {
   CenteredLayout,
   ErrorNotice,
   Heading,
-  ListSkeleton,
   Text,
   TextLink,
   useAction,
@@ -11,6 +10,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router'
 import { BrandLogo } from '../components/brand-logo'
+import { Spinner } from '../components/loading'
 import { SignupFields } from '../components/signup-fields'
 import { useAuth, homeFor } from '../lib/auth'
 import { useInstance } from '../lib/instance'
@@ -42,7 +42,7 @@ export function SignupPage() {
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
         <BrandLogo href="/login" />
         {!instance.loaded ? (
-          <ListSkeleton label="Loading" rows={2} />
+          <Spinner />
         ) : instance.signup === 'closed' ? (
           <div className="space-y-2">
             <Heading>Sign-up is closed</Heading>
