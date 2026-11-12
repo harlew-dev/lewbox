@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# Deploy a published Lewbox release on this VPS. Runs as root (via sudo).
+#
+#   lewbox-deploy vX.Y.Z      download, verify, build, back up, switch, check
+#   lewbox-deploy latest      the newest published release
+#   lewbox-deploy status      the running version and its health
+#   lewbox-deploy rollback    back to the previous version's image
+#   lewbox-deploy restart     recreate the container (after editing bootstrap.env)
+#
+# The binary comes from the GitHub release and must match the release's
+# checksums.txt. The database and keyring are backed up before every switch,
+# because migrations run on start and don't roll back.
+set -euo pipefail
+
+STACK=/opt/stack
+RELEASES=${LEWBOX_RELEASE_URL:-https://github.com/harlew-dev/lewbox/releases}
+TAG_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+
+WORKDIR=
+trap '[ -z "$WORKDIR" ] || rm -rf "$WORKDIR"' EXIT
+die() { echo "lewbox-deploy: $*" >&2; exit 1; }
+[ "$(id -u)" = 0 ] || die "run as root (sudo lewbox-deploy …)"
+cd "$STACK"
+
+compose() { docker compose --project-directory "$STACK" "$@"; }
+current_tag() { sed -n 's/^LEWBOX_TAG=//p' .env; }
+set_tag() {
+  [[ $1 =~ $TAG_RE ]] || die "refusing to write tag '$1'"
+  sed -i "s/^LEWBOX_TAG=.*/LEWBOX_TAG=$1/" .env
+}
+# The whole stack, so Caddy starts too; Compose only recreates what changed.
+up() { compose up -d --wait --wait-timeout 90; }
+
+health() {
+  local id
+  id=$(compose ps -q lewbox 2>/dev/null || true)
+  [ -n "$id" ] || { echo "not running"; return; }
+  docker inspect -f '{{.State.Health.Status}}' "$id"
+}
+
+build_image() {
+  local tag=$1 arch dir
+  if docker image inspect "lewbox:$tag" >/dev/null 2>&1; then
+    echo "→ image lewbox:$tag already built"
+    return
+  fi
+  arch=$(dpkg --print-architecture)
+  case $arch in amd64|arm64) ;; *) die "unsupported architecture $arch" ;; esac
+  dir=$(mktemp -d)
+  WORKDIR=$dir
+
+  echo "→ downloading lewbox_linux_$arch and checksums.txt for $tag"
+  curl -fsSL --retry 3 -o "$dir/checksums.txt" "$RELEASES/download/$tag/checksums.txt"
+  curl -fsSL --retry 3 -o "$dir/lewbox" "$RELEASES/download/$tag/lewbox_linux_$arch"
+  want=$(awk -v f="lewbox_linux_$arch" '$2 == f || $2 == "*"f {print $1}' "$dir/checksums.txt")
+  [[ $want =~ ^[0-9a-f]{64}$ ]] || die "checksums.txt has no line for lewbox_linux_$arch"
+  got=$(sha256sum "$dir/lewbox" | cut -d' ' -f1)
+  [ "$want" = "$got" ] || die "checksum mismatch for lewbox_linux_$arch: want $want, got $got"
+  echo "→ sha256 ok ($got)"
+
+  cp lewbox/Dockerfile "$dir/Dockerfile"
+  docker build -q --build-arg "VERSION=$tag" -t "lewbox:$tag" "$dir" >/dev/null
+  reported=$(docker run --rm --network none "lewbox:$tag" version)
+  [ "$reported" = "$tag" ] || { docker rmi "lewbox:$tag" >/dev/null; die "binary reports '$reported', expected $tag"; }
+  echo "→ built lewbox:$tag"
+}
+
+deploy() {
+  local tag=$1 prev
+  prev=$(current_tag)
+  build_image "$tag"
+
+  if [ "$prev" = "$tag" ] && [ "$(health)" = healthy ]; then
+    echo "lewbox $tag is already running and healthy"
+    return
+  fi
+
+  if [ -n "$prev" ]; then
+    echo "→ backing up before $prev → $tag"
+    lewbox-backup "pre-$tag"
+  fi
+
+  set_tag "$tag"
+  echo "→ starting lewbox $tag"
+  if up; then
+    [ -n "$prev" ] && [ "$prev" != "$tag" ] && echo "$prev" > .previous-tag
+    prune_images
+    echo "lewbox $tag is running and healthy"
+    return
+  fi
+
+  compose logs --tail 40 lewbox >&2 || true
+  if [ -z "$prev" ]; then
+    die "lewbox $tag did not become healthy (logs above)"
+  fi
+  echo "lewbox-deploy: $tag did not become healthy; switching back to $prev" >&2
+  set_tag "$prev"
+  up || true
+  cat >&2 <<EOF
+lewbox-deploy: rolled the image back to $prev.
+If $tag ran a database migration before failing, $prev may not start on the
+new schema. Restore the backup taken above (see deploy/vps/README.md).
+EOF
+  exit 1
+}
+
+prune_images() {
+  # Keep the running image and the previous one; delete older Lewbox images.
+  local keep_cur keep_prev
+  keep_cur=$(current_tag)
+  keep_prev=$(cat .previous-tag 2>/dev/null || true)
+  docker image ls --format '{{.Tag}}' lewbox | while read -r t; do
+    [ "$t" = "$keep_cur" ] || [ "$t" = "$keep_prev" ] || docker rmi "lewbox:$t" >/dev/null 2>&1 || true
+  done
+}
+
+case ${1:-} in
+  status)
+    echo "version: $(current_tag) ($(health))"
+    echo "previous: $(cat .previous-tag 2>/dev/null || echo none)"
+    ;;
+  latest)
+    tag=$(curl -fsSL --retry 3 "$RELEASES/latest/download/release.json" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+    [[ $tag =~ $TAG_RE ]] || die "latest release.json has no valid version"
+    deploy "$tag"
+    ;;
+  rollback)
+    prev=$(cat .previous-tag 2>/dev/null || true)
+    [[ $prev =~ $TAG_RE ]] || die "no previous version recorded"
+    echo "lewbox-deploy: rolling back $(current_tag) → $prev. The database is not restored." >&2
+    deploy "$prev"
+    ;;
+  restart)
+    compose up -d --force-recreate --wait --wait-timeout 90 lewbox
+    ;;
+  v*)
+    [[ $1 =~ $TAG_RE ]] || die "not a release tag: $1"
+    deploy "$1"
+    ;;
+  *)
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

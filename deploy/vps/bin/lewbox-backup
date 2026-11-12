@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Back up Lewbox's database and keyring together. Runs as root.
+#
+#   lewbox-backup [LABEL]   → /var/backups/lewbox/LABEL-<UTC time>/{lewbox.db,keyring.key}
+#
+# The nightly timer uses LABEL=daily (kept 14 days); lewbox-deploy uses
+# pre-<tag> (the last 5 kept). The database is in WAL mode and owned by the
+# container's user (UID 10001), so sqlite3 runs as that user: as root it
+# could leave a root-owned -shm file that Lewbox can't open.
+set -euo pipefail
+
+DATA=/srv/lewbox
+DEST=/var/backups/lewbox
+label=${1:-manual}
+[[ $label =~ ^[A-Za-z0-9._-]+$ ]] || { echo "lewbox-backup: bad label '$label'" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "lewbox-backup: run as root" >&2; exit 1; }
+
+if [ ! -f "$DATA/lewbox.db" ]; then
+  echo "lewbox-backup: no database at $DATA/lewbox.db yet; nothing to back up"
+  exit 0
+fi
+
+out="$DEST/$label-$(date -u +%Y%m%dT%H%M%SZ)"
+install -d -m 0700 -o lewbox -g lewbox "$out"
+runuser -u lewbox -- sqlite3 "$DATA/lewbox.db" ".backup '$out/lewbox.db'"
+check=$(runuser -u lewbox -- sqlite3 "$out/lewbox.db" "PRAGMA integrity_check;")
+[ "$check" = ok ] || { echo "lewbox-backup: integrity check failed: $check" >&2; exit 1; }
+install -m 0600 -o lewbox -g lewbox "$DATA/keyring.key" "$out/keyring.key"
+
+find "$DEST" -mindepth 1 -maxdepth 1 -type d -name 'daily-*' -mtime +14 -exec rm -rf {} +
+{ ls -1dt "$DEST"/pre-* 2>/dev/null || true; } | tail -n +6 | xargs -r rm -rf
+
+echo "$out"
