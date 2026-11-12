@@ -4,16 +4,16 @@ Context for coding agents working in this repo. Read it before changing anything
 
 ## What this is
 
-**Lewbox** is one Go binary, `lewbox`, that is both a server (the **orchestrator**, `lewbox serve`, HTTP API under `/v0`) and a CLI. It installs [AerolVM](https://github.com/aerol-ai/microvm) (a sandbox platform: `sandboxd`) on Linux machines, starts and joins AerolVM clusters, registers them with the orchestrator, and checks them. Customers' apps talk to the clusters directly; Lewbox is never in the sandbox request path. The long-term product (organizations, workspaces, keys, limits, billing) is specced in `MVP.md`. `REVIEW.md` explains why Lewbox builds on stock AerolVM clusters.
+**Lewbox** is one Go binary, `lewbox`, that is both a server (the **orchestrator**, `lewbox serve`, HTTP API under `/v0`) and a CLI. It installs [AerolVM](https://github.com/aerol-ai/microvm) (a sandbox platform: `sandboxd`) on Linux machines, starts and joins AerolVM clusters, registers them with the orchestrator, and checks them. It is a self-hosted E2B: one operator (the instance admins) resells their clusters' compute to customer **workspaces** (code: `organization`), each exactly one AerolVM team with a plan per region pushed as that team's quota. Customers' apps talk to the clusters directly; Lewbox is never in the sandbox request path. **`plans/` is the current spec** (start with `plans/README.md` and `plans/DECISIONS.md`); `MVP.md` is the older, larger design and is partly superseded. `REVIEW.md` explains why Lewbox builds on stock AerolVM clusters.
 
-**Built:** accounts and sessions, contexts, clusters, nodes, the admin web console, `install`, `node add` (new cluster or join), `update`, health checks, text/JSON output. **Not built:** everything in MVP.md after M2 (organizations, workspaces, keys, limits, metering, credits, webhooks, the customer portal). `docs/design/cli-commands.md` marks each command ✅ or 📋.
+**Built:** accounts, sessions and sign-up; workspaces with members and API keys; plans and per-region subscriptions; per-region sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `update`, `firewall enable`; text/JSON output. **Deliberately not built** (see `plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `cmd/lewbox/` | cobra CLI. `main.go` (root, app, backend choice, confirmations, exit codes), `authcmds.go`, `serve.go`, `install.go`, `nodeadd.go`, `update.go`, `machine.go` (host deps + helpers), `render.go` (text output) |
-| `internal/service/` | **All business logic.** Methods `(ctx, req) (resp, error)`. Users/sessions, clusters (checks, node sync, join tokens), nodes |
+| `internal/service/` | **All business logic.** Methods `(ctx, req) (resp, error)`. Users/sessions/sign-up, workspaces (`organizations.go`), plans, subscriptions, sandbox keys, `sync.go` (mirror, metering, quotas), sandboxes, usage, snapshots, monitoring, clusters, nodes |
 | `internal/httpapi/` | Exposes service over HTTP. `ErrorFrom` maps error codes to statuses; `Encode` writes one JSON line |
 | `internal/backend/` | `Backend` interface: `Local` (service in-process, local principal) and remote (`internal/client`) |
 | `internal/client/` | HTTP client implementing Backend; turns API error bodies back into `*service.Error` |
