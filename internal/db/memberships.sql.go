@@ -104,6 +104,39 @@ func (q *Queries) GetMembershipByID(ctx context.Context, arg GetMembershipByIDPa
 	return i, err
 }
 
+const listAllMemberships = `-- name: ListAllMemberships :many
+SELECT id, org_id, user_id, role, created_at FROM memberships ORDER BY org_id, created_at, id
+`
+
+func (q *Queries) ListAllMemberships(ctx context.Context) ([]Membership, error) {
+	rows, err := q.db.QueryContext(ctx, listAllMemberships)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Membership
+	for rows.Next() {
+		var i Membership
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.UserID,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT memberships.id, memberships.org_id, memberships.user_id, memberships.role, memberships.created_at, users.email, users.instance_admin
 FROM memberships

@@ -373,6 +373,13 @@ func (c *Client) RemoveMember(ctx context.Context, org, ref string) (service.Mem
 	return out, err
 }
 
+// SetMemberShares sets a member's explicit share in one region.
+func (c *Client) SetMemberShares(ctx context.Context, org, ref, region string, req service.SetMemberSharesRequest) (service.MemberLimits, error) {
+	var out service.MemberLimits
+	err := c.doOrg(ctx, org, http.MethodPut, "/v0/members/"+url.PathEscape(ref)+"/shares/"+url.PathEscape(region), req, &out)
+	return out, err
+}
+
 // ListAdminKeys returns an organization's admin keys.
 func (c *Client) ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error) {
 	var out service.AdminKeyList
@@ -424,6 +431,9 @@ func (c *Client) ListSandboxes(ctx context.Context, req service.ListSandboxesReq
 	if req.Status != "" {
 		query.Set("status", req.Status)
 	}
+	if req.Member != "" {
+		query.Set("member", req.Member)
+	}
 	path := "/v0/sandboxes"
 	if len(query) > 0 {
 		path += "?" + query.Encode()
@@ -469,6 +479,9 @@ func (c *Client) Usage(ctx context.Context, req service.UsageRequest) (service.U
 	}
 	if req.Granularity != "" {
 		query.Set("granularity", req.Granularity)
+	}
+	if req.Member != "" {
+		query.Set("member", req.Member)
 	}
 	path := "/v0/usage"
 	if len(query) > 0 {

@@ -135,7 +135,6 @@ func (s *Service) createSignupOrganization(ctx context.Context, local, name, sta
 			Name:      name,
 			Status:    status,
 			CreatedAt: s.now(),
-			Team:      sql.NullString{String: teamForID(id), Valid: true},
 		})
 		if db.IsUniqueViolation(cerr) {
 			err = cerr

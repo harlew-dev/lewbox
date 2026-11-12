@@ -50,6 +50,7 @@ lewbox subscription set eu-west --plan pro --org acme
 lewbox subscription set eu-west --plan pro --max-sandboxes 10 --max-vcpus 4 --max-memory 8GB --org acme
 lewbox subscription set eu-west --plan pro --max-sandboxes plan --org acme   # back to the plan's limit
 lewbox subscription remove us-east --org acme
+lewbox member share eu-west dev@acme.dev --max-memory 1GB --max-vcpus 0.5 --max-sandboxes auto --org acme
 lewbox org list --status pending
 lewbox org approve acme                        # status: active
 lewbox org suspend acme                        # status: suspended, reason "admin"
@@ -62,7 +63,16 @@ An override takes a positive whole number or `plan`; `unlimited` is refused, bec
 
 Only instance admins change a subscription or an organization's status. Owners and admins still rename their organization and manage members and keys. A `pending` or `suspended` organization is readable by its members but cannot be managed: no new keys, members or settings until it is active.
 
-An organization also has a **team** (`lbx-…`) for AerolVM, derived from its ID and never reused. Only instance admins see the team.
+Inside a workspace, each region's plan is split between its members. Every member has their own AerolVM team, derived from their membership ID and never reused. An owner or admin sets a member's share:
+
+```bash
+lewbox member share eu-west dev@acme.dev --max-sandboxes 2 --max-vcpus 0.5 --max-memory 1GB --org acme
+lewbox member share eu-west dev@acme.dev --max-sandboxes auto --org acme   # split what is left equally
+```
+
+A member without an explicit share gets an equal part of what is left (sandboxes and memory in whole numbers, the remainder to the earliest members; vCPUs rounded down to 0.01). Explicit shares may not add up to more than the plan (`409`). A `viewer` has no share and cannot create keys. When a member's share of any limited kind is 0, they are blocked in that region until an owner gives them some.
+
+Removing a member revokes their sandbox keys, blocks their team and stops their running sandboxes. Their sandboxes stay visible to owners and admins.
 
 ## Regions
 
@@ -76,17 +86,18 @@ A sandbox key can only be created for a subscribed region. Without one, the requ
 
 ## How limits are enforced
 
-Each region's AerolVM **team quota** is exactly that subscription's limits; there is no cross-region headroom. On each sync pass (every 15 seconds) Lewbox pushes the quota:
+Each member's AerolVM **team quota** is exactly their share of the subscription; there is no cross-region headroom and no unused capacity shared between members. On each sync pass (every 15 seconds) Lewbox pushes the quota:
 
-- an active, subscribed organization gets its subscription's limits;
-- an organization that is not active, or has no subscription in that region, gets a **blocking quota**;
-- when all three limits are unlimited, Lewbox deletes the quota.
+- an active, subscribed member gets their share;
+- a viewer, or a member whose share of a limited kind is 0, gets a **blocking quota**;
+- a member of a workspace that is not active, or that has no subscription in that region, gets a **blocking quota**;
+- when every kind is unlimited for the member, Lewbox deletes the quota.
 
-A blocking quota (`max_cpu: 0.001`, `max_memory_mb: 1`) is used because AerolVM reads a quota of `0` as "no limit". Lewbox only touches regions the organization has used (a quota state, a live key or a mirrored sandbox), so a region it never used is left alone.
+A blocking quota (`max_cpu: 0.001`, `max_memory_mb: 1`) is used because AerolVM reads a quota of `0` as "no limit". Lewbox only touches a member's team on regions the member has used (a quota state, a live key or a mirrored sandbox), so a region nobody used is left alone. If the plan shrinks or members are added so explicit shares add up to more than the plan, they are scaled down proportionally when pushed, and the workspace page says so until an owner fixes them.
 
 AerolVM enforces the quota atomically, so a create that would exceed it fails with `429 team_quota_exceeded`. Lowering a limit never removes a running sandbox. Suspending an organization pushes the blocking quota and the next sync stops its running sandboxes; the sync also stops sandboxes in a region the organization is no longer subscribed to.
 
-Quotas are only pushed when they change, when the last push failed, or after ten minutes; a subscription change pushes at once. What Lewbox last pushed and any error is stored per organization and region. `lewbox limits` shows it.
+Quotas are only pushed when they change, when the last push failed, or after ten minutes; a subscription or share change pushes at once. `lewbox limits` shows the plan, each member's share and live use, and who is blocked.
 
 ## What customers see
 
@@ -96,7 +107,8 @@ Quotas are only pushed when they change, when the last push failed, or after ten
 | Subscribed regions, with plan and limits | all | yes | yes | yes |
 | Subscriptions of the organization | all | read | read | read |
 | Assign or remove a subscription | yes | no | no | no |
-| Change the organization's status | yes | no | no | no |
+| Set a member's share | yes | yes | no | no |
+| Change the workspace's status | yes | no | no | no |
 
 ## Next
 

@@ -1,10 +1,11 @@
 -- name: UpsertSandbox :exec
-INSERT INTO sandboxes (cluster_id, id, org_id, team, node, name, image, status,
+INSERT INTO sandboxes (cluster_id, id, org_id, membership_id, team, node, name, image, status,
                        status_reason, runtime, cpu, memory_mb, disk_gb, created_at,
                        last_seen_at, gone_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(cluster_id, id) DO UPDATE SET
     org_id = COALESCE(excluded.org_id, sandboxes.org_id),
+    membership_id = COALESCE(excluded.membership_id, sandboxes.membership_id),
     team = CASE WHEN excluded.team = '' THEN sandboxes.team ELSE excluded.team END,
     node = CASE WHEN excluded.node = '' THEN sandboxes.node ELSE excluded.node END,
     name = excluded.name,
@@ -27,12 +28,17 @@ WHERE cluster_id = ? AND gone_at IS NULL AND last_seen_at < ?;
 SELECT sqlc.embed(sandboxes),
        clusters.slug AS cluster_slug,
        organizations.slug AS org_slug,
-       organizations.name AS org_name
+       organizations.name AS org_name,
+       member_users.email AS member_email,
+       COALESCE(member_users.instance_admin, 0) AS member_admin
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 LEFT JOIN organizations ON organizations.id = sandboxes.org_id
+LEFT JOIN memberships ON memberships.id = sandboxes.membership_id
+LEFT JOIN users AS member_users ON member_users.id = memberships.user_id
 WHERE sandboxes.gone_at IS NULL
   AND (sqlc.arg(org_id) = '' OR sandboxes.org_id = sqlc.arg(org_id))
+  AND (sqlc.arg(membership_id) = '' OR sandboxes.membership_id = sqlc.arg(membership_id))
   AND (sqlc.arg(cluster_id) = '' OR sandboxes.cluster_id = sqlc.arg(cluster_id))
   AND (sqlc.arg(status) = '' OR sandboxes.status = sqlc.arg(status))
 ORDER BY sandboxes.created_at DESC, sandboxes.id DESC
@@ -42,10 +48,14 @@ LIMIT 500;
 SELECT sqlc.embed(sandboxes),
        clusters.slug AS cluster_slug,
        organizations.slug AS org_slug,
-       organizations.name AS org_name
+       organizations.name AS org_name,
+       member_users.email AS member_email,
+       COALESCE(member_users.instance_admin, 0) AS member_admin
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 LEFT JOIN organizations ON organizations.id = sandboxes.org_id
+LEFT JOIN memberships ON memberships.id = sandboxes.membership_id
+LEFT JOIN users AS member_users ON member_users.id = memberships.user_id
 WHERE sandboxes.id = ? AND sandboxes.gone_at IS NULL;
 
 -- name: ListStartedSandboxesByOrg :many
@@ -53,6 +63,12 @@ SELECT sqlc.embed(sandboxes), clusters.slug AS cluster_slug
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.org_id = ? AND sandboxes.gone_at IS NULL AND sandboxes.status = 'started';
+
+-- name: ListStartedSandboxesByMembership :many
+SELECT sqlc.embed(sandboxes), clusters.slug AS cluster_slug
+FROM sandboxes
+JOIN clusters ON clusters.id = sandboxes.cluster_id
+WHERE sandboxes.membership_id = ? AND sandboxes.gone_at IS NULL AND sandboxes.status = 'started';
 
 -- name: UpdateSandboxStatus :exec
 UPDATE sandboxes SET status = ?, status_reason = ?
@@ -76,11 +92,21 @@ FROM sandboxes
 WHERE org_id = ? AND gone_at IS NULL AND status != 'destroyed'
 GROUP BY cluster_id;
 
+-- name: SumSandboxesByOrgMembership :many
+SELECT membership_id,
+       cluster_id,
+       COUNT(*) AS sandboxes,
+       CAST(COALESCE(SUM(cpu), 0) AS REAL) AS vcpus,
+       CAST(COALESCE(SUM(memory_mb), 0) AS INTEGER) AS memory_mb
+FROM sandboxes
+WHERE org_id = ? AND gone_at IS NULL AND status != 'destroyed'
+GROUP BY membership_id, cluster_id;
+
 -- name: UpsertUsageHourly :exec
-INSERT INTO usage_hourly (org_id, cluster_id, hour, sandbox_seconds, vcpu_seconds,
-                          memory_mb_seconds, peak_sandboxes)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(org_id, cluster_id, hour) DO UPDATE SET
+INSERT INTO usage_hourly (org_id, membership_id, cluster_id, hour, sandbox_seconds,
+                          vcpu_seconds, memory_mb_seconds, peak_sandboxes)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id, membership_id, cluster_id, hour) DO UPDATE SET
     sandbox_seconds = sandbox_seconds + excluded.sandbox_seconds,
     vcpu_seconds = vcpu_seconds + excluded.vcpu_seconds,
     memory_mb_seconds = memory_mb_seconds + excluded.memory_mb_seconds,
@@ -89,6 +115,7 @@ ON CONFLICT(org_id, cluster_id, hour) DO UPDATE SET
 -- name: ListUsageHourly :many
 SELECT * FROM usage_hourly
 WHERE (sqlc.arg(org_id) = '' OR org_id = sqlc.arg(org_id))
+  AND (sqlc.arg(membership_id) = '' OR membership_id = sqlc.arg(membership_id))
   AND hour >= sqlc.arg(from_hour) AND hour <= sqlc.arg(to_hour)
 ORDER BY hour;
 
@@ -99,12 +126,12 @@ WHERE hour >= ?
 GROUP BY org_id;
 
 -- name: GetQuotaState :one
-SELECT * FROM quota_state WHERE org_id = ? AND cluster_id = ?;
+SELECT * FROM quota_state WHERE org_id = ? AND membership_id = ? AND cluster_id = ?;
 
 -- name: UpsertQuotaState :exec
-INSERT INTO quota_state (org_id, cluster_id, quota, pushed_at, error)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(org_id, cluster_id) DO UPDATE SET
+INSERT INTO quota_state (org_id, membership_id, cluster_id, quota, pushed_at, error)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id, membership_id, cluster_id) DO UPDATE SET
     quota = excluded.quota,
     pushed_at = excluded.pushed_at,
     error = excluded.error;

@@ -149,12 +149,13 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
 | `PATCH /v0/members/{ref}` | owner or admin | `{role}` → Member. `{ref}` is an email, account ID or member ID. The last owner stays (`409`) |
-| `DELETE /v0/members/{ref}` | owner or admin, or themselves | → the Member |
+| `DELETE /v0/members/{ref}` | owner or admin, or themselves | → the Member. Revokes their keys, blocks their team and stops their sandboxes |
+| `PUT /v0/members/{ref}/shares/{region}` | owner, admin, instance admin | `{max_sandboxes, max_vcpus, max_memory_mb}` (a positive number or `null` = automatic) → MemberLimits. Refuses shares that add up to more than the plan (`409`) and pushes the affected quotas at once |
 | `GET /v0/admin-keys` | owner, admin, admins, its keys | `{data: [AdminKey]}`, newest first, revoked ones included |
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
 | `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
 | `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
-| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready subscribed region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active, is not subscribed to the region, or the region is not ready; a cluster failure is `502` and stores nothing |
+| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in, member}` → `201` NewSandboxKey, with the `avm_…` token shown only here. The key belongs to a member: the caller by default, or `member` (an email or membership ID), which an instance admin or API key must send (`400` without it). `region` defaults to the only ready subscribed region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the workspace is not active, is not subscribed to the region, the region is not ready, or the member has no share there; a cluster failure is `502` and stores nothing |
 | `DELETE /v0/sandbox-keys/{ref}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `502` and the key stays live |
 
 "Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
@@ -165,11 +166,11 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/sandboxes?region={slug}&status={status}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region and status |
+| `GET /v0/sandboxes?region={slug}&status={status}&member={ref}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region, status and member. Owners and admins see every member's; members and viewers only their own |
 | `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
-| `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
-| `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
+| `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&member={ref}&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days. Owners and admins get a per-member breakdown; members see only their own |
+| `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, workspace use and a row per member with their share and live use. Members see only their own row |
 
 Suspending an organization pushes a blocking quota where it has used compute and stops its running sandboxes on the next sync pass; the sync also stops sandboxes in a region it is no longer subscribed to. Stopped sandboxes still count against limits, as AerolVM counts them.
 
@@ -250,7 +251,6 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "name": "Acme Inc",
   "status": "active",
   "status_reason": "",
-  "team": "lbx-01a1cb3429a574c396915394d021b0f2",
   "regions": [{"slug": "eu-west", "name": "EU West", "plan": {"slug": "free", "name": "Free"}}],
   "members": 1,
   "role": "owner",
@@ -258,7 +258,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `regions` lists the subscriptions' regions by slug (empty when there are none). `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `regions` lists the subscriptions' regions by slug (empty when there are none). `role` is your role (or the listed account's) when it is a member.
 
 **Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 
@@ -268,7 +268,13 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **Settings**: `{instance_name, signup, default_plan, default_regions}`. `signup` is `open`, `approval` or `closed`; `default_plan` is a plan slug or `null`; `default_regions` is a list of cluster slugs.
 
-**LimitsReport**: `{regions: [{slug, name, plan, limits, used, quota, blocked, pushed_at, error}]}`, one entry per subscribed region. `used` is `{sandboxes, vcpus, memory_mb}`; `quota` is `null` when none was pushed; `error` is the last push error.
+**LimitsReport**: `{regions: [{slug, name, plan, limits, used, members}]}`, one entry per subscribed region. `used` is the workspace's `{sandboxes, vcpus, memory_mb}`. Each member row is `{email, share, explicit, used, blocked}`: `share` is the computed `{sandboxes, vcpus, memory_mb}` split (a `null` value is unlimited), `explicit` is what an owner set (`null` = automatic), and `blocked` is true when a limited kind is 0 or the member is a viewer.
+
+**Share** values use `vcpus` as a number (fractional allowed); `sandboxes` and `memory_mb` are whole numbers or `null`.
+
+**Sandbox**: `{id, region, name, image, status, status_reason, runtime, cpu, memory_mb, disk_gb, created_at, last_seen_at, member}`. `member` is `{email}`; `organization` and `node` are only included for instance admins.
+
+**Usage**: `{from, to, granularity, totals, data}`. Each bucket is `{start, sandbox_hours, vcpu_hours, memory_gib_hours, peak_sandboxes, regions, members}`; `members` maps a member's email to the same three amounts and is only present for owners and admins.
 
 **Instance**: `{name, signup}`; public.
 
@@ -278,6 +284,6 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **AdminKey**: `{id, organization_id, name, prefix, last4, status, created_by, created_at, last_used_at, expires_at, revoked_at}`. `status` is `active`, `expired` or `revoked`; `created_by` is an email. The token is only in the create response.
 
-**SandboxKey**: `{id, name, region, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `region` is `{slug, name, endpoint_url, runtime}`; `token_hint` is `avm_…` and the token's last four characters; `expires_at` and `revoked_at` are `null` when they do not apply. **NewSandboxKey** adds the `token` (shown only in the create response), `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a `docker` region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
+**SandboxKey**: `{id, name, region, member, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `region` is `{slug, name, endpoint_url, runtime}`; `member` is `{email}`; `token_hint` is `avm_…` and the token's last four characters; `expires_at` and `revoked_at` are `null` when they do not apply. **NewSandboxKey** adds the `token` (shown only in the create response), `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a `docker` region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
 
 **JoinToken**: `{cluster_id, cluster, runtime, version, role, token_role, token, ca_cert_hash, join_urls, expires_at, command}`. `token` is single-use and is shown only in this response.

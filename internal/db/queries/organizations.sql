@@ -1,6 +1,6 @@
 -- name: CreateOrganization :one
-INSERT INTO organizations (id, slug, name, status, created_at, team)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO organizations (id, slug, name, status, created_at)
+VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetOrganizationByID :one

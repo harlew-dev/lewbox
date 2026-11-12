@@ -376,9 +376,10 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	endHour := now.Truncate(time.Hour)
 	startHour := endHour.Add(-(7*24 - 1) * time.Hour)
 	usage, err := s.q.ListUsageHourly(ctx, db.ListUsageHourlyParams{
-		OrgID:    "",
-		FromHour: startHour,
-		ToHour:   endHour,
+		OrgID:        "",
+		MembershipID: "",
+		FromHour:     startHour,
+		ToHour:       endHour,
 	})
 	if err != nil {
 		return Overview{}, fmt.Errorf("list usage: %w", err)

@@ -425,6 +425,16 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("PUT "+Prefix+"/members/{ref}/shares/{region}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.SetMemberSharesRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.SetMemberShares(r.Context(), r.Header.Get(OrganizationHeader), r.PathValue("ref"), r.PathValue("region"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("DELETE "+Prefix+"/members/{ref}", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.RemoveMember(r.Context(), r.Header.Get(OrganizationHeader), r.PathValue("ref"))
 		respond(w, log, http.StatusOK, resp, err)
@@ -477,6 +487,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 			Region: r.URL.Query().Get("region"),
 			Status: r.URL.Query().Get("status"),
 			Org:    requestOrganization(r),
+			Member: r.URL.Query().Get("member"),
 		})
 		respond(w, log, http.StatusOK, resp, err)
 	})
@@ -503,6 +514,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 			To:          r.URL.Query().Get("to"),
 			Granularity: r.URL.Query().Get("granularity"),
 			Org:         requestOrganization(r),
+			Member:      r.URL.Query().Get("member"),
 		})
 		respond(w, log, http.StatusOK, resp, err)
 	})

@@ -50,6 +50,14 @@ type ClusterSample struct {
 	LatencyMs int64
 }
 
+type MemberShare struct {
+	MembershipID string
+	ClusterID    string
+	MaxSandboxes sql.NullInt64
+	MaxVcpus     sql.NullFloat64
+	MaxMemoryMb  sql.NullInt64
+}
+
 type Membership struct {
 	ID        string
 	OrgID     string
@@ -90,7 +98,6 @@ type Organization struct {
 	Name         string
 	Status       string
 	CreatedAt    time.Time
-	Team         sql.NullString
 	StatusReason string
 }
 
@@ -105,11 +112,12 @@ type Plan struct {
 }
 
 type QuotaState struct {
-	OrgID     string
-	ClusterID string
-	Quota     string
-	PushedAt  time.Time
-	Error     string
+	OrgID        string
+	MembershipID string
+	ClusterID    string
+	Quota        string
+	PushedAt     time.Time
+	Error        string
 }
 
 type Sandbox struct {
@@ -129,19 +137,21 @@ type Sandbox struct {
 	CreatedAt    time.Time
 	LastSeenAt   time.Time
 	GoneAt       sql.NullTime
+	MembershipID sql.NullString
 }
 
 type SandboxKey struct {
-	ID         string
-	OrgID      string
-	ClusterID  string
-	Name       string
-	UpstreamID string
-	Last4      string
-	CreatedBy  sql.NullString
-	CreatedAt  time.Time
-	ExpiresAt  sql.NullTime
-	RevokedAt  sql.NullTime
+	ID           string
+	OrgID        string
+	ClusterID    string
+	Name         string
+	UpstreamID   string
+	Last4        string
+	CreatedBy    sql.NullString
+	CreatedAt    time.Time
+	ExpiresAt    sql.NullTime
+	RevokedAt    sql.NullTime
+	MembershipID sql.NullString
 }
 
 type Session struct {
@@ -171,6 +181,7 @@ type Subscription struct {
 
 type UsageHourly struct {
 	OrgID           string
+	MembershipID    string
 	ClusterID       string
 	Hour            time.Time
 	SandboxSeconds  int64

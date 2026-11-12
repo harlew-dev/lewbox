@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,13 @@ const (
 	blockingMemoryMB   = 1
 	syncConcurrency    = 4
 )
+
+// memberUsageKey identifies one metered member; an unattributed sandbox has
+// both fields empty.
+type memberUsageKey struct {
+	orgID        string
+	membershipID string
+}
 
 // Sync mirrors every cluster's sandboxes, meters usage and pushes limits. It
 // is the orchestrator's background pass, so it runs as the local principal
@@ -45,11 +53,13 @@ func (s *Service) Sync(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list organizations: %w", err)
 	}
-	orgByTeam := make(map[string]string, len(orgs))
-	for _, org := range orgs {
-		if org.Team.Valid && org.Team.String != "" {
-			orgByTeam[org.Team.String] = org.ID
-		}
+	memberships, err := s.q.ListAllMemberships(ctx)
+	if err != nil {
+		return fmt.Errorf("list memberships: %w", err)
+	}
+	memberByTeam := make(map[string]db.Membership, len(memberships))
+	for _, membership := range memberships {
+		memberByTeam[memberTeam(membership.ID)] = membership
 	}
 
 	var (
@@ -67,7 +77,7 @@ func (s *Service) Sync(ctx context.Context) error {
 		go func(row db.Cluster) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := s.syncCluster(ctx, row, orgByTeam, now); err != nil {
+			if err := s.syncCluster(ctx, row, memberByTeam, now); err != nil {
 				s.log.Warn("cluster sync failed", "cluster", row.Slug, "err", err)
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("sync cluster %q: %w", row.Slug, err))
@@ -108,7 +118,7 @@ func (s *Service) Sync(ctx context.Context) error {
 
 // syncCluster reads one cluster's list and index, updates the mirror and
 // records the usage since the last pass.
-func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map[string]string, now time.Time) error {
+func (s *Service) syncCluster(ctx context.Context, row db.Cluster, memberByTeam map[string]db.Membership, now time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, syncClusterTimeout)
 	defer cancel()
 
@@ -139,16 +149,18 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 
 	var (
 		seen    = make(map[string]bool, len(list))
-		running = make(map[string]int64)
-		vcpus   = make(map[string]float64)
-		memory  = make(map[string]float64)
+		running = make(map[memberUsageKey]int64)
+		vcpus   = make(map[memberUsageKey]float64)
+		memory  = make(map[memberUsageKey]float64)
 	)
 	for _, sandbox := range list {
 		placement := placements[sandbox.ID]
 		team := strings.TrimPrefix(placement.OwnerRef, "team:")
 		orgID := sql.NullString{}
-		if id, ok := orgByTeam[team]; ok {
-			orgID = sql.NullString{String: id, Valid: true}
+		membershipID := sql.NullString{}
+		if membership, ok := memberByTeam[team]; ok {
+			orgID = sql.NullString{String: membership.OrgID, Valid: true}
+			membershipID = sql.NullString{String: membership.ID, Valid: true}
 		}
 		createdAt := sandbox.CreatedAt
 		if createdAt.IsZero() {
@@ -159,6 +171,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 			ClusterID:    row.ID,
 			ID:           sandbox.ID,
 			OrgID:        orgID,
+			MembershipID: membershipID,
 			Team:         team,
 			Node:         placement.OwnerNodeID,
 			Name:         sandbox.Name,
@@ -177,9 +190,10 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 		if sandbox.Status != "started" {
 			continue
 		}
-		running[orgID.String]++
-		vcpus[orgID.String] += sandbox.CPU
-		memory[orgID.String] += float64(sandbox.MemoryMB)
+		key := memberUsageKey{orgID: orgID.String, membershipID: membershipID.String}
+		running[key]++
+		vcpus[key] += sandbox.CPU
+		memory[key] += float64(sandbox.MemoryMB)
 	}
 
 	if !partial {
@@ -203,14 +217,15 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 		}
 	}
 	hour := now.Truncate(time.Hour)
-	for orgID, count := range running {
+	for key, count := range running {
 		if err := s.q.UpsertUsageHourly(ctx, db.UpsertUsageHourlyParams{
-			OrgID:           orgID,
+			OrgID:           key.orgID,
+			MembershipID:    key.membershipID,
 			ClusterID:       row.ID,
 			Hour:            hour,
 			SandboxSeconds:  int64(dt/time.Second) * count,
-			VcpuSeconds:     vcpus[orgID] * dt.Seconds(),
-			MemoryMbSeconds: int64(memory[orgID] * dt.Seconds()),
+			VcpuSeconds:     vcpus[key] * dt.Seconds(),
+			MemoryMbSeconds: int64(memory[key] * dt.Seconds()),
 			PeakSandboxes:   count,
 		}); err != nil {
 			return fmt.Errorf("record usage: %w", err)
@@ -235,90 +250,240 @@ func (s *Service) recordSyncError(ctx context.Context, id string, err error) {
 	}
 }
 
-// syncOrganizationQuotas pushes one organization's quota on every cluster it
-// is subscribed to or has used. Errors are recorded per cluster and never
-// fail the caller.
+// shareKey identifies one member's explicit share in one region.
+type shareKey struct {
+	membershipID string
+	clusterID    string
+}
+
+// quotaData is everything needed to push one organization's member quotas.
+type quotaData struct {
+	org     db.Organization
+	members []db.ListMembersRow
+	shares  map[shareKey]db.MemberShare
+	subs    map[string]db.Subscription
+	plans   map[string]db.Plan
+	used    map[string]map[string]bool // cluster -> membership
+	keyed   map[string]map[string]bool
+	states  map[string]map[string]db.QuotaState
+	amounts map[string]map[string]LimitsUsed
+}
+
+func (d *quotaData) usedOn(clusterID, membershipID string) bool {
+	if d.used[clusterID][membershipID] || d.keyed[clusterID][membershipID] {
+		return true
+	}
+	_, ok := d.states[clusterID][membershipID]
+	return ok
+}
+
+// quotaData loads one organization's members, shares, plan and use.
+func (s *Service) quotaData(ctx context.Context, org db.Organization) (quotaData, error) {
+	data := quotaData{
+		org:     org,
+		shares:  map[shareKey]db.MemberShare{},
+		used:    map[string]map[string]bool{},
+		keyed:   map[string]map[string]bool{},
+		states:  map[string]map[string]db.QuotaState{},
+		amounts: map[string]map[string]LimitsUsed{},
+	}
+	members, err := s.q.ListMembers(ctx, org.ID)
+	if err != nil {
+		return data, fmt.Errorf("list members: %w", err)
+	}
+	sort.SliceStable(members, func(i, j int) bool {
+		if !members[i].Membership.CreatedAt.Equal(members[j].Membership.CreatedAt) {
+			return members[i].Membership.CreatedAt.Before(members[j].Membership.CreatedAt)
+		}
+		return members[i].Membership.ID < members[j].Membership.ID
+	})
+	data.members = members
+
+	shareRows, err := s.q.ListMemberShares(ctx, org.ID)
+	if err != nil {
+		return data, fmt.Errorf("list member shares: %w", err)
+	}
+	for _, row := range shareRows {
+		data.shares[shareKey{row.MembershipID, row.ClusterID}] = row
+	}
+	if data.subs, err = s.subscriptionsByCluster(ctx, org.ID); err != nil {
+		return data, err
+	}
+	if data.plans, err = s.planRows(ctx); err != nil {
+		return data, err
+	}
+	useRows, err := s.q.SumSandboxesByOrgMembership(ctx, sql.NullString{String: org.ID, Valid: true})
+	if err != nil {
+		return data, fmt.Errorf("sum sandboxes: %w", err)
+	}
+	for _, row := range useRows {
+		if row.MembershipID.Valid && row.MembershipID.String != "" {
+			markCluster(data.used, row.ClusterID, row.MembershipID.String)
+			if data.amounts[row.ClusterID] == nil {
+				data.amounts[row.ClusterID] = map[string]LimitsUsed{}
+			}
+			data.amounts[row.ClusterID][row.MembershipID.String] = LimitsUsed{
+				Sandboxes: row.Sandboxes,
+				Vcpus:     row.Vcpus,
+				MemoryMB:  row.MemoryMb,
+			}
+		}
+	}
+	keys, err := s.q.ListLiveSandboxKeysByOrg(ctx, org.ID)
+	if err != nil {
+		return data, fmt.Errorf("list sandbox keys: %w", err)
+	}
+	for _, key := range keys {
+		if key.MembershipID.Valid && key.MembershipID.String != "" {
+			markCluster(data.keyed, key.ClusterID, key.MembershipID.String)
+		}
+	}
+	states, err := s.q.ListQuotaStates(ctx, org.ID)
+	if err != nil {
+		return data, fmt.Errorf("list quota state: %w", err)
+	}
+	for _, state := range states {
+		if state.MembershipID == "" {
+			continue
+		}
+		if data.states[state.ClusterID] == nil {
+			data.states[state.ClusterID] = map[string]db.QuotaState{}
+		}
+		data.states[state.ClusterID][state.MembershipID] = state
+	}
+	return data, nil
+}
+
+func markCluster(m map[string]map[string]bool, clusterID, membershipID string) {
+	if m[clusterID] == nil {
+		m[clusterID] = map[string]bool{}
+	}
+	m[clusterID][membershipID] = true
+}
+
+// memberInputs builds the share inputs for one region.
+func (d quotaData) memberInputs(clusterID string) []memberShareInput {
+	inputs := make([]memberShareInput, 0, len(d.members))
+	for _, member := range d.members {
+		explicit := d.shares[shareKey{member.Membership.ID, clusterID}]
+		inputs = append(inputs, memberShareInput{
+			ID:        member.Membership.ID,
+			CreatedAt: member.Membership.CreatedAt,
+			Role:      member.Membership.Role,
+			Explicit: Share{
+				Sandboxes: nullInt(explicit.MaxSandboxes),
+				Vcpus:     nullFloat(explicit.MaxVcpus),
+				MemoryMB:  nullInt(explicit.MaxMemoryMb),
+			},
+		})
+	}
+	return inputs
+}
+
+// limitsFor is the plan's effective limits in one region.
+func (d quotaData) limitsFor(clusterID string) (Limits, bool) {
+	sub, ok := d.subs[clusterID]
+	if !ok {
+		return Limits{}, false
+	}
+	plan, ok := d.plans[sub.PlanID]
+	if !ok {
+		return Limits{}, false
+	}
+	return effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb), true
+}
+
+// syncOrganizationQuotas pushes one organization's member quotas on every
+// cluster it is subscribed to or has used. Errors are recorded per cluster.
 func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organization) error {
-	if !org.Team.Valid || org.Team.String == "" {
-		return nil
+	data, err := s.quotaData(ctx, org)
+	if err != nil {
+		return err
 	}
 	clusters, err := s.q.ListClusters(ctx)
 	if err != nil {
 		return fmt.Errorf("list clusters: %w", err)
 	}
-	subs, err := s.subscriptionsByCluster(ctx, org.ID)
-	if err != nil {
-		return err
-	}
-	plans, err := s.planRows(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := s.q.SumSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
-	if err != nil {
-		return fmt.Errorf("sum sandboxes: %w", err)
-	}
-	used := make(map[string]bool, len(rows))
-	for _, row := range rows {
-		used[row.ClusterID] = true
-	}
-	keys, err := s.q.ListLiveSandboxKeysByOrg(ctx, org.ID)
-	if err != nil {
-		return fmt.Errorf("list sandbox keys: %w", err)
-	}
-	keyed := make(map[string]bool, len(keys))
-	for _, key := range keys {
-		keyed[key.ClusterID] = true
-	}
-	states, err := s.q.ListQuotaStates(ctx, org.ID)
-	if err != nil {
-		return fmt.Errorf("list quota state: %w", err)
-	}
-	stateByCluster := make(map[string]db.QuotaState, len(states))
-	for _, state := range states {
-		stateByCluster[state.ClusterID] = state
-	}
-
 	now := s.now()
 	for _, cluster := range clusters {
-		sub, subscribed := subs[cluster.ID]
-		state, haveState := stateByCluster[cluster.ID]
-		if !subscribed && !used[cluster.ID] && !keyed[cluster.ID] && !haveState {
-			continue
-		}
-		limits := Limits{}
-		if subscribed {
-			plan, ok := plans[sub.PlanID]
-			if !ok {
-				continue
-			}
-			limits = effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb)
-		}
-		quota, remove := subscriptionQuota(org.Status, subscribed, limits)
-		s.pushQuota(ctx, org, cluster, quota, remove, state, haveState, now)
+		s.pushClusterQuotas(ctx, data, cluster, now)
 	}
 	return nil
 }
 
-// subscriptionQuota is the quota an organization should have on one cluster.
-// A region the organization is not subscribed to, or an organization that is
-// not active, is blocked; all three limits unlimited means no quota.
-func subscriptionQuota(status string, subscribed bool, limits Limits) (aerolvm.TeamQuota, bool) {
-	if !subscribed || status != orgActive {
+// syncOrganizationClusterQuotas pushes one organization's member quotas on
+// one cluster now, best effort.
+func (s *Service) syncOrganizationClusterQuotas(ctx context.Context, org db.Organization, cluster db.Cluster) error {
+	data, err := s.quotaData(ctx, org)
+	if err != nil {
+		return err
+	}
+	s.pushClusterQuotas(ctx, data, cluster, s.now())
+	return nil
+}
+
+// blockOrganizationCluster gives every member team the blocking quota on one
+// cluster.
+func (s *Service) blockOrganizationCluster(ctx context.Context, org db.Organization, cluster db.Cluster) {
+	data, err := s.quotaData(ctx, org)
+	if err != nil {
+		s.log.Warn("load member quotas failed", "organization", org.Slug, "err", err)
+		return
+	}
+	now := s.now()
+	for _, member := range data.members {
+		state, have := data.states[cluster.ID][member.Membership.ID]
+		s.pushQuota(ctx, org, member.Membership.ID, cluster, blockingQuota(), false, state, have, now)
+	}
+}
+
+// pushClusterQuotas pushes each member's share on one cluster, or the blocking
+// quota where the workspace is inactive, unsubscribed or the member has no
+// share.
+func (s *Service) pushClusterQuotas(ctx context.Context, data quotaData, cluster db.Cluster, now time.Time) {
+	sub, subscribed := data.subs[cluster.ID]
+	limits := Limits{}
+	if subscribed {
+		plan, ok := data.plans[sub.PlanID]
+		if !ok {
+			return
+		}
+		limits = effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb)
+	}
+	shares := memberShares(limits, data.memberInputs(cluster.ID))
+	for _, member := range data.members {
+		id := member.Membership.ID
+		state, have := data.states[cluster.ID][id]
+		if subscribed && data.org.Status == orgActive && member.Membership.Role != roleViewer {
+			quota, remove := shareQuota(shares[id])
+			s.pushQuota(ctx, data.org, id, cluster, quota, remove, state, have, now)
+			continue
+		}
+		if !data.usedOn(cluster.ID, id) {
+			continue
+		}
+		s.pushQuota(ctx, data.org, id, cluster, blockingQuota(), false, state, have, now)
+	}
+}
+
+// shareQuota is the quota a member should have: a blocking quota when a
+// limited kind is 0, no quota when every kind is unlimited.
+func shareQuota(s shares) (aerolvm.TeamQuota, bool) {
+	if shareBlocked(s) {
 		return blockingQuota(), false
 	}
-	if limits.Sandboxes == nil && limits.Vcpus == nil && limits.MemoryMB == nil {
+	if s.Sandboxes == nil && s.Vcpus == nil && s.MemoryMB == nil {
 		return aerolvm.TeamQuota{}, true
 	}
 	quota := aerolvm.TeamQuota{}
-	if limits.Sandboxes != nil {
-		quota.MaxSandboxes = int(*limits.Sandboxes)
+	if s.Sandboxes != nil {
+		quota.MaxSandboxes = int(*s.Sandboxes)
 	}
-	if limits.Vcpus != nil {
-		quota.MaxCPU = float64(*limits.Vcpus)
+	if s.Vcpus != nil {
+		quota.MaxCPU = *s.Vcpus
 	}
-	if limits.MemoryMB != nil {
-		quota.MaxMemoryMB = int(*limits.MemoryMB)
+	if s.MemoryMB != nil {
+		quota.MaxMemoryMB = int(*s.MemoryMB)
 	}
 	return quota, false
 }
@@ -327,13 +492,9 @@ func blockingQuota() aerolvm.TeamQuota {
 	return aerolvm.TeamQuota{MaxCPU: blockingCPU, MaxMemoryMB: blockingMemoryMB}
 }
 
-func isBlockingQuota(q aerolvm.TeamQuota) bool {
-	return q.MaxCPU > 0 && q.MaxCPU <= blockingCPU
-}
-
-// pushQuota sends a quota only when it changed, the last push failed, or it
-// is old enough to refresh.
-func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db.Cluster, quota aerolvm.TeamQuota, remove bool, state db.QuotaState, haveState bool, now time.Time) {
+// pushQuota sends a member team's quota only when it changed, the last push
+// failed, or it is old enough to refresh.
+func (s *Service) pushQuota(ctx context.Context, org db.Organization, membershipID string, cluster db.Cluster, quota aerolvm.TeamQuota, remove bool, state db.QuotaState, haveState bool, now time.Time) {
 	desired := "none"
 	if !remove {
 		data, err := json.Marshal(quota)
@@ -346,25 +507,27 @@ func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db
 		return
 	}
 
+	team := memberTeam(membershipID)
 	client, err := s.clusterClient(cluster)
 	if err == nil {
 		if remove {
-			err = client.DeleteTeamQuota(ctx, org.Team.String)
+			err = client.DeleteTeamQuota(ctx, team)
 		} else {
-			err = client.PutTeamQuota(ctx, org.Team.String, quota)
+			err = client.PutTeamQuota(ctx, team, quota)
 		}
 	}
 	errText := ""
 	if err != nil {
 		errText = err.Error()
-		s.log.Warn("push quota failed", "cluster", cluster.Slug, "organization", org.Slug, "err", err)
+		s.log.Warn("push quota failed", "cluster", cluster.Slug, "organization", org.Slug, "member", membershipID, "err", err)
 	}
 	if uerr := s.q.UpsertQuotaState(ctx, db.UpsertQuotaStateParams{
-		OrgID:     org.ID,
-		ClusterID: cluster.ID,
-		Quota:     desired,
-		PushedAt:  now,
-		Error:     errText,
+		OrgID:        org.ID,
+		MembershipID: membershipID,
+		ClusterID:    cluster.ID,
+		Quota:        desired,
+		PushedAt:     now,
+		Error:        errText,
 	}); uerr != nil {
 		s.log.Warn("store quota state failed", "cluster", cluster.Slug, "organization", org.Slug, "err", uerr)
 	}
@@ -388,26 +551,42 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 		if only != nil && !only[row.Sandbox.ClusterID] {
 			continue
 		}
-		cluster, err := s.findCluster(ctx, row.Sandbox.ClusterID)
-		if err != nil {
-			s.log.Warn("find sandbox cluster failed", "sandbox", row.Sandbox.ID, "err", err)
-			continue
-		}
-		client, err := s.clusterClient(cluster)
-		if err == nil {
-			err = client.StopSandbox(ctx, row.Sandbox.ID)
-		}
-		if err != nil {
-			s.log.Warn("stop sandbox failed", "sandbox", row.Sandbox.ID, "err", err)
-			continue
-		}
-		if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
-			Status:    "stopped",
-			ClusterID: row.Sandbox.ClusterID,
-			ID:        row.Sandbox.ID,
-		}); err != nil {
-			s.log.Warn("update sandbox status failed", "sandbox", row.Sandbox.ID, "err", err)
-		}
+		s.stopMirroredSandbox(ctx, row.Sandbox)
+	}
+}
+
+// stopMemberSandboxes stops one member's running sandboxes.
+func (s *Service) stopMemberSandboxes(ctx context.Context, membershipID string) {
+	rows, err := s.q.ListStartedSandboxesByMembership(ctx, sql.NullString{String: membershipID, Valid: true})
+	if err != nil {
+		s.log.Warn("list started sandboxes failed", "member", membershipID, "err", err)
+		return
+	}
+	for _, row := range rows {
+		s.stopMirroredSandbox(ctx, row.Sandbox)
+	}
+}
+
+func (s *Service) stopMirroredSandbox(ctx context.Context, sandbox db.Sandbox) {
+	cluster, err := s.findCluster(ctx, sandbox.ClusterID)
+	if err != nil {
+		s.log.Warn("find sandbox cluster failed", "sandbox", sandbox.ID, "err", err)
+		return
+	}
+	client, err := s.clusterClient(cluster)
+	if err == nil {
+		err = client.StopSandbox(ctx, sandbox.ID)
+	}
+	if err != nil {
+		s.log.Warn("stop sandbox failed", "sandbox", sandbox.ID, "err", err)
+		return
+	}
+	if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+		Status:    "stopped",
+		ClusterID: sandbox.ClusterID,
+		ID:        sandbox.ID,
+	}); err != nil {
+		s.log.Warn("update sandbox status failed", "sandbox", sandbox.ID, "err", err)
 	}
 }
 

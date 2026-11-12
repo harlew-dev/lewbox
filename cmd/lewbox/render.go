@@ -250,13 +250,20 @@ func optionalTime(t *time.Time, now time.Time, none string) string {
 // left of the token to recognise it by.
 func renderSandboxKeys(w io.Writer, keys []service.SandboxKey, now time.Time) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "NAME\tREGION\tKEY\tSTATUS\tCREATED_BY\tCREATED\tEXPIRES")
+	fmt.Fprintln(tw, "NAME\tREGION\tMEMBER\tKEY\tSTATUS\tCREATED_BY\tCREATED\tEXPIRES")
 	for _, k := range keys {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			k.Name, k.Region.Slug, k.TokenHint, sandboxKeyStatus(k), dash(k.CreatedBy),
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			k.Name, k.Region.Slug, memberText(k.Member), k.TokenHint, sandboxKeyStatus(k), dash(k.CreatedBy),
 			relativeTime(k.CreatedAt, now), optionalTime(k.ExpiresAt, now, "never"))
 	}
 	return tw.Flush()
+}
+
+func memberText(m *service.MemberRef) string {
+	if m == nil {
+		return "-"
+	}
+	return m.Email
 }
 
 func sandboxKeyStatus(k service.SandboxKey) string {
@@ -289,10 +296,10 @@ func renderNewSandboxKey(w io.Writer, k service.NewSandboxKey, now time.Time) er
 // renderSandboxes prints a sandbox table.
 func renderSandboxes(w io.Writer, sandboxes []service.Sandbox, now time.Time) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "ID\tREGION\tSTATUS\tNAME\tIMAGE\tCPU\tMEMORY\tCREATED")
+	fmt.Fprintln(tw, "ID\tREGION\tMEMBER\tSTATUS\tNAME\tIMAGE\tCPU\tMEMORY\tCREATED")
 	for _, s := range sandboxes {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%g\t%d\t%s\n",
-			s.ID, s.Region, s.Status, dash(s.Name), dash(s.Image), s.CPU, s.MemoryMB, relativeTime(s.CreatedAt, now))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%g\t%d\t%s\n",
+			s.ID, s.Region, memberText(s.Member), s.Status, dash(s.Name), dash(s.Image), s.CPU, s.MemoryMB, relativeTime(s.CreatedAt, now))
 	}
 	return tw.Flush()
 }
@@ -314,28 +321,40 @@ func renderUsage(w io.Writer, u service.Usage) error {
 	return tw.Flush()
 }
 
-// renderLimits prints each subscribed region's plan, limits, live use and
-// pushed quota.
+// renderLimits prints each subscribed region's plan and its members' shares
+// and live use.
 func renderLimits(w io.Writer, l service.LimitsReport) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "REGION\tPLAN\tLIMITS\tUSED\tQUOTA\tBLOCKED\tPUSHED\tERROR")
+	fmt.Fprintln(tw, "REGION\tMEMBER\tSANDBOXES\tVCPUS\tMEMORY\tUSED\tBLOCKED")
 	for _, r := range l.Regions {
-		quota := "none"
-		if r.Quota != nil {
-			quota = fmt.Sprintf("%d sandboxes, %g vCPUs, %d MB",
-				r.Quota.MaxSandboxes, r.Quota.MaxCPU, r.Quota.MaxMemoryMB)
-		}
-		pushed := "never"
-		if r.PushedAt != nil {
-			pushed = relativeTime(*r.PushedAt, time.Now())
-		}
 		used := fmt.Sprintf("%d sandboxes, %g vCPUs, %d MB", r.Used.Sandboxes, r.Used.Vcpus, r.Used.MemoryMB)
-		limits := fmt.Sprintf("%s sandboxes, %s vCPUs, %s MB",
-			limitText(r.Limits.Sandboxes, ""), limitText(r.Limits.Vcpus, ""), limitText(r.Limits.MemoryMB, ""))
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.Slug, r.Plan.Slug, limits, used, quota, yesNo(r.Blocked), pushed, dash(r.Error))
+		if len(r.Members) == 0 {
+			fmt.Fprintf(tw, "%s\t-\t%s\t%s\t%s\t%s\t%s\n", r.Slug,
+				shareInt(r.Limits.Sandboxes), limitText(r.Limits.Vcpus, ""), shareInt(r.Limits.MemoryMB), used, "no")
+			continue
+		}
+		for _, m := range r.Members {
+			memberUsed := fmt.Sprintf("%d sandboxes, %g vCPUs, %d MB", m.Used.Sandboxes, m.Used.Vcpus, m.Used.MemoryMB)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				r.Slug, m.Email, shareInt(m.Share.Sandboxes), shareFloat(m.Share.Vcpus), shareInt(m.Share.MemoryMB),
+				memberUsed, yesNo(m.Blocked))
+		}
 	}
 	return tw.Flush()
+}
+
+func shareInt(n *int64) string {
+	if n == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d", *n)
+}
+
+func shareFloat(n *float64) string {
+	if n == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%g", *n)
 }
 
 // renderContexts prints the saved contexts, marking the current one.

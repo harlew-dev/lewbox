@@ -311,9 +311,11 @@ Instance admins only. Suspending stops the organization's API keys and leaves it
 
 Makes it the current context's default organization for `member`, `admin-key` and `key`. Not available in local mode: pass `--org` there.
 
-### `lewbox member list` · `add EMAIL [--role ROLE]` · `set-role EMAIL|ID ROLE` · `remove EMAIL|ID`
+### `lewbox member list` · `add EMAIL [--role ROLE]` · `set-role EMAIL|ID ROLE` · `remove EMAIL|ID` · `share REGION EMAIL|ID [--max-sandboxes N|auto] [--max-vcpus N|auto] [--max-memory SIZE|auto]`
 
-The organization's members. Roles are `owner`, `admin`, `member` (default) and `viewer`. Owners and admins manage members; only owners manage owners; anyone can remove themselves. The last owner stays. `remove` asks to confirm.
+The organization's members. Roles are `owner`, `admin`, `member` (default) and `viewer`. Owners and admins manage members; only owners manage owners; anyone can remove themselves. The last owner stays. `remove` asks to confirm and revokes the member's keys.
+
+`share` sets one member's explicit share of the plan in a region; `auto` (or no flag) splits what is left equally. It refuses shares that add up to more than the plan. Owners and admins.
 
 ### `lewbox admin-key create NAME [--expires-in DUR | --never-expires]`
 
@@ -323,9 +325,9 @@ Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `3
 
 Lists the keys, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm.
 
-### `lewbox key create NAME [--region SLUG] [--expires-in DUR | --never-expires]`
+### `lewbox key create NAME [--region SLUG] [--member EMAIL|ID] [--expires-in DUR | --never-expires]`
 
-Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the only ready region the organization is subscribed to; without a plan in the region the key is refused with `412`. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
+Creates a sandbox key for a member's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the only ready region the organization is subscribed to; without a plan in the region the key is refused with `412`, and so is a member with no share there. `--member` defaults to the caller and is required for an instance admin or an API key. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members; not viewers.
 
 ### `lewbox key list` · `lewbox key revoke ID|NAME`
 
@@ -341,21 +343,21 @@ See [Customers, plans and limits](../accounts/customers-and-plans.md).
 
 The regions a caller can use. Instance admins see every ready or degraded cluster; everyone else sees the regions their organization is subscribed to, with the plan and limits there. Any signed-in account or API key.
 
-### `lewbox sandbox list [--region SLUG] [--status STATUS] [--all]`
+### `lewbox sandbox list [--region SLUG] [--status STATUS] [--member EMAIL|ID] [--all]`
 
-Sandboxes Lewbox has mirrored from every region, newest first. Members see their organization's; instance admins see the whole fleet with `--all` (or with no organization chosen). `--status` is `creating`, `started`, `stopped`, `destroyed` or `error`.
+Sandboxes Lewbox has mirrored from every region, newest first. Owners and admins see every member's; members and viewers see only their own. `--member` filters for owners and admins; instance admins see the whole fleet with `--all` (or with no organization chosen). `--status` is `creating`, `started`, `stopped`, `destroyed` or `error`.
 
 ### `lewbox sandbox stop ID [--region SLUG]` · `lewbox sandbox delete ID [--region SLUG] [--yes]`
 
 Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--region` picks the cluster when the same ID exists more than once. Delete asks to confirm.
 
-### `lewbox usage [--from DATE] [--to DATE] [--hourly]`
+### `lewbox usage [--from DATE] [--to DATE] [--hourly] [--member EMAIL|ID]`
 
-Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Members see their organization's; instance admins the whole fleet unless they choose one.
+Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Owners and admins see the workspace total and a per-member breakdown; members see only their own. Instance admins see the whole fleet unless they choose one.
 
 ### `lewbox limits [--org SLUG]`
 
-Each subscribed region's plan, limits and live use, and the quota Lewbox has pushed there, with the last push time and error.
+Each subscribed region's plan, limits and live use, and a row per member with their share, use and whether they are blocked. Members see only their own row.
 
 ### `lewbox settings` · `lewbox settings set [--name NAME] [--signup MODE] [--default-plan SLUG|none] [--default-regions SLUG,SLUG|none]`
 

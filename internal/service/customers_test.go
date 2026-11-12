@@ -55,17 +55,6 @@ func TestSignupModes(t *testing.T) {
 	if len(org.Regions) != 0 {
 		t.Errorf("plan and regions = %+v", org.Regions)
 	}
-	// Members do not see the team.
-	if org.Team != "" {
-		t.Errorf("member sees admin fields: %+v", org)
-	}
-	adminOrg, err := s.GetOrganization(localCtx(), org.Slug)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(adminOrg.Team, "lbx-") {
-		t.Errorf("admin organization = %+v", adminOrg)
-	}
 
 	// Approval mode creates a pending organization its owner cannot manage.
 	setSignup(t, s, signupApproval)

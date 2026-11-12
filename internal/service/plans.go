@@ -340,3 +340,11 @@ func nullInt(n sql.NullInt64) *int64 {
 	v := n.Int64
 	return &v
 }
+
+func nullFloat(n sql.NullFloat64) *float64 {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Float64
+	return &v
+}
