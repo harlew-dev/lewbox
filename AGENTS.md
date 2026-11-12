@@ -30,6 +30,7 @@ Context for coding agents working in this repo. Read it before changing anything
 | `deploy/dev-cluster/` | Docker test bed (systemd + Docker-in-Docker nodes) and `e2e.sh` |
 | `deploy/docker/` | Smoke test for the orchestrator image (repo-root `Dockerfile`, `compose.yaml`) |
 | `deploy/vps/` | Production orchestrator on a VPS: `setup.sh`, `deploy.sh`, Compose with Caddy, release-based deploys, backups (see its README) |
+| `scripts/region-smoke.sh` | Live check of a region through a workspace's sandbox API key: lifecycle, exec, data persistence, snapshots, lifecycle timers, volumes, and each plan limit refusing with 429. Creates real sandboxes and deletes them, except a long-lived set kept with `--persist`; `--help` for options |
 | `docs/` | Documentation books: `docs/consumer/` for customers, `docs/platform/` for operators (`docs/README.md` is the GitHub index). `docs/design/` holds design notes |
 
 ## Commands
