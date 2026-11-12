@@ -46,21 +46,19 @@ func (q *Queries) CountSandboxesByStatus(ctx context.Context) ([]CountSandboxesB
 }
 
 const getQuotaState = `-- name: GetQuotaState :one
-SELECT org_id, membership_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ? AND membership_id = ? AND cluster_id = ?
+SELECT org_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ? AND cluster_id = ?
 `
 
 type GetQuotaStateParams struct {
-	OrgID        string
-	MembershipID string
-	ClusterID    string
+	OrgID     string
+	ClusterID string
 }
 
 func (q *Queries) GetQuotaState(ctx context.Context, arg GetQuotaStateParams) (QuotaState, error) {
-	row := q.db.QueryRowContext(ctx, getQuotaState, arg.OrgID, arg.MembershipID, arg.ClusterID)
+	row := q.db.QueryRowContext(ctx, getQuotaState, arg.OrgID, arg.ClusterID)
 	var i QuotaState
 	err := row.Scan(
 		&i.OrgID,
-		&i.MembershipID,
 		&i.ClusterID,
 		&i.Quota,
 		&i.PushedAt,
@@ -70,7 +68,7 @@ func (q *Queries) GetQuotaState(ctx context.Context, arg GetQuotaStateParams) (Q
 }
 
 const listQuotaStates = `-- name: ListQuotaStates :many
-SELECT org_id, membership_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ?
+SELECT org_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ?
 `
 
 func (q *Queries) ListQuotaStates(ctx context.Context, orgID string) ([]QuotaState, error) {
@@ -84,7 +82,6 @@ func (q *Queries) ListQuotaStates(ctx context.Context, orgID string) ([]QuotaSta
 		var i QuotaState
 		if err := rows.Scan(
 			&i.OrgID,
-			&i.MembershipID,
 			&i.ClusterID,
 			&i.Quota,
 			&i.PushedAt,
@@ -104,31 +101,25 @@ func (q *Queries) ListQuotaStates(ctx context.Context, orgID string) ([]QuotaSta
 }
 
 const listSandboxes = `-- name: ListSandboxes :many
-SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at, sandboxes.membership_id,
+SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at,
        clusters.slug AS cluster_slug,
        organizations.slug AS org_slug,
-       organizations.name AS org_name,
-       member_users.email AS member_email,
-       COALESCE(member_users.instance_admin, 0) AS member_admin
+       organizations.name AS org_name
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 LEFT JOIN organizations ON organizations.id = sandboxes.org_id
-LEFT JOIN memberships ON memberships.id = sandboxes.membership_id
-LEFT JOIN users AS member_users ON member_users.id = memberships.user_id
 WHERE sandboxes.gone_at IS NULL
   AND (?1 = '' OR sandboxes.org_id = ?1)
-  AND (?2 = '' OR sandboxes.membership_id = ?2)
-  AND (?3 = '' OR sandboxes.cluster_id = ?3)
-  AND (?4 = '' OR sandboxes.status = ?4)
+  AND (?2 = '' OR sandboxes.cluster_id = ?2)
+  AND (?3 = '' OR sandboxes.status = ?3)
 ORDER BY sandboxes.created_at DESC, sandboxes.id DESC
 LIMIT 500
 `
 
 type ListSandboxesParams struct {
-	OrgID        interface{}
-	MembershipID interface{}
-	ClusterID    interface{}
-	Status       interface{}
+	OrgID     interface{}
+	ClusterID interface{}
+	Status    interface{}
 }
 
 type ListSandboxesRow struct {
@@ -136,17 +127,10 @@ type ListSandboxesRow struct {
 	ClusterSlug string
 	OrgSlug     sql.NullString
 	OrgName     sql.NullString
-	MemberEmail sql.NullString
-	MemberAdmin int64
 }
 
 func (q *Queries) ListSandboxes(ctx context.Context, arg ListSandboxesParams) ([]ListSandboxesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listSandboxes,
-		arg.OrgID,
-		arg.MembershipID,
-		arg.ClusterID,
-		arg.Status,
-	)
+	rows, err := q.db.QueryContext(ctx, listSandboxes, arg.OrgID, arg.ClusterID, arg.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +155,9 @@ func (q *Queries) ListSandboxes(ctx context.Context, arg ListSandboxesParams) ([
 			&i.Sandbox.CreatedAt,
 			&i.Sandbox.LastSeenAt,
 			&i.Sandbox.GoneAt,
-			&i.Sandbox.MembershipID,
 			&i.ClusterSlug,
 			&i.OrgSlug,
 			&i.OrgName,
-			&i.MemberEmail,
-			&i.MemberAdmin,
 		); err != nil {
 			return nil, err
 		}
@@ -192,17 +173,13 @@ func (q *Queries) ListSandboxes(ctx context.Context, arg ListSandboxesParams) ([
 }
 
 const listSandboxesByID = `-- name: ListSandboxesByID :many
-SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at, sandboxes.membership_id,
+SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at,
        clusters.slug AS cluster_slug,
        organizations.slug AS org_slug,
-       organizations.name AS org_name,
-       member_users.email AS member_email,
-       COALESCE(member_users.instance_admin, 0) AS member_admin
+       organizations.name AS org_name
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 LEFT JOIN organizations ON organizations.id = sandboxes.org_id
-LEFT JOIN memberships ON memberships.id = sandboxes.membership_id
-LEFT JOIN users AS member_users ON member_users.id = memberships.user_id
 WHERE sandboxes.id = ? AND sandboxes.gone_at IS NULL
 `
 
@@ -211,8 +188,6 @@ type ListSandboxesByIDRow struct {
 	ClusterSlug string
 	OrgSlug     sql.NullString
 	OrgName     sql.NullString
-	MemberEmail sql.NullString
-	MemberAdmin int64
 }
 
 func (q *Queries) ListSandboxesByID(ctx context.Context, id string) ([]ListSandboxesByIDRow, error) {
@@ -241,66 +216,9 @@ func (q *Queries) ListSandboxesByID(ctx context.Context, id string) ([]ListSandb
 			&i.Sandbox.CreatedAt,
 			&i.Sandbox.LastSeenAt,
 			&i.Sandbox.GoneAt,
-			&i.Sandbox.MembershipID,
 			&i.ClusterSlug,
 			&i.OrgSlug,
 			&i.OrgName,
-			&i.MemberEmail,
-			&i.MemberAdmin,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStartedSandboxesByMembership = `-- name: ListStartedSandboxesByMembership :many
-SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at, sandboxes.membership_id, clusters.slug AS cluster_slug
-FROM sandboxes
-JOIN clusters ON clusters.id = sandboxes.cluster_id
-WHERE sandboxes.membership_id = ? AND sandboxes.gone_at IS NULL AND sandboxes.status = 'started'
-`
-
-type ListStartedSandboxesByMembershipRow struct {
-	Sandbox     Sandbox
-	ClusterSlug string
-}
-
-func (q *Queries) ListStartedSandboxesByMembership(ctx context.Context, membershipID sql.NullString) ([]ListStartedSandboxesByMembershipRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStartedSandboxesByMembership, membershipID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStartedSandboxesByMembershipRow
-	for rows.Next() {
-		var i ListStartedSandboxesByMembershipRow
-		if err := rows.Scan(
-			&i.Sandbox.ClusterID,
-			&i.Sandbox.ID,
-			&i.Sandbox.OrgID,
-			&i.Sandbox.Team,
-			&i.Sandbox.Node,
-			&i.Sandbox.Name,
-			&i.Sandbox.Image,
-			&i.Sandbox.Status,
-			&i.Sandbox.StatusReason,
-			&i.Sandbox.Runtime,
-			&i.Sandbox.Cpu,
-			&i.Sandbox.MemoryMb,
-			&i.Sandbox.DiskGb,
-			&i.Sandbox.CreatedAt,
-			&i.Sandbox.LastSeenAt,
-			&i.Sandbox.GoneAt,
-			&i.Sandbox.MembershipID,
-			&i.ClusterSlug,
 		); err != nil {
 			return nil, err
 		}
@@ -316,7 +234,7 @@ func (q *Queries) ListStartedSandboxesByMembership(ctx context.Context, membersh
 }
 
 const listStartedSandboxesByOrg = `-- name: ListStartedSandboxesByOrg :many
-SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at, sandboxes.membership_id, clusters.slug AS cluster_slug
+SELECT sandboxes.cluster_id, sandboxes.id, sandboxes.org_id, sandboxes.team, sandboxes.node, sandboxes.name, sandboxes.image, sandboxes.status, sandboxes.status_reason, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb, sandboxes.disk_gb, sandboxes.created_at, sandboxes.last_seen_at, sandboxes.gone_at, clusters.slug AS cluster_slug
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.org_id = ? AND sandboxes.gone_at IS NULL AND sandboxes.status = 'started'
@@ -353,7 +271,6 @@ func (q *Queries) ListStartedSandboxesByOrg(ctx context.Context, orgID sql.NullS
 			&i.Sandbox.CreatedAt,
 			&i.Sandbox.LastSeenAt,
 			&i.Sandbox.GoneAt,
-			&i.Sandbox.MembershipID,
 			&i.ClusterSlug,
 		); err != nil {
 			return nil, err
@@ -370,27 +287,20 @@ func (q *Queries) ListStartedSandboxesByOrg(ctx context.Context, orgID sql.NullS
 }
 
 const listUsageHourly = `-- name: ListUsageHourly :many
-SELECT org_id, membership_id, cluster_id, hour, sandbox_seconds, vcpu_seconds, memory_mb_seconds, peak_sandboxes FROM usage_hourly
+SELECT org_id, cluster_id, hour, sandbox_seconds, vcpu_seconds, memory_mb_seconds, peak_sandboxes FROM usage_hourly
 WHERE (?1 = '' OR org_id = ?1)
-  AND (?2 = '' OR membership_id = ?2)
-  AND hour >= ?3 AND hour <= ?4
+  AND hour >= ?2 AND hour <= ?3
 ORDER BY hour
 `
 
 type ListUsageHourlyParams struct {
-	OrgID        interface{}
-	MembershipID interface{}
-	FromHour     time.Time
-	ToHour       time.Time
+	OrgID    interface{}
+	FromHour time.Time
+	ToHour   time.Time
 }
 
 func (q *Queries) ListUsageHourly(ctx context.Context, arg ListUsageHourlyParams) ([]UsageHourly, error) {
-	rows, err := q.db.QueryContext(ctx, listUsageHourly,
-		arg.OrgID,
-		arg.MembershipID,
-		arg.FromHour,
-		arg.ToHour,
-	)
+	rows, err := q.db.QueryContext(ctx, listUsageHourly, arg.OrgID, arg.FromHour, arg.ToHour)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +310,6 @@ func (q *Queries) ListUsageHourly(ctx context.Context, arg ListUsageHourlyParams
 		var i UsageHourly
 		if err := rows.Scan(
 			&i.OrgID,
-			&i.MembershipID,
 			&i.ClusterID,
 			&i.Hour,
 			&i.SandboxSeconds,
@@ -498,54 +407,6 @@ func (q *Queries) SumSandboxesByOrg(ctx context.Context, orgID sql.NullString) (
 	return items, nil
 }
 
-const sumSandboxesByOrgMembership = `-- name: SumSandboxesByOrgMembership :many
-SELECT membership_id,
-       cluster_id,
-       COUNT(*) AS sandboxes,
-       CAST(COALESCE(SUM(cpu), 0) AS REAL) AS vcpus,
-       CAST(COALESCE(SUM(memory_mb), 0) AS INTEGER) AS memory_mb
-FROM sandboxes
-WHERE org_id = ? AND gone_at IS NULL AND status != 'destroyed'
-GROUP BY membership_id, cluster_id
-`
-
-type SumSandboxesByOrgMembershipRow struct {
-	MembershipID sql.NullString
-	ClusterID    string
-	Sandboxes    int64
-	Vcpus        float64
-	MemoryMb     int64
-}
-
-func (q *Queries) SumSandboxesByOrgMembership(ctx context.Context, orgID sql.NullString) ([]SumSandboxesByOrgMembershipRow, error) {
-	rows, err := q.db.QueryContext(ctx, sumSandboxesByOrgMembership, orgID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []SumSandboxesByOrgMembershipRow
-	for rows.Next() {
-		var i SumSandboxesByOrgMembershipRow
-		if err := rows.Scan(
-			&i.MembershipID,
-			&i.ClusterID,
-			&i.Sandboxes,
-			&i.Vcpus,
-			&i.MemoryMb,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const sumVcpuSecondsByOrg = `-- name: SumVcpuSecondsByOrg :many
 SELECT org_id, CAST(COALESCE(SUM(vcpu_seconds), 0) AS REAL) AS vcpu_seconds
 FROM usage_hourly
@@ -604,27 +465,25 @@ func (q *Queries) UpdateSandboxStatus(ctx context.Context, arg UpdateSandboxStat
 }
 
 const upsertQuotaState = `-- name: UpsertQuotaState :exec
-INSERT INTO quota_state (org_id, membership_id, cluster_id, quota, pushed_at, error)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT(org_id, membership_id, cluster_id) DO UPDATE SET
+INSERT INTO quota_state (org_id, cluster_id, quota, pushed_at, error)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(org_id, cluster_id) DO UPDATE SET
     quota = excluded.quota,
     pushed_at = excluded.pushed_at,
     error = excluded.error
 `
 
 type UpsertQuotaStateParams struct {
-	OrgID        string
-	MembershipID string
-	ClusterID    string
-	Quota        string
-	PushedAt     time.Time
-	Error        string
+	OrgID     string
+	ClusterID string
+	Quota     string
+	PushedAt  time.Time
+	Error     string
 }
 
 func (q *Queries) UpsertQuotaState(ctx context.Context, arg UpsertQuotaStateParams) error {
 	_, err := q.db.ExecContext(ctx, upsertQuotaState,
 		arg.OrgID,
-		arg.MembershipID,
 		arg.ClusterID,
 		arg.Quota,
 		arg.PushedAt,
@@ -634,13 +493,12 @@ func (q *Queries) UpsertQuotaState(ctx context.Context, arg UpsertQuotaStatePara
 }
 
 const upsertSandbox = `-- name: UpsertSandbox :exec
-INSERT INTO sandboxes (cluster_id, id, org_id, membership_id, team, node, name, image, status,
+INSERT INTO sandboxes (cluster_id, id, org_id, team, node, name, image, status,
                        status_reason, runtime, cpu, memory_mb, disk_gb, created_at,
                        last_seen_at, gone_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(cluster_id, id) DO UPDATE SET
     org_id = COALESCE(excluded.org_id, sandboxes.org_id),
-    membership_id = COALESCE(excluded.membership_id, sandboxes.membership_id),
     team = CASE WHEN excluded.team = '' THEN sandboxes.team ELSE excluded.team END,
     node = CASE WHEN excluded.node = '' THEN sandboxes.node ELSE excluded.node END,
     name = excluded.name,
@@ -660,7 +518,6 @@ type UpsertSandboxParams struct {
 	ClusterID    string
 	ID           string
 	OrgID        sql.NullString
-	MembershipID sql.NullString
 	Team         string
 	Node         string
 	Name         string
@@ -680,7 +537,6 @@ func (q *Queries) UpsertSandbox(ctx context.Context, arg UpsertSandboxParams) er
 		arg.ClusterID,
 		arg.ID,
 		arg.OrgID,
-		arg.MembershipID,
 		arg.Team,
 		arg.Node,
 		arg.Name,
@@ -698,10 +554,10 @@ func (q *Queries) UpsertSandbox(ctx context.Context, arg UpsertSandboxParams) er
 }
 
 const upsertUsageHourly = `-- name: UpsertUsageHourly :exec
-INSERT INTO usage_hourly (org_id, membership_id, cluster_id, hour, sandbox_seconds,
-                          vcpu_seconds, memory_mb_seconds, peak_sandboxes)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(org_id, membership_id, cluster_id, hour) DO UPDATE SET
+INSERT INTO usage_hourly (org_id, cluster_id, hour, sandbox_seconds, vcpu_seconds,
+                          memory_mb_seconds, peak_sandboxes)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(org_id, cluster_id, hour) DO UPDATE SET
     sandbox_seconds = sandbox_seconds + excluded.sandbox_seconds,
     vcpu_seconds = vcpu_seconds + excluded.vcpu_seconds,
     memory_mb_seconds = memory_mb_seconds + excluded.memory_mb_seconds,
@@ -710,7 +566,6 @@ ON CONFLICT(org_id, membership_id, cluster_id, hour) DO UPDATE SET
 
 type UpsertUsageHourlyParams struct {
 	OrgID           string
-	MembershipID    string
 	ClusterID       string
 	Hour            time.Time
 	SandboxSeconds  int64
@@ -722,7 +577,6 @@ type UpsertUsageHourlyParams struct {
 func (q *Queries) UpsertUsageHourly(ctx context.Context, arg UpsertUsageHourlyParams) error {
 	_, err := q.db.ExecContext(ctx, upsertUsageHourly,
 		arg.OrgID,
-		arg.MembershipID,
 		arg.ClusterID,
 		arg.Hour,
 		arg.SandboxSeconds,

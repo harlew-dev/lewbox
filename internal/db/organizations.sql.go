@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -75,9 +76,9 @@ func (q *Queries) CountOrganizationsByStatus(ctx context.Context) ([]CountOrgani
 }
 
 const createOrganization = `-- name: CreateOrganization :one
-INSERT INTO organizations (id, slug, name, status, created_at)
-VALUES (?, ?, ?, ?, ?)
-RETURNING id, slug, name, status, created_at, status_reason
+INSERT INTO organizations (id, slug, name, status, created_at, team)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, slug, name, status, created_at, team, status_reason
 `
 
 type CreateOrganizationParams struct {
@@ -86,6 +87,7 @@ type CreateOrganizationParams struct {
 	Name      string
 	Status    string
 	CreatedAt time.Time
+	Team      sql.NullString
 }
 
 func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error) {
@@ -95,6 +97,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.Name,
 		arg.Status,
 		arg.CreatedAt,
+		arg.Team,
 	)
 	var i Organization
 	err := row.Scan(
@@ -103,6 +106,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
 		&i.StatusReason,
 	)
 	return i, err
@@ -118,7 +122,7 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id string) error {
 }
 
 const getOrganizationByID = `-- name: GetOrganizationByID :one
-SELECT id, slug, name, status, created_at, status_reason FROM organizations WHERE id = ?
+SELECT id, slug, name, status, created_at, team, status_reason FROM organizations WHERE id = ?
 `
 
 func (q *Queries) GetOrganizationByID(ctx context.Context, id string) (Organization, error) {
@@ -130,13 +134,14 @@ func (q *Queries) GetOrganizationByID(ctx context.Context, id string) (Organizat
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
 		&i.StatusReason,
 	)
 	return i, err
 }
 
 const getOrganizationBySlug = `-- name: GetOrganizationBySlug :one
-SELECT id, slug, name, status, created_at, status_reason FROM organizations WHERE slug = ?
+SELECT id, slug, name, status, created_at, team, status_reason FROM organizations WHERE slug = ?
 `
 
 func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organization, error) {
@@ -148,13 +153,14 @@ func (q *Queries) GetOrganizationBySlug(ctx context.Context, slug string) (Organ
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
 		&i.StatusReason,
 	)
 	return i, err
 }
 
 const listOrganizations = `-- name: ListOrganizations :many
-SELECT id, slug, name, status, created_at, status_reason FROM organizations ORDER BY slug
+SELECT id, slug, name, status, created_at, team, status_reason FROM organizations ORDER BY slug
 `
 
 func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error) {
@@ -172,6 +178,7 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 			&i.Name,
 			&i.Status,
 			&i.CreatedAt,
+			&i.Team,
 			&i.StatusReason,
 		); err != nil {
 			return nil, err
@@ -188,7 +195,7 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 }
 
 const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
-SELECT organizations.id, organizations.slug, organizations.name, organizations.status, organizations.created_at, organizations.status_reason, memberships.role
+SELECT organizations.id, organizations.slug, organizations.name, organizations.status, organizations.created_at, organizations.team, organizations.status_reason, memberships.role
 FROM organizations
 JOIN memberships ON memberships.org_id = organizations.id
 WHERE memberships.user_id = ?
@@ -215,6 +222,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID string) (
 			&i.Organization.Name,
 			&i.Organization.Status,
 			&i.Organization.CreatedAt,
+			&i.Organization.Team,
 			&i.Organization.StatusReason,
 			&i.Role,
 		); err != nil {
@@ -232,7 +240,7 @@ func (q *Queries) ListOrganizationsForUser(ctx context.Context, userID string) (
 }
 
 const setOrganizationName = `-- name: SetOrganizationName :one
-UPDATE organizations SET name = ? WHERE id = ? RETURNING id, slug, name, status, created_at, status_reason
+UPDATE organizations SET name = ? WHERE id = ? RETURNING id, slug, name, status, created_at, team, status_reason
 `
 
 type SetOrganizationNameParams struct {
@@ -249,13 +257,14 @@ func (q *Queries) SetOrganizationName(ctx context.Context, arg SetOrganizationNa
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
 		&i.StatusReason,
 	)
 	return i, err
 }
 
 const setOrganizationStatus = `-- name: SetOrganizationStatus :one
-UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING id, slug, name, status, created_at, status_reason
+UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING id, slug, name, status, created_at, team, status_reason
 `
 
 type SetOrganizationStatusParams struct {
@@ -273,6 +282,7 @@ func (q *Queries) SetOrganizationStatus(ctx context.Context, arg SetOrganization
 		&i.Name,
 		&i.Status,
 		&i.CreatedAt,
+		&i.Team,
 		&i.StatusReason,
 	)
 	return i, err

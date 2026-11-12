@@ -19,8 +19,8 @@ func newSandboxCmd(a *app) *cobra.Command {
 	}
 
 	var (
-		region, status, member string
-		all                    bool
+		region, status string
+		all            bool
 	)
 	list := &cobra.Command{
 		Use:     "list",
@@ -32,12 +32,11 @@ func newSandboxCmd(a *app) *cobra.Command {
 			if all {
 				org = ""
 			}
-			return b.ListSandboxes(ctx, service.ListSandboxesRequest{Region: region, Status: status, Org: org, Member: member})
+			return b.ListSandboxes(ctx, service.ListSandboxesRequest{Region: region, Status: status, Org: org})
 		}),
 	}
 	list.Flags().StringVar(&region, "region", "", "only sandboxes in this region")
 	list.Flags().StringVar(&status, "status", "", "only sandboxes with this status")
-	list.Flags().StringVar(&member, "member", "", "only this member's sandboxes (email or ID)")
 	list.Flags().BoolVar(&all, "all", false, "every organization (instance admins)")
 
 	var stopRegion string
@@ -74,7 +73,7 @@ func newSandboxCmd(a *app) *cobra.Command {
 
 // newUsageCmd mirrors /v0/usage.
 func newUsageCmd(a *app) *cobra.Command {
-	var from, to, member string
+	var from, to string
 	var hourly bool
 	cmd := &cobra.Command{
 		Use:   "usage",
@@ -85,12 +84,11 @@ func newUsageCmd(a *app) *cobra.Command {
 			if hourly {
 				granularity = "hour"
 			}
-			return b.Usage(ctx, service.UsageRequest{From: from, To: to, Granularity: granularity, Org: a.org, Member: member})
+			return b.Usage(ctx, service.UsageRequest{From: from, To: to, Granularity: granularity, Org: a.org})
 		}),
 	}
 	cmd.Flags().StringVar(&from, "from", "", "start date (default: 30 days ago)")
 	cmd.Flags().StringVar(&to, "to", "", "end date (default: now)")
-	cmd.Flags().StringVar(&member, "member", "", "only this member's usage (email or ID)")
 	cmd.Flags().BoolVar(&hourly, "hourly", false, "one bucket per hour instead of per day")
 	return cmd
 }

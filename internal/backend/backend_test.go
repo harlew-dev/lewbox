@@ -479,8 +479,8 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	if err != nil || me.Via != "admin_key" || me.Organization == nil || me.Organization.Slug != "acme" {
 		t.Fatalf("me with key = %+v, %v", me, err)
 	}
-	if len(me.Organization.Regions) != 0 {
-		t.Errorf("a key sees plan fields: %+v", me.Organization)
+	if me.Organization.Team != "" || len(me.Organization.Regions) != 0 {
+		t.Errorf("a key sees admin fields: %+v", me.Organization)
 	}
 	if org, err := keyed.GetOrganization(ctx, ""); err != nil || org.Slug != "acme" {
 		t.Fatalf("own organization with key = %+v, %v", org, err)
@@ -508,10 +508,7 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.local.CreateUser(ctx, service.CreateUserRequest{Email: "owner@example.com", Password: adminPassword}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"}); err != nil {
+	if _, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
@@ -525,10 +522,10 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 		{
 			name: "create sandbox key",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "laptop", Region: "eu-west", Member: "owner@example.com"})
+				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "laptop", Region: "eu-west"})
 			},
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "agent", Region: "eu-west", Member: "owner@example.com"})
+				return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "agent", Region: "eu-west"})
 			},
 			check: func(t *testing.T, v any) {
 				k, ok := v.(service.NewSandboxKey)
@@ -555,19 +552,6 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 			},
 		},
 		both("list sandbox keys after revoke", listKeys),
-		{
-			name: "set member shares",
-			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.SetMemberShares(ctx, "acme", "owner@example.com", "eu-west", service.SetMemberSharesRequest{
-					MaxSandboxes: intPtr(1),
-				})
-			},
-			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.SetMemberShares(ctx, "acme", "owner@example.com", "eu-west", service.SetMemberSharesRequest{
-					MaxSandboxes: intPtr(1),
-				})
-			},
-		},
 		both("no organization chosen", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.ListSandboxKeys(ctx, "")
 		}),
@@ -585,7 +569,7 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 	if _, err := keyed.ListSandboxKeys(ctx, ""); err != nil {
 		t.Errorf("admin key lists sandbox keys: %v", err)
 	}
-	created, err := keyed.CreateSandboxKey(ctx, "", service.CreateSandboxKeyRequest{Name: "from-key", Region: "eu-west", Member: "owner@example.com"})
+	created, err := keyed.CreateSandboxKey(ctx, "", service.CreateSandboxKeyRequest{Name: "from-key", Region: "eu-west"})
 	if err != nil {
 		t.Fatalf("admin key creates a sandbox key: %v", err)
 	}
@@ -628,25 +612,18 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.local.CreateUser(ctx, service.CreateUserRequest{Email: "owner@example.com", Password: adminPassword}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"}); err != nil {
+	org, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
-	members, err := h.local.ListMembers(ctx, "acme")
-	if err != nil || len(members.Data) != 1 {
-		t.Fatalf("members = %+v, %v", members, err)
-	}
-	team := "lbx-" + strings.ReplaceAll(members.Data[0].ID, "-", "")
-	h.fake.AddSandbox(team, aerolvm.Sandbox{
+	h.fake.AddSandbox(org.Team, aerolvm.Sandbox{
 		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
 		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
 	})
-	h.fake.AddSandbox(team, aerolvm.Sandbox{
+	h.fake.AddSandbox(org.Team, aerolvm.Sandbox{
 		ID: "sb-2", Name: "worker", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
 		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
 	})

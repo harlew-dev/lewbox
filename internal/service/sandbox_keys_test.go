@@ -16,7 +16,6 @@ type sandboxFixture struct {
 	s                                            *Service
 	fake                                         *aerolvmtest.Server
 	org                                          Organization
-	team                                         string
 	root, owner, admin, member, viewer, outsider context.Context
 }
 
@@ -34,13 +33,9 @@ func newSandboxFixture(t *testing.T, extra ...Option) sandboxFixture {
 	}
 	f.org = org
 	f.owner = userCtx(t, s, "owner@example.com")
-	for _, join := range []struct{ email, role string }{
-		{"admin@example.com", roleAdmin},
-		{"member@example.com", roleMember},
-		{"viewer@example.com", roleViewer},
-	} {
-		if _, err := s.AddMember(f.owner, "acme", AddMemberRequest{Email: join.email, Role: join.role}); err != nil {
-			t.Fatalf("add %s: %v", join.email, err)
+	for email, role := range map[string]string{"admin@example.com": roleAdmin, "member@example.com": roleMember, "viewer@example.com": roleViewer} {
+		if _, err := s.AddMember(f.owner, "acme", AddMemberRequest{Email: email, Role: role}); err != nil {
+			t.Fatalf("add %s: %v", email, err)
 		}
 	}
 	f.admin = userCtx(t, s, "admin@example.com")
@@ -48,7 +43,6 @@ func newSandboxFixture(t *testing.T, extra ...Option) sandboxFixture {
 	f.viewer = userCtx(t, s, "viewer@example.com")
 	f.outsider = userCtx(t, s, "outsider@example.com")
 
-	f.team = teamOf(t, s, org.Slug, "owner@example.com")
 	f.fake = newClusterFake(t)
 	setMembers(f.fake, "node-a")
 	addTestCluster(t, s, f.fake, "eu-west")
@@ -80,7 +74,7 @@ func TestCreateSandboxKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("upstream token %q not found in %+v", out.Token, f.fake.Tokens())
 	}
-	if token.Role != "runner" || token.Team != f.team || token.Name != "lbx."+out.ID {
+	if token.Role != "runner" || token.Team != f.org.Team || token.Name != "lbx."+out.ID {
 		t.Errorf("upstream token = %+v", token)
 	}
 	if token.ExpiresAt == nil {
@@ -231,14 +225,6 @@ func TestSandboxKeyAccess(t *testing.T) {
 	_, err = s.RevokeSandboxKey(f.viewer, "acme", "no")
 	wantCode(t, err, CodeForbidden)
 
-	// Three members share the plan, so give each room in this test.
-	if _, err := s.SetSubscription(f.root, "acme", "eu-west", SetSubscriptionRequest{
-		Plan:         "free",
-		MaxSandboxes: OptionalInt{Set: true, Value: intValue(3)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	// A member creates its own key and may not revoke someone else's.
 	if _, err := s.CreateSandboxKey(f.member, "acme", CreateSandboxKeyRequest{Name: "mine"}); err != nil {
 		t.Fatal(err)
@@ -262,7 +248,7 @@ func TestSandboxKeyAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyCtx := WithPrincipal(context.Background(), p)
-	if _, err := s.CreateSandboxKey(keyCtx, "", CreateSandboxKeyRequest{Name: "agent", Member: "member@example.com"}); err != nil {
+	if _, err := s.CreateSandboxKey(keyCtx, "", CreateSandboxKeyRequest{Name: "agent"}); err != nil {
 		t.Fatalf("admin key creates a sandbox key: %v", err)
 	}
 	if list, err := s.ListSandboxKeys(keyCtx, ""); err != nil || len(list.Data) != 3 {
@@ -333,7 +319,7 @@ func TestSandboxKeyRecoversFrom503Then409(t *testing.T) {
 	))
 	client := aerolvm.New(f.fake.URL(), f.fake.AdminToken, aerolvm.WithRetry(0))
 	seeded, err := client.CreateToken(context.Background(), aerolvm.CreateTokenRequest{
-		Name: "lbx." + id, Role: "runner", Team: f.team, ExpiresIn: "90d",
+		Name: "lbx." + id, Role: "runner", Team: f.org.Team, ExpiresIn: "90d",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +399,7 @@ func TestSandboxKeyErrorsDoNotLeakTheRegionURL(t *testing.T) {
 	}
 
 	// Instance admins get the detail.
-	_, err = f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "laptop", Member: "owner@example.com"})
+	_, err = f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "laptop"})
 	se = wantCode(t, err, CodeUnavailable)
 	if !strings.Contains(se.Message, "eu-west") {
 		t.Errorf("admin message = %q", se.Message)
@@ -476,7 +462,7 @@ func TestRemoveClusterFailsClosedOnLiveKeys(t *testing.T) {
 
 func TestSandboxKeyCreatorIsHidden(t *testing.T) {
 	f := newSandboxFixture(t)
-	out, err := f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "ops", Member: "owner@example.com"})
+	out, err := f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "ops"})
 	if err != nil {
 		t.Fatal(err)
 	}

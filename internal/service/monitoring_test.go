@@ -274,12 +274,10 @@ func TestOverview(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createUser(t, s, "owner@example.com", false)
-	acme, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"})
+	acme, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	team := teamOf(t, s, "acme", "owner@example.com")
 	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
@@ -290,13 +288,14 @@ func TestOverview(t *testing.T) {
 			Name:      org.slug,
 			Status:    org.status,
 			CreatedAt: clock,
+			Team:      sql.NullString{String: "lbx-" + org.slug, Valid: true},
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	fake.AddSandbox(team, aerolvm.Sandbox{ID: "sb-1", Status: "started", Runtime: "docker", CreatedAt: clock})
-	fake.AddSandbox(team, aerolvm.Sandbox{ID: "sb-2", Status: "stopped", Runtime: "docker", CreatedAt: clock})
+	fake.AddSandbox(acme.Team, aerolvm.Sandbox{ID: "sb-1", Status: "started", Runtime: "docker", CreatedAt: clock})
+	fake.AddSandbox(acme.Team, aerolvm.Sandbox{ID: "sb-2", Status: "stopped", Runtime: "docker", CreatedAt: clock})
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}

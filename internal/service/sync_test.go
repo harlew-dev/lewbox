@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,6 @@ type syncFixture struct {
 	clock *testClock
 	fake  *aerolvmtest.Server
 	org   Organization
-	team  string
 }
 
 func newSyncFixture(t *testing.T) syncFixture {
@@ -29,15 +29,14 @@ func newSyncFixture(t *testing.T) syncFixture {
 	fake := newClusterFake(t)
 	setMembers(fake, "node-a")
 	addTestCluster(t, s, fake, "eu-west")
-	createUser(t, s, "owner@example.com", false)
-	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"})
+	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.SetSubscription(localCtx(), org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
-	return syncFixture{s: s, clock: clock, fake: fake, org: org, team: teamOf(t, s, org.Slug, "owner@example.com")}
+	return syncFixture{s: s, clock: clock, fake: fake, org: org}
 }
 
 func (f syncFixture) sync(t *testing.T) {
@@ -45,22 +44,6 @@ func (f syncFixture) sync(t *testing.T) {
 	if err := f.s.Sync(localCtx()); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-}
-
-// teamOf is an account's AerolVM team in an organization.
-func teamOf(t *testing.T, s *Service, orgSlug, email string) string {
-	t.Helper()
-	members, err := s.ListMembers(localCtx(), orgSlug)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range members.Data {
-		if m.Email == email {
-			return memberTeam(m.ID)
-		}
-	}
-	t.Fatalf("%s is not a member of %s", email, orgSlug)
-	return ""
 }
 
 func startedSandbox(id string, cpu float64, memoryMB int64) aerolvm.Sandbox {
@@ -81,7 +64,7 @@ func TestSyncMirrorsPagedSandboxes(t *testing.T) {
 	f := newSyncFixture(t)
 	f.fake.SetPageLimit(2)
 	for _, id := range []string{"sb-1", "sb-2"} {
-		f.fake.AddSandbox(f.team, startedSandbox(id, 1, 512))
+		f.fake.AddSandbox(f.org.Team, startedSandbox(id, 1, 512))
 	}
 	f.fake.AddSandbox("unknown-team", startedSandbox("sb-3", 1, 512))
 	f.fake.AddSandbox("", startedSandbox("sb-4", 1, 512))
@@ -112,8 +95,8 @@ func TestSyncMirrorsPagedSandboxes(t *testing.T) {
 
 func TestSyncPartialListKeepsRows(t *testing.T) {
 	f := newSyncFixture(t)
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
-	f.fake.AddSandbox(f.team, startedSandbox("sb-2", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-2", 1, 512))
 	f.clock.advance(15 * time.Second)
 	f.sync(t)
 
@@ -146,9 +129,9 @@ func TestSyncPartialListKeepsRows(t *testing.T) {
 
 func TestSyncMetersStartedSandboxes(t *testing.T) {
 	f := newSyncFixture(t)
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
-	f.fake.AddSandbox(f.team, startedSandbox("sb-2", 1, 512))
-	f.fake.AddSandbox(f.team, func() aerolvm.Sandbox {
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-2", 1, 512))
+	f.fake.AddSandbox(f.org.Team, func() aerolvm.Sandbox {
 		sandbox := startedSandbox("sb-3", 1, 512)
 		sandbox.Status = "stopped"
 		return sandbox
@@ -188,7 +171,7 @@ func TestSyncMetersStartedSandboxes(t *testing.T) {
 
 func TestUsageZeroFillsBuckets(t *testing.T) {
 	f := newSyncFixture(t)
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 2, 1024))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 2, 1024))
 	f.clock.advance(15 * time.Second)
 	f.sync(t)
 	f.clock.advance(30 * time.Second)
@@ -235,11 +218,10 @@ func TestQuotaPerSubscription(t *testing.T) {
 	second := newClusterFake(t)
 	setMembers(second, "node-b")
 	addTestCluster(t, s, second, "us-east")
-	createUser(t, s, "owner@example.com", false)
-	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Owner: "owner@example.com"}); err != nil {
+	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	team := teamOf(t, s, "acme", "owner@example.com")
 	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,22 +229,22 @@ func TestQuotaPerSubscription(t *testing.T) {
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
-	eu := first.QuotaPushes(team)
+	eu := first.QuotaPushes(org.Team)
 	if len(eu) != 1 || eu[0].MaxSandboxes != 2 || eu[0].MaxCPU != 2 || eu[0].MaxMemoryMB != 4096 {
 		t.Fatalf("eu pushes = %+v", eu)
 	}
 	// A region the organization never used is left alone.
-	if us := second.QuotaPushes(team); len(us) != 0 {
+	if us := second.QuotaPushes(org.Team); len(us) != 0 {
 		t.Errorf("unused region pushes = %+v", us)
 	}
 
 	// A sandbox in an unsubscribed region gets the blocking quota.
-	second.AddSandbox(team, startedSandbox("sb-1", 1, 512))
+	second.AddSandbox(org.Team, startedSandbox("sb-1", 1, 512))
 	clock.advance(15 * time.Second)
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
-	us := second.QuotaPushes(team)
+	us := second.QuotaPushes(org.Team)
 	if len(us) != 1 || us[0].MaxCPU != blockingCPU || us[0].MaxMemoryMB != blockingMemoryMB {
 		t.Errorf("unsubscribed region pushes = %+v", us)
 	}
@@ -278,7 +260,7 @@ func TestQuotaPerSubscription(t *testing.T) {
 	if err := s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(first.QuotaPushes(team)); got != 1 {
+	if got := len(first.QuotaPushes(org.Team)); got != 1 {
 		t.Errorf("unchanged quota pushed %d times", got)
 	}
 
@@ -289,7 +271,7 @@ func TestQuotaPerSubscription(t *testing.T) {
 	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := first.QuotaDeletes(team); got != 1 {
+	if got := first.QuotaDeletes(org.Team); got != 1 {
 		t.Errorf("quota deletes = %d, want 1", got)
 	}
 }
@@ -304,7 +286,7 @@ func TestQuotaBlocksAndDeletes(t *testing.T) {
 	if err := f.s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
-	pushes := f.fake.QuotaPushes(f.team)
+	pushes := f.fake.QuotaPushes(f.org.Team)
 	last := pushes[len(pushes)-1]
 	if last.MaxCPU != blockingCPU || last.MaxMemoryMB != blockingMemoryMB {
 		t.Fatalf("blocking pushes = %+v", pushes)
@@ -322,14 +304,14 @@ func TestQuotaBlocksAndDeletes(t *testing.T) {
 	if _, err := f.s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: open.Slug}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.fake.QuotaDeletes(f.team); got != 1 {
+	if got := f.fake.QuotaDeletes(f.org.Team); got != 1 {
 		t.Errorf("quota deletes = %d, want 1", got)
 	}
 }
 
 func TestSuspendedOrganizationIsBlockedAndStopped(t *testing.T) {
 	f := newSyncFixture(t)
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
 	f.clock.advance(15 * time.Second)
 	f.sync(t)
 
@@ -338,7 +320,7 @@ func TestSuspendedOrganizationIsBlockedAndStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.sync(t)
-	pushes := f.fake.QuotaPushes(f.team)
+	pushes := f.fake.QuotaPushes(f.org.Team)
 	last := pushes[len(pushes)-1]
 	if last.MaxCPU != blockingCPU || last.MaxMemoryMB != blockingMemoryMB {
 		t.Errorf("suspended quota = %+v", last)
@@ -354,19 +336,19 @@ func TestSuspendedOrganizationIsBlockedAndStopped(t *testing.T) {
 
 func TestSandboxActionsAreScoped(t *testing.T) {
 	f := newSyncFixture(t)
-	createUser(t, f.s, "member@example.com", false)
+	createUser(t, f.s, "owner@example.com", false)
 	createUser(t, f.s, "viewer@example.com", false)
 	createUser(t, f.s, "outsider@example.com", false)
-	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "member@example.com", Role: roleMember}); err != nil {
+	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "viewer@example.com", Role: roleViewer}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "viewer@example.com", Role: roleViewer}); err != nil {
+	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "owner@example.com", Role: roleOwner}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "other", Owner: "outsider@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
 	f.clock.advance(15 * time.Second)
 	f.sync(t)
 
@@ -375,13 +357,6 @@ func TestSandboxActionsAreScoped(t *testing.T) {
 		t.Error("a viewer stopped a sandbox")
 	} else {
 		wantCode(t, err, CodeForbidden)
-	}
-
-	member := userCtx(t, f.s, "member@example.com")
-	if _, err := f.s.StopSandbox(member, "sb-1", SandboxActionRequest{Org: "acme"}); err == nil {
-		t.Error("a member stopped another member's sandbox")
-	} else {
-		wantCode(t, err, CodeNotFound)
 	}
 
 	outsider := userCtx(t, f.s, "outsider@example.com")
@@ -411,46 +386,34 @@ func TestSandboxActionsAreScoped(t *testing.T) {
 	}
 }
 
-func TestLimitsScopesMembers(t *testing.T) {
+func TestLimitsHidesRegionErrorsFromCustomers(t *testing.T) {
 	f := newSyncFixture(t)
-	createUser(t, f.s, "member@example.com", false)
-	createUser(t, f.s, "viewer@example.com", false)
-	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "member@example.com", Role: roleMember}); err != nil {
+	createUser(t, f.s, "owner@example.com", false)
+	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "owner@example.com", Role: roleOwner}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "viewer@example.com", Role: roleViewer}); err != nil {
+	f.fake.Stop()
+	// A changed quota makes the sync record the push failure, which contains
+	// the region's URL.
+	if _, err := f.s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{
+		Plan:         "free",
+		MaxSandboxes: OptionalInt{Set: true, Value: intValue(1)},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	memberTeam := teamOf(t, f.s, "acme", "member@example.com")
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
-	f.fake.AddSandbox(memberTeam, startedSandbox("sb-2", 1, 512))
-	f.clock.advance(15 * time.Second)
-	f.sync(t)
 
-	report, err := f.s.Limits(localCtx(), "acme")
+	admin, err := f.s.Limits(localCtx(), "acme")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Regions) != 1 || len(report.Regions[0].Members) != 3 {
-		t.Fatalf("admin limits = %+v", report)
+	if len(admin.Regions) != 1 || !strings.Contains(admin.Regions[0].Error, f.fake.URL()) {
+		t.Errorf("admin limits = %+v", admin.Regions)
 	}
-	blocked := map[string]bool{}
-	for _, m := range report.Regions[0].Members {
-		blocked[m.Email] = m.Blocked
-		if m.Email == "viewer@example.com" && !m.Blocked {
-			t.Errorf("viewer = %+v", m)
-		}
-	}
-	if !blocked["viewer@example.com"] {
-		t.Errorf("viewer share = %+v", report.Regions[0].Members)
-	}
-
-	memberCtx := userCtx(t, f.s, "member@example.com")
-	scoped, err := f.s.Limits(memberCtx, "acme")
+	customer, err := f.s.Limits(userCtx(t, f.s, "owner@example.com"), "acme")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scoped.Regions) != 1 || len(scoped.Regions[0].Members) != 1 || scoped.Regions[0].Members[0].Email != "member@example.com" {
-		t.Errorf("member limits = %+v", scoped)
+	if len(customer.Regions) != 1 || customer.Regions[0].Error == "" || strings.Contains(customer.Regions[0].Error, f.fake.URL()) {
+		t.Errorf("customer limits = %+v", customer.Regions)
 	}
 }

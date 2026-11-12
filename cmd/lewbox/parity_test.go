@@ -539,10 +539,7 @@ func TestSandboxKeys(t *testing.T) {
 		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
 		t.Fatalf("cluster add: exit %d: %s", code, errOut)
 	}
-	if _, errOut, code := e.cliIn("owner-password-1\n", "user", "create", "owner@example.com", "--password-stdin"); code != 0 {
-		t.Fatalf("user create: %s", errOut)
-	}
-	if _, errOut, code := e.cli("org", "create", "acme", "--owner", "owner@example.com"); code != 0 {
+	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
 		t.Fatalf("org create: %s", errOut)
 	}
 	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
@@ -552,7 +549,7 @@ func TestSandboxKeys(t *testing.T) {
 		t.Errorf("empty key list = %q", got)
 	}
 
-	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west", "--member", "owner@example.com", "--expires-in", "30d")
+	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west", "--expires-in", "30d")
 	if code != 0 {
 		t.Fatalf("key create: exit %d: %s", code, errOut)
 	}
@@ -565,7 +562,7 @@ func TestSandboxKeys(t *testing.T) {
 		t.Fatalf("created = %+v", created)
 	}
 
-	status, body := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"agent","region":"eu-west","member":"owner@example.com"}`)
+	status, body := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"agent","region":"eu-west"}`)
 	if status != http.StatusCreated {
 		t.Fatalf("POST sandbox-keys: status %d body %s", status, body)
 	}
@@ -629,10 +626,7 @@ func TestSandboxesAndUsage(t *testing.T) {
 		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
 		t.Fatalf("cluster add: exit %d: %s", code, errOut)
 	}
-	if _, errOut, code := e.cliIn("owner-password-1\n", "user", "create", "owner@example.com", "--password-stdin"); code != 0 {
-		t.Fatalf("user create: %s", errOut)
-	}
-	out, errOut, code := e.cli("org", "create", "acme", "--owner", "owner@example.com")
+	out, errOut, code := e.cli("org", "create", "acme")
 	if code != 0 {
 		t.Fatalf("org create: %s", errOut)
 	}
@@ -643,19 +637,7 @@ func TestSandboxesAndUsage(t *testing.T) {
 	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
 		t.Fatalf("subscription set: %s", errOut)
 	}
-	status, membersBody := e.httpOrg("acme", "GET", "/v0/members", "")
-	if status != 200 {
-		t.Fatalf("members: %d %s", status, membersBody)
-	}
-	var members service.MemberList
-	if err := json.Unmarshal([]byte(membersBody), &members); err != nil {
-		t.Fatal(err)
-	}
-	if len(members.Data) != 1 {
-		t.Fatalf("members = %+v", members)
-	}
-	team := "lbx-" + strings.ReplaceAll(members.Data[0].ID, "-", "")
-	fake.AddSandbox(team, aerolvm.Sandbox{
+	fake.AddSandbox(org.Team, aerolvm.Sandbox{
 		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
 		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
 	})
@@ -827,19 +809,16 @@ func TestSubscriptions(t *testing.T) {
 		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
 		t.Fatalf("cluster add: exit %d: %s", code, errOut)
 	}
-	if _, errOut, code := e.cliIn("owner-password-1\n", "user", "create", "owner@example.com", "--password-stdin"); code != 0 {
-		t.Fatalf("user create: %s", errOut)
-	}
-	if _, errOut, code := e.cli("org", "create", "acme", "--owner", "owner@example.com"); code != 0 {
+	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
 		t.Fatalf("org create: %s", errOut)
 	}
 
 	// With no subscription, a key there is refused.
-	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west", "--member", "owner@example.com")
+	out, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west")
 	if code != 1 || out != "" {
 		t.Fatalf("key create without a subscription: exit %d stdout %q", code, out)
 	}
-	status, got := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"laptop","region":"eu-west","member":"owner@example.com"}`)
+	status, got := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"laptop","region":"eu-west"}`)
 	if status != http.StatusPreconditionFailed || errOut != got {
 		t.Fatalf("key create without a subscription: status %d error %q, want 412 %q", status, errOut, got)
 	}
@@ -857,7 +836,7 @@ func TestSubscriptions(t *testing.T) {
 	}
 
 	// A subscribed key works.
-	if _, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west", "--member", "owner@example.com"); code != 0 {
+	if _, errOut, code := e.cli("key", "create", "laptop", "--org", "acme", "--region", "eu-west"); code != 0 {
 		t.Fatalf("key create: %s", errOut)
 	}
 
@@ -910,47 +889,5 @@ func TestLoginWithAdminKey(t *testing.T) {
 	}
 	if _, _, code := e.cli("org", "use", "acme"); code != 2 {
 		t.Errorf("org use in local mode: exit %d, want 2", code)
-	}
-}
-
-func TestMemberShares(t *testing.T) {
-	e := newEnv(t)
-	fake := aerolvmtest.New(t)
-	const token = "avm_admin_member_share_parity"
-	fake.AdminToken = token
-	fake.SetMembers([]aerolvm.Member{{
-		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
-		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
-	}})
-	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
-		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
-		t.Fatalf("cluster add: exit %d: %s", code, errOut)
-	}
-	for _, email := range []string{"owner@example.com", "member@example.com"} {
-		if _, errOut, code := e.cliIn("member-password-1\n", "user", "create", email, "--password-stdin"); code != 0 {
-			t.Fatalf("user create %s: %s", email, errOut)
-		}
-	}
-	if _, errOut, code := e.cli("org", "create", "acme", "--owner", "owner@example.com"); code != 0 {
-		t.Fatalf("org create: %s", errOut)
-	}
-	if _, errOut, code := e.cli("member", "add", "member@example.com", "--org", "acme"); code != 0 {
-		t.Fatalf("member add: %s", errOut)
-	}
-	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
-		t.Fatalf("subscription set: %s", errOut)
-	}
-
-	out := e.sameOrgBody("acme",
-		[]string{"member", "share", "eu-west", "member@example.com", "--max-sandboxes", "1", "--max-vcpus", "0.5", "--max-memory", "1GB", "--org", "acme"},
-		"PUT", "/v0/members/member@example.com/shares/eu-west",
-		`{"max_sandboxes":1,"max_vcpus":0.5,"max_memory_mb":1024}`, 200)
-	if !strings.Contains(out, `"email":"member@example.com"`) || !strings.Contains(out, `"vcpus":0.5`) {
-		t.Errorf("member share = %s", out)
-	}
-	// The per-member table is the same either way.
-	limits := e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
-	if !strings.Contains(limits, `"email":"member@example.com"`) || !strings.Contains(limits, `"blocked":false`) {
-		t.Errorf("limits = %s", limits)
 	}
 }

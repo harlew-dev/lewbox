@@ -140,9 +140,7 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 	}
 
 	out := toSubscription(existing, plan, cluster, true)
-	if err := s.syncOrganizationClusterQuotas(ctx, c.org, cluster); err != nil {
-		s.log.Warn("quota sync failed", "cluster", cluster.Slug, "organization", c.org.Slug, "err", err)
-	}
+	s.pushSubscriptionQuota(ctx, c.org, cluster, plan, existing)
 	return out, nil
 }
 
@@ -183,7 +181,12 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
 	}
 
-	s.blockOrganizationCluster(ctx, c.org, cluster)
+	now := s.now()
+	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Subscription{}, fmt.Errorf("get quota state: %w", err)
+	}
+	s.pushQuota(ctx, c.org, cluster, blockingQuota(), false, state, err == nil, now)
 	s.stopSandboxes(ctx, c.org, map[string]bool{cluster.ID: true})
 	return out, nil
 }
@@ -229,7 +232,17 @@ func (s *Service) revokeSubscriptionKeys(ctx context.Context, org db.Organizatio
 	return nil
 }
 
-// pushSubscriptionQuota is gone: quotas are per member team.
+// pushSubscriptionQuota sends one subscription's quota to its cluster now.
+// Errors are logged and recorded in quota_state.
+func (s *Service) pushSubscriptionQuota(ctx context.Context, org db.Organization, cluster db.Cluster, plan db.Plan, sub db.Subscription) {
+	quota, remove := subscriptionQuota(org.Status, true, effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb))
+	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: org.ID, ClusterID: cluster.ID})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		s.log.Warn("get quota state failed", "cluster", cluster.Slug, "organization", org.Slug, "err", err)
+		return
+	}
+	s.pushQuota(ctx, org, cluster, quota, remove, state, err == nil, s.now())
+}
 
 func toSubscription(sub db.Subscription, plan db.Plan, cluster db.Cluster, admin bool) Subscription {
 	out := Subscription{

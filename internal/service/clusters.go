@@ -347,27 +347,17 @@ func sandboxKeysNotRevoked(n int, slug string) error {
 }
 
 // revokeKeys revokes live sandbox keys on one cluster and reports how many
-// failed. A revoked token's row is marked revoked too, so the portal never
-// shows it live. ok is false when the cluster's admin token cannot be opened,
-// so every key must be treated as failed (and the caller can force).
+// failed. ok is false when the cluster's admin token cannot be opened, so
+// every key must be treated as failed (and the caller can force).
 func (s *Service) revokeKeys(ctx context.Context, cluster db.Cluster, keys []db.SandboxKey) (failed int, ok bool) {
 	token, err := s.clusterToken(cluster)
 	if err != nil {
 		return len(keys), false
 	}
 	client := s.aerolvmClient(cluster.AdminURL, token)
-	now := s.now()
 	for _, key := range keys {
 		if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
 			failed++
-			continue
-		}
-		if _, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
-			RevokedAt: sql.NullTime{Time: now, Valid: true},
-			OrgID:     key.OrgID,
-			ID:        key.ID,
-		}); err != nil {
-			s.log.Warn("mark sandbox key revoked failed", "key", key.ID, "err", err)
 		}
 	}
 	return failed, true

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +16,6 @@ type Sandbox struct {
 	ID           string               `json:"id"`
 	Region       string               `json:"region"`
 	Organization *SandboxOrganization `json:"organization,omitempty"`
-	Member       *MemberRef           `json:"member,omitempty"`
 	Name         string               `json:"name"`
 	Image        string               `json:"image"`
 	Status       string               `json:"status"`
@@ -43,12 +41,11 @@ type SandboxList struct {
 }
 
 // ListSandboxesRequest filters the mirror. Org is empty for the whole fleet
-// of an instance admin. Member is an email or membership ID.
+// of an instance admin.
 type ListSandboxesRequest struct {
 	Region string `json:"region"`
 	Status string `json:"status"`
 	Org    string `json:"org"`
-	Member string `json:"member"`
 }
 
 // SandboxActionRequest picks the cluster for a stop or delete when the
@@ -58,71 +55,41 @@ type SandboxActionRequest struct {
 	Org    string `json:"org"`
 }
 
-// orgScope is the organization a fleet-capable call is about, and the
-// caller's place in it.
-type orgScope struct {
-	p          Principal
-	org        *db.Organization
-	fleet      bool
-	role       string
-	membership *db.Membership
-}
-
 // scopeOrg resolves the organization a list or usage call is about. An
 // instance admin with no organization sees the whole fleet.
-func (s *Service) scopeOrg(ctx context.Context, ref string) (orgScope, error) {
+func (s *Service) scopeOrg(ctx context.Context, ref string) (Principal, *db.Organization, bool, error) {
 	p, err := requirePrincipal(ctx)
 	if err != nil {
-		return orgScope{}, err
+		return Principal{}, nil, false, err
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		if p.InstanceAdmin {
-			return orgScope{p: p, fleet: true}, nil
+			return p, nil, true, nil
 		}
 		c, err := s.orgFor(ctx, "", accessRead)
 		if err != nil {
-			return orgScope{}, err
+			return Principal{}, nil, false, err
 		}
-		return s.scopeFor(ctx, c)
+		return p, &c.org, false, nil
 	}
 	c, err := s.orgFor(ctx, ref, accessRead)
 	if err != nil {
-		return orgScope{}, err
+		return Principal{}, nil, false, err
 	}
-	return s.scopeFor(ctx, c)
-}
-
-func (s *Service) scopeFor(ctx context.Context, c orgCaller) (orgScope, error) {
-	scope := orgScope{p: c.p, org: &c.org, role: c.role}
-	if c.p.Kind != "user" {
-		return scope, nil
-	}
-	m, err := s.q.GetMembership(ctx, db.GetMembershipParams{OrgID: c.org.ID, UserID: c.p.UserID})
-	switch {
-	case err == nil:
-		scope.membership = &m
-	case !errors.Is(err, sql.ErrNoRows):
-		return orgScope{}, fmt.Errorf("get membership: %w", err)
-	}
-	return scope, nil
-}
-
-// limited reports whether the caller sees only their own member's resources.
-func (s orgScope) limited() bool {
-	return !s.p.InstanceAdmin && s.p.Kind == "user" && s.role != roleOwner && s.role != roleAdmin
+	return p, &c.org, false, nil
 }
 
 // ListSandboxes returns the mirrored sandboxes that have not gone away,
 // newest first, at most 500.
 func (s *Service) ListSandboxes(ctx context.Context, req ListSandboxesRequest) (SandboxList, error) {
-	scope, err := s.scopeOrg(ctx, req.Org)
+	p, org, _, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return SandboxList{}, err
 	}
 	orgID := ""
-	if scope.org != nil {
-		orgID = scope.org.ID
+	if org != nil {
+		orgID = org.ID
 	}
 	clusterID := ""
 	if region := strings.TrimSpace(req.Region); region != "" {
@@ -132,37 +99,18 @@ func (s *Service) ListSandboxes(ctx context.Context, req ListSandboxesRequest) (
 		}
 		clusterID = cluster.ID
 	}
-	membershipID := ""
-	switch {
-	case scope.limited():
-		if scope.membership != nil {
-			membershipID = scope.membership.ID
-		} else {
-			membershipID = "none"
-		}
-	case strings.TrimSpace(req.Member) != "":
-		if scope.org == nil {
-			return SandboxList{}, invalid("choose a workspace to filter by member")
-		}
-		m, _, err := s.findMember(ctx, *scope.org, req.Member)
-		if err != nil {
-			return SandboxList{}, err
-		}
-		membershipID = m.ID
-	}
 	status := strings.ToLower(strings.TrimSpace(req.Status))
 	rows, err := s.q.ListSandboxes(ctx, db.ListSandboxesParams{
-		OrgID:        orgID,
-		MembershipID: membershipID,
-		ClusterID:    clusterID,
-		Status:       status,
+		OrgID:     orgID,
+		ClusterID: clusterID,
+		Status:    status,
 	})
 	if err != nil {
 		return SandboxList{}, fmt.Errorf("list sandboxes: %w", err)
 	}
 	out := SandboxList{Data: make([]Sandbox, 0, len(rows))}
 	for _, row := range rows {
-		out.Data = append(out.Data, toSandbox(row.Sandbox, row.ClusterSlug, row.OrgSlug, row.OrgName, row.MemberEmail, row.MemberAdmin, scope.p.InstanceAdmin))
+		out.Data = append(out.Data, toSandbox(row.Sandbox, row.ClusterSlug, row.OrgSlug, row.OrgName, p.InstanceAdmin))
 	}
 	return out, nil
 }
@@ -220,9 +168,6 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req SandboxActio
 		if !row.Sandbox.OrgID.Valid || row.Sandbox.OrgID.String != c.org.ID {
 			return Sandbox{}, notFound("sandbox %q not found", id)
 		}
-		if err := s.checkSandboxOwnership(ctx, row.Sandbox, c, p); err != nil {
-			return Sandbox{}, err
-		}
 	} else if !p.InstanceAdmin {
 		c, err := s.orgFor(ctx, "", accessUse)
 		if err != nil {
@@ -230,9 +175,6 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req SandboxActio
 		}
 		if !row.Sandbox.OrgID.Valid || row.Sandbox.OrgID.String != c.org.ID {
 			return Sandbox{}, notFound("sandbox %q not found", id)
-		}
-		if err := s.checkSandboxOwnership(ctx, row.Sandbox, c, p); err != nil {
-			return Sandbox{}, err
 		}
 	}
 
@@ -270,24 +212,10 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req SandboxActio
 		row.Sandbox.Status = "stopped"
 		row.Sandbox.StatusReason = ""
 	}
-	return toSandbox(row.Sandbox, row.ClusterSlug, row.OrgSlug, row.OrgName, row.MemberEmail, row.MemberAdmin, p.InstanceAdmin), nil
+	return toSandbox(row.Sandbox, row.ClusterSlug, row.OrgSlug, row.OrgName, p.InstanceAdmin), nil
 }
 
-// checkSandboxOwnership refuses a plain member touch on another member's
-// sandbox. Owners, admins, API keys and instance admins may touch any sandbox
-// in the workspace.
-func (s *Service) checkSandboxOwnership(ctx context.Context, sandbox db.Sandbox, c orgCaller, p Principal) error {
-	if p.Kind != "user" || c.role != roleMember {
-		return nil
-	}
-	m, err := s.q.GetMembership(ctx, db.GetMembershipParams{OrgID: c.org.ID, UserID: p.UserID})
-	if err != nil || !sandbox.MembershipID.Valid || sandbox.MembershipID.String != m.ID {
-		return notFound("sandbox %q not found", sandbox.ID)
-	}
-	return nil
-}
-
-func toSandbox(row db.Sandbox, region string, orgSlug, orgName sql.NullString, memberEmail sql.NullString, memberAdmin int64, admin bool) Sandbox {
+func toSandbox(row db.Sandbox, region string, orgSlug, orgName sql.NullString, admin bool) Sandbox {
 	sandbox := Sandbox{
 		ID:           row.ID,
 		Region:       region,
@@ -301,13 +229,6 @@ func toSandbox(row db.Sandbox, region string, orgSlug, orgName sql.NullString, m
 		DiskGB:       row.DiskGb,
 		CreatedAt:    row.CreatedAt.UTC(),
 		LastSeenAt:   row.LastSeenAt.UTC(),
-	}
-	if memberEmail.Valid {
-		email := memberEmail.String
-		if memberAdmin != 0 && !admin {
-			email = "operator"
-		}
-		sandbox.Member = &MemberRef{Email: email}
 	}
 	if admin {
 		node := row.Node

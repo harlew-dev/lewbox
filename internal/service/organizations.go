@@ -25,6 +25,7 @@ type Organization struct {
 	Name         string               `json:"name"`
 	Status       string               `json:"status"` // pending | active | suspended
 	StatusReason string               `json:"status_reason"`
+	Team         string               `json:"team,omitempty"`
 	Regions      []OrganizationRegion `json:"regions"`
 	Members      int                  `json:"members"`
 	Role         string               `json:"role,omitempty"`
@@ -362,7 +363,7 @@ func effectiveLimits(plan db.Plan, maxSandboxes, maxVcpus, maxMemoryMB sql.NullI
 }
 
 // toOrganization renders an organization. admin decides whether to include
-// recent vCPU-hours.
+// the fields only instance admins see: team and recent vCPU-hours.
 func toOrganization(row db.Organization, role string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool) Organization {
 	org := Organization{
 		ID:           row.ID,
@@ -375,9 +376,14 @@ func toOrganization(row db.Organization, role string, counts map[string]int, sub
 		Role:         role,
 		CreatedAt:    row.CreatedAt.UTC(),
 	}
+	if row.Team.Valid {
+		org.Team = row.Team.String
+	}
 	if admin {
 		hours := usage[row.ID]
 		org.VcpuHours30d = &hours
+	} else {
+		org.Team = ""
 	}
 	return org
 }
@@ -518,6 +524,7 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 		Name:      name,
 		Status:    orgActive,
 		CreatedAt: s.now(),
+		Team:      sql.NullString{String: teamForID(id), Valid: true},
 	})
 	if db.IsUniqueViolation(err) {
 		return Organization{}, conflict("an organization with slug %q already exists", slug)
@@ -546,10 +553,10 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 	return s.toOrganization(ctx, row, role, p.InstanceAdmin)
 }
 
-// memberTeam is a member's AerolVM team: unique, valid, and never reused
-// because a new membership gets a new ID.
-func memberTeam(membershipID string) string {
-	return "lbx-" + strings.ReplaceAll(membershipID, "-", "")
+// teamForID is an organization's AerolVM team: unique, valid, and never
+// reused because IDs never are.
+func teamForID(id string) string {
+	return "lbx-" + strings.ReplaceAll(id, "-", "")
 }
 
 // orgName trims and checks a display name; empty means the slug.
@@ -715,9 +722,6 @@ func (s *Service) AddMember(ctx context.Context, org string, req AddMemberReques
 	if err != nil {
 		return Member{}, fmt.Errorf("add member: %w", err)
 	}
-	if err := s.syncOrganizationQuotas(ctx, c.org); err != nil {
-		s.log.Warn("quota sync failed", "organization", c.org.Slug, "err", err)
-	}
 	return toMember(row, user.Email), nil
 }
 
@@ -752,9 +756,6 @@ func (s *Service) SetMemberRole(ctx context.Context, org, ref string, req SetMem
 	if err != nil {
 		return Member{}, fmt.Errorf("set role: %w", err)
 	}
-	if err := s.syncOrganizationQuotas(ctx, c.org); err != nil {
-		s.log.Warn("quota sync failed", "organization", c.org.Slug, "err", err)
-	}
 	return toMember(updated, email), nil
 }
 
@@ -782,30 +783,6 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 			return Member{}, forbidden("only an owner can remove an owner")
 		}
 	}
-	// The member's tokens must stop before the membership (and its key rows)
-	// disappear, and a failure leaves the member in place.
-	if m.Role == roleOwner {
-		members, err := s.q.ListMembers(ctx, c.org.ID)
-		if err != nil {
-			return Member{}, fmt.Errorf("list members: %w", err)
-		}
-		owners := 0
-		for _, other := range members {
-			if other.Membership.Role == roleOwner {
-				owners++
-			}
-		}
-		if owners <= 1 {
-			return Member{}, conflict("%q needs at least one owner", c.org.Slug)
-		}
-	}
-	clusters, err := s.memberClusters(ctx, c.org.ID, m.ID)
-	if err != nil {
-		return Member{}, err
-	}
-	if err := s.revokeMemberKeys(ctx, c.org, m.ID); err != nil {
-		return Member{}, err
-	}
 	n, err := s.q.DeleteMembership(ctx, m.ID)
 	if err != nil {
 		return Member{}, fmt.Errorf("remove member: %w", err)
@@ -816,8 +793,6 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 		}
 		return Member{}, notFound("%q is not a member of %q", ref, c.org.Slug)
 	}
-	s.blockMemberTeams(ctx, c.org, m.ID, clusters)
-	s.stopMemberSandboxes(ctx, m.ID)
 	return toMember(m, email), nil
 }
 

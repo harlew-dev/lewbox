@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -231,94 +229,8 @@ func newMemberCmd(a *app) *cobra.Command {
 		},
 	}
 
-	member.AddCommand(list, add, setRole, remove, newMemberShareCmd(a))
+	member.AddCommand(list, add, setRole, remove)
 	return member
-}
-
-// newMemberShareCmd sets one member's explicit share of a region's plan.
-func newMemberShareCmd(a *app) *cobra.Command {
-	var maxSandboxes, maxVcpus, maxMemory string
-	share := &cobra.Command{
-		Use:   "share <region> <email|id>",
-		Short: "Set a member's share of the plan in a region (PUT /v0/members/{ref}/shares/{region})",
-		Args:  usageArgs(cobra.ExactArgs(2)),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if !cmd.Flags().Changed("max-sandboxes") && !cmd.Flags().Changed("max-vcpus") && !cmd.Flags().Changed("max-memory") {
-				return usagef("nothing to change: pass --max-sandboxes, --max-vcpus or --max-memory")
-			}
-			req := service.SetMemberSharesRequest{}
-			var err error
-			if req.MaxSandboxes, err = parseShareCount(maxSandboxes); err != nil {
-				return err
-			}
-			if req.MaxVcpus, err = parseShareVcpus(maxVcpus); err != nil {
-				return err
-			}
-			if req.MaxMemoryMB, err = parseShareMemory(maxMemory); err != nil {
-				return err
-			}
-			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
-				return b.SetMemberShares(ctx, org, args[1], args[0], req)
-			})(cmd, args)
-		},
-	}
-	share.Flags().StringVar(&maxSandboxes, "max-sandboxes", "", "the member's sandboxes: a positive whole number, or auto")
-	share.Flags().StringVar(&maxVcpus, "max-vcpus", "", "the member's vCPUs: a positive number (0.5 is allowed), or auto")
-	share.Flags().StringVar(&maxMemory, "max-memory", "", "the member's memory: a positive size such as 1GB, or auto")
-	return share
-}
-
-// parseShareCount reads a whole-number share. auto or an empty value is
-// automatic.
-func parseShareCount(raw string) (*int64, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.EqualFold(raw, "auto") {
-		return nil, nil
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n < 1 {
-		return nil, usagef("%q is not a whole number: use a positive number or auto", raw)
-	}
-	return &n, nil
-}
-
-// parseShareVcpus reads a fractional vCPU share.
-func parseShareVcpus(raw string) (*float64, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.EqualFold(raw, "auto") {
-		return nil, nil
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 || math.IsNaN(v) || math.IsInf(v, 0) {
-		return nil, usagef("%q is not a vCPU count: use a positive number such as 0.5 or auto", raw)
-	}
-	return &v, nil
-}
-
-// parseShareMemory reads a memory share in MB. auto or an empty value is
-// automatic.
-func parseShareMemory(raw string) (*int64, error) {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	if s == "" || s == "auto" {
-		return nil, nil
-	}
-	multiplier := int64(1)
-	switch {
-	case strings.HasSuffix(s, "gb"):
-		s, multiplier = strings.TrimSuffix(s, "gb"), 1024
-	case strings.HasSuffix(s, "mb"):
-		s = strings.TrimSuffix(s, "mb")
-	case strings.HasSuffix(s, "g"):
-		s, multiplier = strings.TrimSuffix(s, "g"), 1024
-	case strings.HasSuffix(s, "m"):
-		s = strings.TrimSuffix(s, "m")
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-	if err != nil || n < 1 || n > math.MaxInt64/multiplier {
-		return nil, usagef("%q is not a memory size: use a positive size such as 4096, 4096MB or 1GB, or auto", raw)
-	}
-	n *= multiplier
-	return &n, nil
 }
 
 // newAdminKeyCmd mirrors /v0/admin-keys.
@@ -392,7 +304,6 @@ func newSandboxKeyCmd(a *app) *cobra.Command {
 
 	var (
 		region       string
-		member       string
 		expiresIn    string
 		neverExpires bool
 	)
@@ -413,13 +324,11 @@ func newSandboxKeyCmd(a *app) *cobra.Command {
 					Name:      args[0],
 					Region:    region,
 					ExpiresIn: lifetime,
-					Member:    member,
 				})
 			})(cmd, args)
 		},
 	}
 	create.Flags().StringVar(&region, "region", "", "the region's slug (default: the only ready region)")
-	create.Flags().StringVar(&member, "member", "", "the member it belongs to, by email or ID (required for an instance admin or API key)")
 	create.Flags().StringVar(&expiresIn, "expires-in", "90d", "how long the key works, such as 30d or 720h")
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the key works until it is revoked")
 

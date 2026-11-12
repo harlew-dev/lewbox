@@ -20,18 +20,12 @@ type SandboxKey struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	Region    Region     `json:"region"`
-	Member    *MemberRef `json:"member,omitempty"`
 	TokenHint string     `json:"token_hint"`
 	CreatedBy string     `json:"created_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at"`
 	RevokedAt *time.Time `json:"revoked_at"`
 	Expired   bool       `json:"expired"`
-}
-
-// MemberRef names the workspace member a key or sandbox belongs to.
-type MemberRef struct {
-	Email string `json:"email"`
 }
 
 // NewSandboxKey is returned by CreateSandboxKey: the key, its token and the
@@ -50,13 +44,10 @@ type SandboxKeyList struct {
 
 // CreateSandboxKeyRequest is the input to CreateSandboxKey. Region defaults to
 // the only ready region. ExpiresIn defaults to 90d; "never" means no expiry.
-// Member is the account the key belongs to; an instance admin or API key must
-// name it.
 type CreateSandboxKeyRequest struct {
 	Name      string `json:"name"`
 	Region    string `json:"region"`
 	ExpiresIn string `json:"expires_in"`
-	Member    string `json:"member"`
 }
 
 const (
@@ -68,19 +59,14 @@ const (
 // token name before the key exists.
 var sandboxKeyID = func() string { return uuid.NewV7().String() }
 
-// CreateSandboxKey mints a runner token for a member's team and returns it
-// once. An owner, admin or member may create one for themselves; a viewer
-// cannot.
+// CreateSandboxKey mints a runner token for the organization's team and
+// returns it once. An owner, admin or member may create one; a viewer cannot.
 func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSandboxKeyRequest) (NewSandboxKey, error) {
 	c, err := s.orgFor(ctx, org, accessUse)
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
 	if err := sandboxOrgReady(c.org.Status); err != nil {
-		return NewSandboxKey{}, err
-	}
-	membership, memberEmail, err := s.keyMember(ctx, c, req.Member)
-	if err != nil {
 		return NewSandboxKey{}, err
 	}
 	name, err := keyName(req.Name)
@@ -95,8 +81,8 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
-	if err := s.requireMemberShare(ctx, c.org, membership.ID, cluster); err != nil {
-		return NewSandboxKey{}, err
+	if !c.org.Team.Valid || c.org.Team.String == "" {
+		return NewSandboxKey{}, fmt.Errorf("organization %q has no team", c.org.Slug)
 	}
 	if _, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
 		return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
@@ -113,7 +99,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	token, err := mintSandboxToken(ctx, client, aerolvm.CreateTokenRequest{
 		Name:      upstreamName,
 		Role:      "runner",
-		Team:      memberTeam(membership.ID),
+		Team:      c.org.Team.String,
 		ExpiresIn: upstreamTTL,
 	})
 	if err != nil {
@@ -133,16 +119,15 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		createdBy = sql.NullString{String: c.p.UserID, Valid: true}
 	}
 	row, err := s.q.CreateSandboxKey(ctx, db.CreateSandboxKeyParams{
-		ID:           keyID,
-		OrgID:        c.org.ID,
-		MembershipID: sql.NullString{String: membership.ID, Valid: true},
-		ClusterID:    cluster.ID,
-		Name:         name,
-		UpstreamID:   token.ID,
-		Last4:        last4(token.Token),
-		CreatedBy:    createdBy,
-		CreatedAt:    now,
-		ExpiresAt:    expires,
+		ID:         keyID,
+		OrgID:      c.org.ID,
+		ClusterID:  cluster.ID,
+		Name:       name,
+		UpstreamID: token.ID,
+		Last4:      last4(token.Token),
+		CreatedBy:  createdBy,
+		CreatedAt:  now,
+		ExpiresAt:  expires,
 	})
 	if err != nil {
 		_ = client.RevokeToken(context.WithoutCancel(ctx), token.ID)
@@ -152,10 +137,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		return NewSandboxKey{}, fmt.Errorf("create sandbox key: %w", err)
 	}
 
-	if email, err := s.memberEmail(ctx, membership.UserID, memberEmail, c.p.InstanceAdmin); err == nil {
-		memberEmail = email
-	}
-	key := toSandboxKey(row, c.p.Email, c.p.InstanceAdmin, sql.NullString{String: memberEmail, Valid: true}, 0, cluster, now, c.p.InstanceAdmin)
+	key := toSandboxKey(row, c.p.Email, c.p.InstanceAdmin, cluster, now, c.p.InstanceAdmin)
 	out := NewSandboxKey{
 		SandboxKey: key,
 		Token:      token.Token,
@@ -173,22 +155,6 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		}
 	}
 	return out, nil
-}
-
-// keyMember resolves the account a new sandbox key belongs to. Only an
-// instance admin or an API key may name one; everyone else gets their own.
-func (s *Service) keyMember(ctx context.Context, c orgCaller, ref string) (db.Membership, string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref != "" {
-		if !c.p.InstanceAdmin && c.p.Kind != "key" {
-			return db.Membership{}, "", invalid("only an instance admin or an API key can choose a member")
-		}
-		return s.findMember(ctx, c.org, ref)
-	}
-	if c.p.InstanceAdmin || c.p.Kind == "key" {
-		return db.Membership{}, "", invalid("name the member this key belongs to: pass --member <email or ID>")
-	}
-	return s.findMember(ctx, c.org, c.p.UserID)
 }
 
 // ListSandboxKeys returns the organization's keys, live ones first and newest
@@ -210,7 +176,7 @@ func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyLi
 	out := SandboxKeyList{Data: make([]SandboxKey, 0, len(rows))}
 	for _, r := range rows {
 		cluster := regions[r.SandboxKey.ClusterID]
-		out.Data = append(out.Data, toSandboxKey(r.SandboxKey, r.CreatedByEmail.String, r.CreatedByAdmin != 0, r.MemberEmail, r.MemberAdmin, cluster, now, c.p.InstanceAdmin))
+		out.Data = append(out.Data, toSandboxKey(r.SandboxKey, r.CreatedByEmail.String, r.CreatedByAdmin != 0, cluster, now, c.p.InstanceAdmin))
 	}
 	return out, nil
 }
@@ -229,19 +195,15 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	var row db.SandboxKey
 	var email sql.NullString
 	var createdByAdmin bool
-	var memberEmail sql.NullString
-	var memberAdmin int64
 	if id, perr := uuid.Parse(ref); perr == nil {
 		r, err := s.q.GetSandboxKeyByID(ctx, db.GetSandboxKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
 		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
-		memberEmail, memberAdmin = r.MemberEmail, r.MemberAdmin
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
 		}
 	} else {
 		r, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: ref})
 		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
-		memberEmail, memberAdmin = r.MemberEmail, r.MemberAdmin
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
 		}
@@ -278,7 +240,7 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 		return SandboxKey{}, conflict("sandbox key %q is already revoked", ref)
 	}
 	row.RevokedAt = sql.NullTime{Time: now, Valid: true}
-	return toSandboxKey(row, email.String, createdByAdmin, memberEmail, memberAdmin, cluster, now, c.p.InstanceAdmin), nil
+	return toSandboxKey(row, email.String, createdByAdmin, cluster, now, c.p.InstanceAdmin), nil
 }
 
 // sandboxOrgReady refuses keys for an organization that is not active.
@@ -437,11 +399,11 @@ func sandboxKeyLookupErr(err error, ref string) error {
 	return nil
 }
 
-func toSandboxKey(r db.SandboxKey, createdBy string, createdByAdmin bool, memberEmail sql.NullString, memberAdmin int64, cluster db.Cluster, now time.Time, callerAdmin bool) SandboxKey {
+func toSandboxKey(r db.SandboxKey, createdBy string, createdByAdmin bool, cluster db.Cluster, now time.Time, callerAdmin bool) SandboxKey {
 	if createdByAdmin && !callerAdmin {
 		createdBy = "operator"
 	}
-	key := SandboxKey{
+	return SandboxKey{
 		ID:        r.ID,
 		Name:      r.Name,
 		Region:    toRegion(cluster),
@@ -452,12 +414,4 @@ func toSandboxKey(r db.SandboxKey, createdBy string, createdByAdmin bool, member
 		RevokedAt: nullTime(r.RevokedAt),
 		Expired:   r.ExpiresAt.Valid && !now.Before(r.ExpiresAt.Time),
 	}
-	if memberEmail.Valid {
-		email := memberEmail.String
-		if memberAdmin != 0 && !callerAdmin {
-			email = "operator"
-		}
-		key.Member = &MemberRef{Email: email}
-	}
-	return key
 }

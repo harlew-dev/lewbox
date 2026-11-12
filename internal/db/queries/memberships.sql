@@ -9,9 +9,6 @@ SELECT * FROM memberships WHERE org_id = ? AND user_id = ?;
 -- name: GetMembershipByID :one
 SELECT * FROM memberships WHERE org_id = ? AND id = ?;
 
--- name: ListAllMemberships :many
-SELECT * FROM memberships ORDER BY org_id, created_at, id;
-
 -- name: ListMembers :many
 SELECT sqlc.embed(memberships), users.email, users.instance_admin
 FROM memberships

@@ -3,13 +3,14 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/db"
 )
 
@@ -30,9 +31,8 @@ type UsageRegion struct {
 type UsageBucket struct {
 	Start time.Time `json:"start"`
 	UsageAmounts
-	PeakSandboxes int64                   `json:"peak_sandboxes"`
-	Regions       map[string]UsageRegion  `json:"regions"`
-	Members       map[string]UsageAmounts `json:"members,omitempty"`
+	PeakSandboxes int64                  `json:"peak_sandboxes"`
+	Regions       map[string]UsageRegion `json:"regions"`
 }
 
 // Usage is returned by Usage: a bucket series and its totals.
@@ -45,18 +45,17 @@ type Usage struct {
 }
 
 // UsageRequest selects a range, granularity and organization. Org is empty
-// for an instance admin's whole fleet. Member is an email or membership ID.
+// for an instance admin's whole fleet.
 type UsageRequest struct {
 	From        string `json:"from"`
 	To          string `json:"to"`
 	Granularity string `json:"granularity"`
 	Org         string `json:"org"`
-	Member      string `json:"member"`
 }
 
 // Usage returns metered usage per hour or day, zero-filled over the range.
 func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
-	scope, err := s.scopeOrg(ctx, req.Org)
+	_, org, fleet, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return Usage{}, err
 	}
@@ -91,33 +90,13 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	start := from.UTC().Truncate(step)
 	end := to.UTC().Truncate(step)
 	orgID := ""
-	if scope.org != nil {
-		orgID = scope.org.ID
+	if !fleet && org != nil {
+		orgID = org.ID
 	}
-	membershipID := ""
-	switch {
-	case scope.limited():
-		if scope.membership != nil {
-			membershipID = scope.membership.ID
-		} else {
-			membershipID = "none"
-		}
-	case strings.TrimSpace(req.Member) != "":
-		if scope.org == nil {
-			return Usage{}, invalid("choose a workspace to filter by member")
-		}
-		m, _, err := s.findMember(ctx, *scope.org, req.Member)
-		if err != nil {
-			return Usage{}, err
-		}
-		membershipID = m.ID
-	}
-
 	rows, err := s.q.ListUsageHourly(ctx, db.ListUsageHourlyParams{
-		OrgID:        orgID,
-		MembershipID: membershipID,
-		FromHour:     start,
-		ToHour:       end.Add(step),
+		OrgID:    orgID,
+		FromHour: start,
+		ToHour:   end.Add(step),
 	})
 	if err != nil {
 		return Usage{}, fmt.Errorf("list usage: %w", err)
@@ -131,31 +110,10 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 		regionSlug[cluster.ID] = cluster.Slug
 	}
 
-	breakdown := scope.org != nil && !scope.limited() &&
-		(scope.p.InstanceAdmin || scope.p.Kind == "user")
-	emails := map[string]string{}
-	if breakdown {
-		members, err := s.q.ListMembers(ctx, scope.org.ID)
-		if err != nil {
-			return Usage{}, fmt.Errorf("list members: %w", err)
-		}
-		for _, member := range members {
-			email := member.Email
-			if member.InstanceAdmin != 0 && !scope.p.InstanceAdmin {
-				email = "operator"
-			}
-			emails[member.Membership.ID] = email
-		}
-	}
-
 	buckets := make(map[time.Time]*UsageBucket)
 	order := make([]time.Time, 0)
 	for at := start; !at.After(end); at = at.Add(step) {
-		bucket := &UsageBucket{Start: at, Regions: map[string]UsageRegion{}}
-		if breakdown {
-			bucket.Members = map[string]UsageAmounts{}
-		}
-		buckets[at] = bucket
+		buckets[at] = &UsageBucket{Start: at, Regions: map[string]UsageRegion{}}
 		order = append(order, at)
 	}
 	var totals UsageAmounts
@@ -180,15 +138,6 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 			region.VcpuHours += vcpuHours
 			bucket.Regions[slug] = region
 		}
-		if breakdown && row.MembershipID != "" {
-			if email, ok := emails[row.MembershipID]; ok {
-				member := bucket.Members[email]
-				member.SandboxHours += sandboxHours
-				member.VcpuHours += vcpuHours
-				member.MemoryGiBHours += memoryGiBHours
-				bucket.Members[email] = member
-			}
-		}
 		totals.SandboxHours += sandboxHours
 		totals.VcpuHours += vcpuHours
 		totals.MemoryGiBHours += memoryGiBHours
@@ -210,9 +159,6 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 			region.VcpuHours = round3(region.VcpuHours)
 			bucket.Regions[slug] = region
 		}
-		for email, member := range bucket.Members {
-			bucket.Members[email] = roundAmounts(member)
-		}
 		out.Data = append(out.Data, *bucket)
 	}
 	return out, nil
@@ -226,15 +172,18 @@ type LimitsUsed struct {
 	MemoryMB  int64   `json:"memory_mb"`
 }
 
-// RegionLimits is one subscribed region's plan, live use and each member's
-// share.
+// RegionLimits is one subscribed region's plan, limits, live use and the
+// quota Lewbox last pushed there.
 type RegionLimits struct {
-	Slug    string         `json:"slug"`
-	Name    string         `json:"name"`
-	Plan    PlanRef        `json:"plan"`
-	Limits  Limits         `json:"limits"`
-	Used    LimitsUsed     `json:"used"`
-	Members []MemberLimits `json:"members"`
+	Slug     string             `json:"slug"`
+	Name     string             `json:"name"`
+	Plan     PlanRef            `json:"plan"`
+	Limits   Limits             `json:"limits"`
+	Used     LimitsUsed         `json:"used"`
+	Quota    *aerolvm.TeamQuota `json:"quota"`
+	Blocked  bool               `json:"blocked"`
+	PushedAt *time.Time         `json:"pushed_at"`
+	Error    string             `json:"error"`
 }
 
 // LimitsReport is returned by Limits: one entry per subscribed region.
@@ -242,14 +191,18 @@ type LimitsReport struct {
 	Regions []RegionLimits `json:"regions"`
 }
 
-// Limits returns an organization's subscribed regions with their plan, live
-// use and member shares. A member sees only their own row.
+// Limits returns an organization's subscribed regions with their plan,
+// limits, live use and pushed quota.
 func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, error) {
 	c, err := s.orgFor(ctx, orgRef, accessRead)
 	if err != nil {
 		return LimitsReport{}, err
 	}
-	data, err := s.quotaData(ctx, c.org)
+	subs, err := s.subscriptionsByCluster(ctx, c.org.ID)
+	if err != nil {
+		return LimitsReport{}, err
+	}
+	plans, err := s.planRows(ctx)
 	if err != nil {
 		return LimitsReport{}, err
 	}
@@ -261,58 +214,56 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 	for _, row := range rows {
 		usedByCluster[row.ClusterID] = LimitsUsed{Sandboxes: row.Sandboxes, Vcpus: row.Vcpus, MemoryMB: row.MemoryMb}
 	}
+	states, err := s.q.ListQuotaStates(ctx, c.org.ID)
+	if err != nil {
+		return LimitsReport{}, fmt.Errorf("list quota state: %w", err)
+	}
+	stateByCluster := make(map[string]db.QuotaState, len(states))
+	for _, state := range states {
+		stateByCluster[state.ClusterID] = state
+	}
 	clusters, err := s.q.ListClusters(ctx)
 	if err != nil {
 		return LimitsReport{}, fmt.Errorf("list clusters: %w", err)
 	}
-	limited := !c.p.InstanceAdmin && c.p.Kind == "user" && c.role != roleOwner && c.role != roleAdmin
-	var ownMembership string
-	if limited {
-		m, err := s.q.GetMembership(ctx, db.GetMembershipParams{OrgID: c.org.ID, UserID: c.p.UserID})
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return LimitsReport{}, fmt.Errorf("get membership: %w", err)
-		}
-		if err == nil {
-			ownMembership = m.ID
-		}
-	}
-	out := LimitsReport{Regions: make([]RegionLimits, 0, len(data.subs))}
+	out := LimitsReport{Regions: make([]RegionLimits, 0, len(subs))}
 	for _, cluster := range clusters {
-		limits, ok := data.limitsFor(cluster.ID)
+		sub, ok := subs[cluster.ID]
+		if !ok {
+			continue
+		}
+		plan, ok := plans[sub.PlanID]
 		if !ok {
 			continue
 		}
 		region := RegionLimits{
-			Slug:    cluster.Slug,
-			Name:    cluster.Name,
-			Plan:    data.planRef(cluster.ID),
-			Limits:  limits,
-			Used:    usedByCluster[cluster.ID],
-			Members: make([]MemberLimits, 0, len(data.members)),
+			Slug:   cluster.Slug,
+			Name:   cluster.Name,
+			Plan:   PlanRef{Slug: plan.Slug, Name: plan.Name},
+			Limits: effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb),
+			Used:   usedByCluster[cluster.ID],
 		}
-		for _, member := range data.members {
-			if limited && member.Membership.ID != ownMembership {
-				continue
+		if state, ok := stateByCluster[cluster.ID]; ok {
+			at := state.PushedAt.UTC()
+			region.PushedAt = &at
+			if state.Error != "" {
+				if c.p.InstanceAdmin {
+					region.Error = state.Error
+				} else {
+					region.Error = "the region reported an error while syncing"
+				}
 			}
-			region.Members = append(region.Members, data.memberLimits(cluster, member.Membership.ID, c.p.InstanceAdmin))
+			if state.Quota != "none" {
+				var quota aerolvm.TeamQuota
+				if json.Unmarshal([]byte(state.Quota), &quota) == nil {
+					region.Quota = &quota
+					region.Blocked = isBlockingQuota(quota)
+				}
+			}
 		}
-		sort.SliceStable(region.Members, func(i, j int) bool { return region.Members[i].Email < region.Members[j].Email })
 		out.Regions = append(out.Regions, region)
 	}
 	return out, nil
-}
-
-// planRef is the plan on one subscribed region.
-func (d quotaData) planRef(clusterID string) PlanRef {
-	sub, ok := d.subs[clusterID]
-	if !ok {
-		return PlanRef{}
-	}
-	plan, ok := d.plans[sub.PlanID]
-	if !ok {
-		return PlanRef{}
-	}
-	return PlanRef{Slug: plan.Slug, Name: plan.Name}
 }
 
 // parseUsageTime accepts an RFC3339 timestamp or a date, which is midnight
@@ -328,7 +279,7 @@ func parseUsageTime(raw string, def time.Time) (time.Time, error) {
 	if t, err := time.Parse("2006-01-02", raw); err == nil {
 		return t.UTC(), nil
 	}
-	return time.Time{}, fmt.Errorf("use a date (2026-11-01) or an RFC3339 timestamp")
+	return time.Time{}, errors.New("use a date (2026-11-01) or an RFC3339 timestamp")
 }
 
 func roundAmounts(a UsageAmounts) UsageAmounts {

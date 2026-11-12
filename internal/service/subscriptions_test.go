@@ -14,7 +14,7 @@ func TestDeleteSubscription(t *testing.T) {
 	if !ok {
 		t.Fatalf("upstream token %q not found", key.Token)
 	}
-	f.fake.AddSandbox(f.team, startedSandbox("sb-1", 1, 512))
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
 	if err := f.s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
@@ -33,11 +33,7 @@ func TestDeleteSubscription(t *testing.T) {
 	if err != nil || len(subs.Data) != 0 {
 		t.Errorf("subscriptions after remove = %+v, %v", subs, err)
 	}
-	keys, err := f.s.ListSandboxKeys(f.root, "acme")
-	if err != nil || len(keys.Data) != 1 || keys.Data[0].RevokedAt == nil {
-		t.Errorf("keys after remove = %+v, %v", keys, err)
-	}
-	pushes := f.fake.QuotaPushes(f.team)
+	pushes := f.fake.QuotaPushes(f.org.Team)
 	last := pushes[len(pushes)-1]
 	if last.MaxCPU != blockingCPU || last.MaxMemoryMB != blockingMemoryMB {
 		t.Errorf("quota after remove = %+v", last)

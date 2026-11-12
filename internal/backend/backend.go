@@ -62,7 +62,6 @@ type Backend interface {
 	AddMember(ctx context.Context, org string, req service.AddMemberRequest) (service.Member, error)
 	SetMemberRole(ctx context.Context, org, ref string, req service.SetMemberRoleRequest) (service.Member, error)
 	RemoveMember(ctx context.Context, org, ref string) (service.Member, error)
-	SetMemberShares(ctx context.Context, org, ref, region string, req service.SetMemberSharesRequest) (service.MemberLimits, error)
 
 	ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error)
 	CreateAdminKey(ctx context.Context, org string, req service.CreateAdminKeyRequest) (service.NewAdminKey, error)
@@ -303,11 +302,6 @@ func (l Local) SetMemberRole(ctx context.Context, org, ref string, req service.S
 // RemoveMember removes a member.
 func (l Local) RemoveMember(ctx context.Context, org, ref string) (service.Member, error) {
 	return l.Svc.RemoveMember(l.withPrincipal(ctx), org, ref)
-}
-
-// SetMemberShares sets a member's explicit share in one region.
-func (l Local) SetMemberShares(ctx context.Context, org, ref, region string, req service.SetMemberSharesRequest) (service.MemberLimits, error) {
-	return l.Svc.SetMemberShares(l.withPrincipal(ctx), org, ref, region, req)
 }
 
 // ListAdminKeys returns an organization's admin keys.
