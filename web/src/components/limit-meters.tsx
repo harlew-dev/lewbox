@@ -1,7 +1,10 @@
+import { ErrorNotice, ListSkeleton, Subheading, Text } from '@harlew-dev/ui'
 import { Meter } from '@harlew-dev/ui/chart'
 import type { Level } from '@harlew-dev/ui'
 import type * as api from '../lib/api'
 import { formatMemory, formatNumber } from '../lib/format'
+import type { LoadState } from '../lib/use-load'
+import { noRegionText } from './no-region'
 
 function level(used: number, limit: number): Level {
   if (used >= limit) return 'critical'
@@ -9,12 +12,12 @@ function level(used: number, limit: number): Level {
   return 'ok'
 }
 
-// Live use against each limit, across every region together.
-export function LimitMeters({ report }: { report: api.LimitsReport }) {
+// Live use against each of one region's limits.
+export function LimitMeters({ limits, used }: { limits: api.Limits; used: api.LimitsUsed }) {
   const rows = [
-    { label: 'Sandboxes', used: report.used.sandboxes, limit: report.limits.sandboxes, format: (v: number) => formatNumber(v, 0) },
-    { label: 'vCPUs', used: report.used.vcpus, limit: report.limits.vcpus, format: (v: number) => formatNumber(v) },
-    { label: 'Memory', used: report.used.memory_mb, limit: report.limits.memory_mb, format: formatMemory },
+    { label: 'Sandboxes', used: used.sandboxes, limit: limits.sandboxes, format: (v: number) => formatNumber(v, 0) },
+    { label: 'vCPUs', used: used.vcpus, limit: limits.vcpus, format: (v: number) => formatNumber(v) },
+    { label: 'Memory', used: used.memory_mb, limit: limits.memory_mb, format: formatMemory },
   ]
   return (
     <dl className="grid gap-6 sm:grid-cols-3">
@@ -37,5 +40,35 @@ export function LimitMeters({ report }: { report: api.LimitsReport }) {
         )
       })}
     </dl>
+  )
+}
+
+// Each subscribed region: its name, its plan, and a meter per limit.
+export function RegionLimits({ limits, title = 'Limits' }: { limits: LoadState<api.LimitsReport>; title?: string }) {
+  return (
+    <>
+      <Subheading className="mt-14 mb-6">{title}</Subheading>
+      {limits.data ? (
+        limits.data.regions.length === 0 ? (
+          <Text>{noRegionText}</Text>
+        ) : (
+          <div className="space-y-10">
+            {limits.data.regions.map((region) => (
+              <section key={region.slug} aria-label={`${region.name} limits`}>
+                <div className="mb-4 flex items-baseline gap-2 text-sm/6">
+                  <span className="font-semibold text-zinc-950 dark:text-white">{region.name}</span>
+                  <span className="text-zinc-500 dark:text-zinc-400">{region.plan.name} plan</span>
+                </div>
+                <LimitMeters limits={region.limits} used={region.used} />
+              </section>
+            ))}
+          </div>
+        )
+      ) : limits.error.message ? (
+        <ErrorNotice error={limits.error} onRetry={limits.reload} />
+      ) : (
+        <ListSkeleton label="Loading limits" rows={1} />
+      )}
+    </>
   )
 }

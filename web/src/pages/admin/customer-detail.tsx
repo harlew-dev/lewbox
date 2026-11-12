@@ -1,14 +1,16 @@
 import {
   Button,
-  DescriptionDetails,
-  DescriptionList,
-  DescriptionTerm,
+  ConfirmationDialog,
   Description,
   Dialog,
   DialogActions,
   DialogBody,
   DialogDescription,
   DialogTitle,
+  Dropdown,
+  DropdownButton,
+  DropdownItem,
+  DropdownMenu,
   EmptyState,
   ErrorNotice,
   Field,
@@ -20,51 +22,51 @@ import {
   ListSkeleton,
   PageHeader,
   PageTabs,
-  Stat,
   Subheading,
+  Text,
   tabFrom,
   toast,
   useAction,
 } from '@harlew-dev/ui'
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
+import { EllipsisHorizontalIcon, PencilIcon, TrashIcon } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useRefreshPending } from '../../components/console-layout'
-import { LimitMeters } from '../../components/limit-meters'
 import { SandboxTable } from '../../components/sandbox-table'
+import { Snapshots } from '../../components/snapshot-table'
+import { SubscriptionTable } from '../../components/subscription-table'
 import { UsageSummary } from '../../components/usage-summary'
 import * as api from '../../lib/api'
-import { daysAgo, formatLimit, formatMemory, formatMoney, formatNumber } from '../../lib/format'
-import { useInstance } from '../../lib/instance'
+import { daysAgo, formatLimit, formatMemory, formatNumber } from '../../lib/format'
+import { invalidLimitReason, limitText, parseLimit, validLimits } from '../../lib/limits'
 import { orgPermissions } from '../../lib/organizations'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { MembersSection } from '../organizations/members'
 import { OrgStatusBadge } from '../organizations/roles'
-import { CreditTable } from '../portal/billing'
 import { SandboxKeyTable } from '../portal/keys'
 import { SuspendDialog } from './customers'
 
 const back = { href: '/admin/customers', label: 'Customers' }
 
+const tabs = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'sandboxes', label: 'Sandboxes' },
+  { id: 'keys', label: 'API keys' },
+  { id: 'snapshots', label: 'Snapshots' },
+  { id: 'members', label: 'Members' },
+] as const
+
 export function CustomerDetailPage() {
   const { org: slug = '' } = useParams()
   const navigate = useNavigate()
   const refreshPending = useRefreshPending()
-  const { billing } = useInstance()
   const [searchParams] = useSearchParams()
   const customer = useLoad(() => api.getOrganization(slug), [slug])
   const org = customer.data
   useDocumentTitle(org?.name ?? 'Customer')
-  const [dialog, setDialog] = useState<'limits' | 'credits' | 'suspend' | 'member' | null>(null)
-
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'sandboxes', label: 'Sandboxes' },
-    { id: 'keys', label: 'API keys' },
-    { id: 'members', label: 'Members' },
-    ...(billing !== 'off' ? [{ id: 'credits', label: 'Credits' }] : []),
-  ]
+  const [dialog, setDialog] = useState<'suspend' | 'member' | null>(null)
   const tab = tabFrom(searchParams, tabs)
 
   const setStatus = useAction(
@@ -91,7 +93,7 @@ export function CustomerDetailPage() {
     return (
       <EmptyState
         title="Customer not found"
-        description={`There is no customer ${slug}.`}
+        description={`There is no workspace ${slug}.`}
         action={<Button href="/admin/customers">All customers</Button>}
       />
     )
@@ -106,42 +108,38 @@ export function CustomerDetailPage() {
   }
 
   const can = orgPermissions(org, true)
-  const actions = (
-    <>
-      {org.status === 'active' ? (
-        <Button outline onClick={() => setDialog('suspend')}>
-          Suspend
-        </Button>
-      ) : (
-        <Button loading={setStatus.loading} onClick={() => void setStatus.run('active')}>
-          {org.status === 'pending' ? 'Approve' : 'Restore'}
-        </Button>
-      )}
-      <Button outline onClick={() => setDialog('limits')}>
-        Change plan
+  const actions =
+    org.status === 'active' ? (
+      <Button outline onClick={() => setDialog('suspend')}>
+        Suspend
       </Button>
-      {billing !== 'off' && (
-        <Button outline onClick={() => setDialog('credits')}>
-          Add credits
-        </Button>
-      )}
-    </>
-  )
+    ) : (
+      <Button loading={setStatus.loading} onClick={() => void setStatus.run('active')}>
+        {org.status === 'pending' ? 'Approve' : 'Restore'}
+      </Button>
+    )
 
   return (
     <>
       <PageHeader
         back={back}
         title={org.name}
-        meta={<OrgStatusBadge status={org.status} reason={org.status_reason} />}
-        description={`${org.slug} · ${org.plan?.name ?? 'No'} plan`}
+        meta={<OrgStatusBadge status={org.status} />}
+        description={org.slug}
         actions={actions}
       />
       <PageTabs label="Customer views" tabs={tabs} current={tab} className="mb-8" />
 
-      {tab === 'overview' && <CustomerOverview org={org} onEdit={() => setDialog('limits')} />}
+      {tab === 'overview' && <CustomerOverview org={org} onChanged={changed} />}
       {tab === 'sandboxes' && <CustomerSandboxes org={org} />}
       {tab === 'keys' && <CustomerKeys org={org} />}
+      {tab === 'snapshots' && (
+        <Snapshots
+          org={org.slug}
+          canDelete
+          empty={<EmptyState title="No snapshots" description={`${org.name} hasn’t taken a snapshot.`} />}
+        />
+      )}
       {tab === 'members' && (
         <>
           <div className="mb-4 flex justify-end">
@@ -158,59 +156,280 @@ export function CustomerDetailPage() {
           />
         </>
       )}
-      {tab === 'credits' && <CustomerCredits org={org} />}
 
-      <LimitsDialog open={dialog === 'limits'} org={org} onClose={() => setDialog(null)} onSaved={changed} />
-      <AddCreditsDialog open={dialog === 'credits'} org={org} onClose={() => setDialog(null)} onAdded={changed} />
       <SuspendDialog org={dialog === 'suspend' ? org : null} onClose={() => setDialog(null)} onSuspended={changed} />
     </>
   )
 }
 
-function CustomerOverview({ org, onEdit }: { org: api.Organization; onEdit: () => void }) {
-  const { currency } = useInstance()
-  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+function CustomerOverview({ org, onChanged }: { org: api.Organization; onChanged: () => void }) {
   const usage = useLoad(() => api.getUsage({ org: org.slug, from: daysAgo(30), granularity: 'day' }), [org.slug])
-  const overridden = (key: keyof api.Limits) => org.overrides?.[key] != null
+  return (
+    <>
+      <Regions org={org} onChanged={onChanged} />
+      <Subheading className="mt-14 mb-6">Usage, last 30 days</Subheading>
+      <UsageSummary usage={usage} onRetry={usage.reload} />
+    </>
+  )
+}
+
+type Editing = { subscription: api.Subscription | null } | null
+
+// The workspace's plan in each region, with what it uses there now.
+function Regions({ org, onChanged }: { org: api.Organization; onChanged: () => void }) {
+  const subscriptions = useLoad(() => api.listSubscriptions(org.slug), [org.slug])
+  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+  const regions = useLoad(() => api.listRegions(), [])
+  const [editing, setEditing] = useState<Editing>(null)
+  const [removing, setRemoving] = useState<api.Subscription | null>(null)
+  const list = subscriptions.data?.data ?? []
+  const used = new Map((limits.data?.regions ?? []).map((region) => [region.slug, region.used]))
+  const subscribed = new Set(list.map((subscription) => subscription.region.slug))
+  const free = (regions.data?.data ?? []).filter((region) => !subscribed.has(region.slug))
+
+  function saved() {
+    subscriptions.refresh()
+    limits.refresh()
+    onChanged()
+  }
 
   return (
     <>
-      <div className="flex items-end justify-between gap-4">
-        <Subheading>Limits</Subheading>
-        <Button plain onClick={onEdit}>
-          Edit
+      <div className="mb-4 flex items-end justify-between gap-4">
+        <Subheading>Regions</Subheading>
+        <Button
+          outline
+          onClick={() => setEditing({ subscription: null })}
+          disabled={!regions.data || free.length === 0}
+          disabledReason={regions.data ? 'It has a plan in every region' : 'Loading regions'}
+        >
+          Add region
         </Button>
       </div>
-      <DescriptionList className="mt-2">
-        <DescriptionTerm>Sandboxes at once</DescriptionTerm>
-        <DescriptionDetails>
-          {formatLimit(org.limits.sandboxes)}
-          {overridden('sandboxes') && ' (override)'}
-        </DescriptionDetails>
-        <DescriptionTerm>vCPUs</DescriptionTerm>
-        <DescriptionDetails>
-          {formatLimit(org.limits.vcpus)}
-          {overridden('vcpus') && ' (override)'}
-        </DescriptionDetails>
-        <DescriptionTerm>Memory</DescriptionTerm>
-        <DescriptionDetails>
-          {formatLimit(org.limits.memory_mb, formatMemory)}
-          {overridden('memory_mb') && ' (override)'}
-        </DescriptionDetails>
-      </DescriptionList>
-
-      <Subheading className="mt-12 mb-6">In use now</Subheading>
-      {limits.data ? (
-        <LimitMeters report={limits.data} />
-      ) : limits.error.message ? (
-        <ErrorNotice error={limits.error} onRetry={limits.reload} />
+      {subscriptions.loading && !subscriptions.data ? (
+        <ListSkeleton label="Loading regions" rows={2} />
+      ) : subscriptions.error.message ? (
+        <ErrorNotice error={subscriptions.error} onRetry={subscriptions.reload} />
+      ) : list.length === 0 ? (
+        <Text>No regions. {org.name} can’t run sandboxes until you add one.</Text>
       ) : (
-        <ListSkeleton label="Loading limits" rows={1} />
+        <SubscriptionTable
+          subscriptions={list}
+          used={used}
+          actions={(subscription) => (
+            <Dropdown>
+              <DropdownButton as={Button} plain aria-label={`Actions for ${subscription.region.name}`}>
+                <EllipsisHorizontalIcon />
+              </DropdownButton>
+              <DropdownMenu anchor="bottom end">
+                <DropdownItem onClick={() => setEditing({ subscription })}>
+                  <PencilIcon data-slot="icon" />
+                  Change plan
+                </DropdownItem>
+                <DropdownItem variant="danger" onClick={() => setRemoving(subscription)}>
+                  <TrashIcon data-slot="icon" />
+                  Remove region
+                </DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
+          )}
+        />
       )}
 
-      <Subheading className="mt-12 mb-6">Usage, last 30 days</Subheading>
-      <UsageSummary usage={usage} currency={currency} onRetry={usage.reload} />
+      <SubscriptionDialog editing={editing} org={org} regions={free} onClose={() => setEditing(null)} onSaved={saved} />
+      <RemoveRegionDialog org={org} subscription={removing} onClose={() => setRemoving(null)} onRemoved={saved} />
     </>
+  )
+}
+
+// Removing a region revokes the workspace's keys there. When a key can't be
+// revoked the API answers 502; the operator can then remove it anyway.
+function RemoveRegionDialog({
+  org,
+  subscription,
+  onClose,
+  onRemoved,
+}: {
+  org: api.Organization
+  subscription: api.Subscription | null
+  onClose: () => void
+  onRemoved: () => void
+}) {
+  const [force, setForce] = useState(false)
+  const name = subscription?.region.name ?? 'region'
+  return (
+    <ConfirmationDialog
+      open={subscription !== null}
+      onClose={() => {
+        setForce(false)
+        onClose()
+      }}
+      title={`Remove ${name}?`}
+      description={
+        force
+          ? `Its API keys in ${name} couldn’t all be revoked. Removing it anyway leaves those keys on the region until it can be reached.`
+          : `${org.name}’s API keys in ${name} are revoked and its sandboxes there are stopped. Its sandboxes and usage history stay.`
+      }
+      confirm={force ? 'Remove anyway' : 'Remove region'}
+      variant="danger"
+      onConfirm={async () => {
+        if (subscription) await api.deleteSubscription(org.slug, subscription.region.slug, force)
+      }}
+      onError={(failure) => {
+        if (failure instanceof api.ApiError && failure.status === 502) setForce(true)
+      }}
+      onConfirmed={() => {
+        setForce(false)
+        toast.success(`${name} removed.`)
+        onRemoved()
+      }}
+    />
+  )
+}
+
+function SubscriptionDialog({
+  editing,
+  org,
+  regions,
+  onClose,
+  onSaved,
+}: {
+  editing: Editing
+  org: api.Organization
+  regions: api.Region[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const count = useOpenCount(editing !== null)
+  return (
+    <Dialog open={editing !== null} onClose={onClose} size="lg">
+      {editing && (
+        <SubscriptionForm
+          key={count}
+          subscription={editing.subscription}
+          org={org}
+          regions={regions}
+          onClose={onClose}
+          onSaved={onSaved}
+        />
+      )}
+    </Dialog>
+  )
+}
+
+function SubscriptionForm({
+  subscription,
+  org,
+  regions,
+  onClose,
+  onSaved,
+}: {
+  subscription: api.Subscription | null
+  org: api.Organization
+  regions: api.Region[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const plans = useLoad(() => api.listPlans(), [])
+  const [region, setRegion] = useState(subscription?.region.slug ?? regions[0]?.slug ?? '')
+  const [plan, setPlan] = useState(subscription?.plan.slug ?? '')
+  const [sandboxes, setSandboxes] = useState(limitText(subscription?.overrides?.sandboxes))
+  const [vcpus, setVcpus] = useState(limitText(subscription?.overrides?.vcpus))
+  const [memory, setMemory] = useState(limitText(subscription?.overrides?.memory_mb))
+  const list = plans.data?.data ?? []
+  const chosen = list.find((option) => option.slug === (plan || list.find((p) => p.default)?.slug))
+  const planSlug = chosen?.slug ?? ''
+  const valid = validLimits(sandboxes, vcpus, memory)
+
+  const save = useAction(
+    () =>
+      api.setSubscription(org.slug, region, {
+        plan: planSlug,
+        max_sandboxes: parseLimit(sandboxes),
+        max_vcpus: parseLimit(vcpus),
+        max_memory_mb: parseLimit(memory),
+      }),
+    { toError: (failure) => ({ message: failureMessage(failure) }) },
+  )
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    const result = await save.run()
+    if (result.ok) {
+      toast.success(subscription ? `${result.value.region.name} saved.` : `${result.value.region.name} added.`)
+      onSaved()
+      onClose()
+    }
+  }
+
+  const placeholder = (value: number | null | undefined, format = (v: number) => formatNumber(v)) =>
+    chosen ? `Plan: ${formatLimit(value ?? null, format)}` : 'Plan’s limit'
+
+  return (
+    <form onSubmit={submit}>
+      <DialogTitle>{subscription ? `${subscription.region.name} plan` : 'Add a region'}</DialogTitle>
+      <DialogDescription>
+        {subscription
+          ? `What ${org.name} may run in ${subscription.region.name}.`
+          : `${org.name} can create keys and run sandboxes there, up to the plan’s limits.`}
+      </DialogDescription>
+      <DialogBody>
+        <FieldGroup>
+          <ErrorNotice error={save.error} />
+          <ErrorNotice error={plans.error} onRetry={plans.reload} />
+          {!subscription && (
+            <Field disabled={save.busy}>
+              <Label>Region</Label>
+              <Listbox value={region} onChange={setRegion} placeholder="Choose a region">
+                {regions.map((option) => (
+                  <ListboxOption key={option.slug} value={option.slug}>
+                    {option.name}
+                  </ListboxOption>
+                ))}
+              </Listbox>
+            </Field>
+          )}
+          <Field disabled={save.busy || !plans.data}>
+            <Label>Plan</Label>
+            <Listbox value={planSlug} onChange={setPlan} placeholder="Choose a plan">
+              {list.map((option) => (
+                <ListboxOption key={option.slug} value={option.slug}>
+                  {option.name}
+                </ListboxOption>
+              ))}
+            </Listbox>
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field disabled={save.busy}>
+              <Label>Sandboxes</Label>
+              <Input type="number" min={1} step={1} value={sandboxes} placeholder={placeholder(chosen?.max_sandboxes)} onChange={(event) => setSandboxes(event.currentTarget.value)} />
+            </Field>
+            <Field disabled={save.busy}>
+              <Label>vCPUs</Label>
+              <Input type="number" min={1} step={1} value={vcpus} placeholder={placeholder(chosen?.max_vcpus)} onChange={(event) => setVcpus(event.currentTarget.value)} />
+            </Field>
+            <Field disabled={save.busy}>
+              <Label>Memory (MB)</Label>
+              <Input type="number" min={1} step={1} value={memory} placeholder={placeholder(chosen?.max_memory_mb, formatMemory)} onChange={(event) => setMemory(event.currentTarget.value)} />
+            </Field>
+          </div>
+          <Description>An override replaces the plan’s limit in this region only. Leave it empty to use the plan’s.</Description>
+        </FieldGroup>
+      </DialogBody>
+      <DialogActions>
+        <Button plain onClick={onClose} disabled={save.busy}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          loading={save.loading}
+          disabled={region === '' || planSlug === '' || !valid}
+          disabledReason={valid ? 'Fill in required fields' : invalidLimitReason}
+        >
+          {subscription ? 'Save' : 'Add region'}
+        </Button>
+      </DialogActions>
+    </form>
   )
 }
 
@@ -230,205 +449,4 @@ function CustomerKeys({ org }: { org: api.Organization }) {
   if (keys.error.message) return <ErrorNotice error={keys.error} onRetry={keys.reload} />
   if (list.length === 0) return <EmptyState title="No API keys" description={`${org.name} hasn’t created a key yet.`} />
   return <SandboxKeyTable keys={list} org={org.slug} canRevoke onRevoked={keys.refresh} />
-}
-
-function CustomerCredits({ org }: { org: api.Organization }) {
-  const credits = useLoad(() => api.getCredits(org.slug), [org.slug])
-  const data = credits.data
-  if (credits.loading && !data) return <ListSkeleton label="Loading credits" rows={3} />
-  if (credits.error.message || !data) return <ErrorNotice error={credits.error} onRetry={credits.reload} />
-  return (
-    <>
-      <div className="grid gap-8 sm:grid-cols-3">
-        <Stat title="Balance" value={formatMoney(data.balance_micros, data.currency)} />
-        <Stat title="Spent this month" value={formatMoney(data.month_spend_micros, data.currency)} />
-        <Stat title="Monthly credits" value={formatMoney(data.monthly_credits_micros, data.currency)} />
-      </div>
-      <Subheading className="mt-12 mb-4">Transactions</Subheading>
-      <CreditTable credits={data} />
-    </>
-  )
-}
-
-// "" is no override (the plan's limit).
-function limitText(value: number | null | undefined): string {
-  return value == null ? '' : String(value)
-}
-
-function parseLimit(text: string): number | null {
-  return text.trim() === '' ? null : Number(text)
-}
-
-function LimitsDialog({
-  open,
-  org,
-  onClose,
-  onSaved,
-}: {
-  open: boolean
-  org: api.Organization
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const count = useOpenCount(open)
-  return (
-    <Dialog open={open} onClose={onClose} size="lg">
-      <LimitsForm key={count} org={org} onClose={onClose} onSaved={onSaved} />
-    </Dialog>
-  )
-}
-
-function LimitsForm({ org, onClose, onSaved }: { org: api.Organization; onClose: () => void; onSaved: () => void }) {
-  const plans = useLoad(() => api.listPlans(), [])
-  const [plan, setPlan] = useState(org.plan?.slug ?? '')
-  const [sandboxes, setSandboxes] = useState(limitText(org.overrides?.sandboxes))
-  const [vcpus, setVcpus] = useState(limitText(org.overrides?.vcpus))
-  const [memory, setMemory] = useState(limitText(org.overrides?.memory_mb))
-  const chosen = plans.data?.data.find((option) => option.slug === plan)
-
-  const save = useAction(
-    () => {
-      const input: api.OrganizationUpdate = {}
-      if (plan && plan !== org.plan?.slug) input.plan = plan
-      const fields = [
-        ['max_sandboxes', sandboxes, org.overrides?.sandboxes],
-        ['max_vcpus', vcpus, org.overrides?.vcpus],
-        ['max_memory_mb', memory, org.overrides?.memory_mb],
-      ] as const
-      for (const [key, text, before] of fields) {
-        const value = parseLimit(text)
-        if (value !== (before ?? null)) input[key] = value
-      }
-      return api.updateOrganization(org.slug, input)
-    },
-    { toError: (failure) => ({ message: failureMessage(failure) }) },
-  )
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    const result = await save.run()
-    if (result.ok) {
-      toast.success('Plan and limits saved.')
-      onSaved()
-      onClose()
-    }
-  }
-
-  const placeholder = (value: number | null | undefined, format = (v: number) => formatNumber(v)) =>
-    chosen ? `Plan: ${formatLimit(value ?? null, format)}` : 'Plan’s limit'
-
-  return (
-    <form onSubmit={submit}>
-      <DialogTitle>Plan and limits</DialogTitle>
-      <DialogDescription>An override replaces the plan’s limit for {org.name} only. Leave it empty to use the plan’s.</DialogDescription>
-      <DialogBody>
-        <FieldGroup>
-          <ErrorNotice error={save.error} />
-          <ErrorNotice error={plans.error} onRetry={plans.reload} />
-          <Field disabled={save.busy || !plans.data}>
-            <Label>Plan</Label>
-            <Listbox value={plan} onChange={setPlan}>
-              {(plans.data?.data ?? []).map((option) => (
-                <ListboxOption key={option.slug} value={option.slug}>
-                  {option.name}
-                </ListboxOption>
-              ))}
-            </Listbox>
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field disabled={save.busy}>
-              <Label>Sandboxes</Label>
-              <Input type="number" min={0} step={1} value={sandboxes} placeholder={placeholder(chosen?.max_sandboxes)} onChange={(event) => setSandboxes(event.currentTarget.value)} />
-            </Field>
-            <Field disabled={save.busy}>
-              <Label>vCPUs</Label>
-              <Input type="number" min={0} step={1} value={vcpus} placeholder={placeholder(chosen?.max_vcpus)} onChange={(event) => setVcpus(event.currentTarget.value)} />
-            </Field>
-            <Field disabled={save.busy}>
-              <Label>Memory (MB)</Label>
-              <Input type="number" min={0} step={1} value={memory} placeholder={placeholder(chosen?.max_memory_mb)} onChange={(event) => setMemory(event.currentTarget.value)} />
-            </Field>
-          </div>
-          <Description>Limits hold across every region together.</Description>
-        </FieldGroup>
-      </DialogBody>
-      <DialogActions>
-        <Button plain onClick={onClose} disabled={save.busy}>
-          Cancel
-        </Button>
-        <Button type="submit" loading={save.loading}>
-          Save
-        </Button>
-      </DialogActions>
-    </form>
-  )
-}
-
-function AddCreditsDialog({
-  open,
-  org,
-  onClose,
-  onAdded,
-}: {
-  open: boolean
-  org: api.Organization
-  onClose: () => void
-  onAdded: () => void
-}) {
-  const count = useOpenCount(open)
-  return (
-    <Dialog open={open} onClose={onClose} size="md">
-      <AddCredits key={count} org={org} onClose={onClose} onAdded={onAdded} />
-    </Dialog>
-  )
-}
-
-function AddCredits({ org, onClose, onAdded }: { org: api.Organization; onClose: () => void; onAdded: () => void }) {
-  const { currency } = useInstance()
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
-  const micros = Math.round(Number(amount) * 1e6)
-  const valid = amount.trim() !== '' && Number.isFinite(micros) && micros !== 0
-  const add = useAction(() => api.addCredits(org.slug, { amount_micros: micros, note: note.trim() }), {
-    toError: (failure) => ({ message: failureMessage(failure) }),
-  })
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    const result = await add.run()
-    if (result.ok) {
-      toast.success(`${formatMoney(micros, currency)} ${micros > 0 ? 'added' : 'removed'}.`)
-      onAdded()
-      onClose()
-    }
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <DialogTitle>Add credits</DialogTitle>
-      <DialogDescription>A negative amount removes credits from {org.name}.</DialogDescription>
-      <DialogBody>
-        <FieldGroup>
-          <ErrorNotice error={add.error} />
-          <Field disabled={add.busy}>
-            <Label>Amount{currency ? ` (${currency})` : ''}</Label>
-            <Input type="number" step="0.01" required autoFocus value={amount} placeholder="25.00" onChange={(event) => setAmount(event.currentTarget.value)} />
-          </Field>
-          <Field disabled={add.busy}>
-            <Label>Note</Label>
-            <Input value={note} placeholder="Invoice 1042" onChange={(event) => setNote(event.currentTarget.value)} />
-            <Description>The customer sees it on their Billing page.</Description>
-          </Field>
-        </FieldGroup>
-      </DialogBody>
-      <DialogActions>
-        <Button plain onClick={onClose} disabled={add.busy}>
-          Cancel
-        </Button>
-        <Button type="submit" loading={add.loading} disabled={!valid} disabledReason="Enter an amount">
-          Add credits
-        </Button>
-      </DialogActions>
-    </form>
-  )
 }

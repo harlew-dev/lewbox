@@ -5,7 +5,7 @@ import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '..
 const signedOut = () => json(401, { error: { code: 'unauthorized', message: 'session expired or invalid' } })
 
 function instance(signup: string) {
-  return () => json(200, { name: 'Acme Cloud', signup, billing: 'off', currency: '' })
+  return () => json(200, { name: 'Acme Cloud', signup })
 }
 
 describe('sign-up', () => {
@@ -43,7 +43,7 @@ describe('sign-up', () => {
 
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'dev@acme.test' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
-    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'Acme' } })
+    fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'Acme' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(await screen.findByRole('heading', { name: 'Get started' })).toBeInTheDocument()

@@ -1,6 +1,10 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+
+// Pages load lazily, so under a full parallel run the first findBy can wait
+// on a chunk; one second is too tight for that.
+configure({ asyncUtilTimeout: 5000 })
 
 afterEach(() => {
   cleanup()

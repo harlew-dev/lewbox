@@ -21,7 +21,7 @@ export function SandboxesPage() {
   return (
     <>
       <PageHeader title="Sandboxes" description="Every sandbox in every region. Refreshes every 10 seconds." />
-      <SandboxFilters region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
+      <SandboxFilters org={org.slug} region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
 
       {sandboxes.loading && !sandboxes.data ? (
         <ListSkeleton label="Loading sandboxes" rows={4} />

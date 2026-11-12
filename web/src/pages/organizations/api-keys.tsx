@@ -82,7 +82,7 @@ export function AdminKeysSection({
       ) : list.length === 0 ? (
         <EmptyState
           title="No management API keys"
-          description="A key lets your own backend call the Lewbox API as this organization."
+          description="A key lets your own backend call the Lewbox API as this workspace."
         />
       ) : (
         <Table>

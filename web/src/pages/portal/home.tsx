@@ -9,14 +9,13 @@ import {
   Stat,
   Step,
   Steps,
-  Subheading,
   Text,
 } from '@harlew-dev/ui'
 import { useState } from 'react'
 import * as api from '../../lib/api'
-import { LimitMeters } from '../../components/limit-meters'
-import { formatMoney, formatNumber, monthStart } from '../../lib/format'
-import { useInstance } from '../../lib/instance'
+import { RegionLimits } from '../../components/limit-meters'
+import { NoRegion } from '../../components/no-region'
+import { formatNumber, monthStart } from '../../lib/format'
 import { sandboxSnippets } from '../../lib/snippets'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
@@ -25,6 +24,19 @@ import { usePortalOrg } from './portal-route'
 
 export function HomePage() {
   useDocumentTitle('Home')
+  const { org } = usePortalOrg()
+  if (org.regions.length === 0) {
+    return (
+      <>
+        <PageHeader title={org.name} />
+        <NoRegion />
+      </>
+    )
+  }
+  return <Home />
+}
+
+function Home() {
   const { org } = usePortalOrg()
   const usage = useLoad(() => api.getUsage({ org: org.slug, from: monthStart() }), [org.slug])
   const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug])
@@ -57,14 +69,15 @@ export function HomePage() {
 function GetStarted({ onDone }: { onDone: () => void }) {
   const { org, can } = usePortalOrg()
   const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
-  const regions = useLoad(() => api.listRegions(), [])
+  const regions = useLoad(() => api.listRegions(org.slug), [org.slug])
   const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug], { every: 5_000 })
   const [createOpen, setCreateOpen] = useState(false)
   const [created, setCreated] = useState<api.NewSandboxKey | null>(null)
 
   const live = (keys.data?.data ?? []).filter((key) => !key.revoked_at && !key.expired)
   const key = created ?? live[0] ?? null
-  const region = key?.region ?? regions.data?.data[0] ?? null
+  const subscribed = new Set(org.regions.map((option) => option.slug))
+  const region = key?.region ?? regions.data?.data.find((option) => subscribed.has(option.slug)) ?? null
   const snippets = region ? sandboxSnippets(region, created?.token) : null
   const first = (sandboxes.data?.data.length ?? 0) > 0
 
@@ -109,7 +122,7 @@ function GetStarted({ onDone }: { onDone: () => void }) {
       </Steps>
       <CreateKeyDialog
         open={createOpen}
-        org={org.slug}
+        org={org}
         onClose={() => setCreateOpen(false)}
         onCreated={(value) => {
           setCreated(value)
@@ -122,48 +135,20 @@ function GetStarted({ onDone }: { onDone: () => void }) {
 
 function Dashboard({ usage, running }: { usage: api.Usage | null; running: api.Sandbox[] }) {
   const { org } = usePortalOrg()
-  const { billing, currency } = useInstance()
   const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
-  const credits = useLoad(
-    () => (billing !== 'off' ? api.getCredits(org.slug) : Promise.resolve(null)),
-    [org.slug, billing],
-  )
   const count = running.filter((sandbox) => sandbox.status === 'started').length
-  const limit = org.limits.sandboxes
 
   return (
     <>
-      <PageHeader title={org.name} description={org.plan ? `${org.plan.name} plan` : undefined} />
+      <PageHeader title={org.name} />
       <div className="grid gap-8 sm:grid-cols-3">
-        <Stat title="Running sandboxes" value={formatNumber(count, 0)} href="/sandboxes">
-          {limit !== null && <span>of {formatNumber(limit, 0)} allowed</span>}
-        </Stat>
+        <Stat title="Running sandboxes" value={formatNumber(count, 0)} href="/sandboxes" />
         <Stat title="vCPU-hours this month" value={usage ? formatNumber(usage.totals.vcpu_hours, 1) : undefined} href="/usage">
           {usage && <span>{formatNumber(usage.totals.memory_gib_hours, 1)} GiB-hours of memory</span>}
         </Stat>
-        {billing !== 'off' ? (
-          <Stat
-            title="Credits"
-            value={credits.data ? formatMoney(credits.data.balance_micros, credits.data.currency || currency) : undefined}
-            href="/billing"
-          >
-            {credits.data && (
-              <span>{formatMoney(credits.data.month_spend_micros, credits.data.currency || currency)} spent this month</span>
-            )}
-          </Stat>
-        ) : (
-          <Stat title="Sandbox-hours this month" value={usage ? formatNumber(usage.totals.sandbox_hours, 1) : undefined} href="/usage" />
-        )}
+        <Stat title="Sandbox-hours this month" value={usage ? formatNumber(usage.totals.sandbox_hours, 1) : undefined} href="/usage" />
       </div>
-
-      <Subheading className="mt-14 mb-6">Limits</Subheading>
-      {limits.data ? (
-        <LimitMeters report={limits.data} />
-      ) : limits.error.message ? (
-        <ErrorNotice error={limits.error} onRetry={limits.reload} />
-      ) : (
-        <ListSkeleton label="Loading limits" rows={1} />
-      )}
+      <RegionLimits limits={limits} />
     </>
   )
 }

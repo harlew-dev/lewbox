@@ -26,6 +26,7 @@ import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
+import { noRegionText } from '../../components/no-region'
 import { CreateKeyDialog } from './create-key-dialog'
 import { usePortalOrg } from './portal-route'
 
@@ -134,7 +135,12 @@ export function KeysPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
   const list = keys.data?.data ?? []
-  const create = can.use ? <Button onClick={() => setCreateOpen(true)}>Create API key</Button> : undefined
+  const noRegion = org.regions.length === 0
+  const create = can.use ? (
+    <Button onClick={() => setCreateOpen(true)} disabled={noRegion} disabledReason={noRegionText}>
+      Create API key
+    </Button>
+  ) : undefined
 
   return (
     <>
@@ -151,14 +157,14 @@ export function KeysPage() {
       ) : list.length === 0 ? (
         <EmptyState
           title="No API keys"
-          description="Create a key for a region, then run your first sandbox with it."
+          description={noRegion ? noRegionText : 'Create a key for a region, then run your first sandbox with it.'}
           action={create}
         />
       ) : (
         <SandboxKeyTable keys={list} org={org.slug} canRevoke={can.use} onRevoked={keys.refresh} />
       )}
 
-      <CreateKeyDialog open={createOpen} org={org.slug} onClose={() => setCreateOpen(false)} onCreated={keys.refresh} />
+      <CreateKeyDialog open={createOpen} org={org} onClose={() => setCreateOpen(false)} onCreated={keys.refresh} />
     </>
   )
 }

@@ -1,10 +1,9 @@
-import { ErrorNotice, Listbox, ListboxOption, ListSkeleton, PageHeader, Subheading } from '@harlew-dev/ui'
+import { Listbox, ListboxOption, PageHeader } from '@harlew-dev/ui'
 import { useState } from 'react'
 import * as api from '../../lib/api'
-import { LimitMeters } from '../../components/limit-meters'
+import { RegionLimits } from '../../components/limit-meters'
 import { UsageSummary } from '../../components/usage-summary'
 import { daysAgo } from '../../lib/format'
-import { useInstance } from '../../lib/instance'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
@@ -30,7 +29,6 @@ function UsageRange({ value, onChange }: { value: string; onChange: (days: strin
 export function UsagePage() {
   useDocumentTitle('Usage')
   const { org } = usePortalOrg()
-  const { currency } = useInstance()
   const [days, setDays] = useState('30')
   const usage = useLoad(
     () => api.getUsage({ org: org.slug, from: daysAgo(Number(days)), granularity: 'day' }),
@@ -41,16 +39,8 @@ export function UsagePage() {
   return (
     <>
       <PageHeader title="Usage" actions={<UsageRange value={days} onChange={setDays} />} />
-      <UsageSummary usage={usage} currency={currency} onRetry={usage.reload} />
-
-      <Subheading className="mt-14 mb-6">Limits</Subheading>
-      {limits.data ? (
-        <LimitMeters report={limits.data} />
-      ) : limits.error.message ? (
-        <ErrorNotice error={limits.error} onRetry={limits.reload} />
-      ) : (
-        <ListSkeleton label="Loading limits" rows={1} />
-      )}
+      <UsageSummary usage={usage} onRetry={usage.reload} />
+      <RegionLimits limits={limits} title="Limits by region" />
     </>
   )
 }

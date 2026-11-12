@@ -136,7 +136,7 @@ function CreateUser({ onClose }: { onClose: () => void }) {
     <form onSubmit={submit}>
       <DialogTitle>New account</DialogTitle>
       <DialogDescription>
-        The account can sign in straight away. Add it to an organization from its page.
+        The account can sign in straight away. Add it to a workspace from its page.
       </DialogDescription>
       <ErrorNotice error={create.error} className="mt-6" />
       <DialogBody className="space-y-6">
@@ -164,7 +164,7 @@ function CreateUser({ onClose }: { onClose: () => void }) {
           </Field>
         </FieldGroup>
         <CheckboxField checked={isAdmin} onChange={setIsAdmin} disabled={create.busy}>
-          Instance admin: manages every server, organization and account
+          Instance admin: manages every server, workspace and account
         </CheckboxField>
       </DialogBody>
       <DialogActions>

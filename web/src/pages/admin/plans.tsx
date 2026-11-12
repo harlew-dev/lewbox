@@ -2,7 +2,6 @@ import {
   Badge,
   Button,
   ConfirmationDialog,
-  Description,
   Dialog,
   DialogActions,
   DialogBody,
@@ -34,25 +33,23 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { EllipsisHorizontalIcon, PencilIcon, TrashIcon } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
-import { formatLimit, formatMemory, formatMoney } from '../../lib/format'
-import { useInstance } from '../../lib/instance'
+import { formatLimit, formatMemory } from '../../lib/format'
+import { invalidLimitReason, limitText, parseLimit, validLimits } from '../../lib/limits'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
 export function PlansPage() {
   useDocumentTitle('Plans')
-  const { billing, currency } = useInstance()
   const plans = useLoad(() => api.listPlans(), [])
   const list = plans.data?.data ?? []
   const [editing, setEditing] = useState<api.Plan | 'new' | null>(null)
   const [deleting, setDeleting] = useState<api.Plan | null>(null)
-  const credits = billing !== 'off'
 
   return (
     <>
       <PageHeader
         title="Plans"
-        description="Limits hold across every region together."
+        description="Named sets of limits. You give a customer a plan in each region."
         actions={<Button onClick={() => setEditing('new')}>New plan</Button>}
       />
 
@@ -63,7 +60,7 @@ export function PlansPage() {
       ) : list.length === 0 ? (
         <EmptyState
           title="No plans"
-          description="A plan is a set of limits customers are on."
+          description="A plan is a set of limits you give customers in a region."
           action={<Button onClick={() => setEditing('new')}>New plan</Button>}
         />
       ) : (
@@ -74,8 +71,7 @@ export function PlansPage() {
               <TableHeader className="text-right">Sandboxes</TableHeader>
               <TableHeader className="text-right">vCPUs</TableHeader>
               <TableHeader className="text-right">Memory</TableHeader>
-              {credits && <TableHeader className="text-right">Monthly credits</TableHeader>}
-              <TableHeader className="text-right">Customers</TableHeader>
+              <TableHeader className="text-right">Subscriptions</TableHeader>
               <TableHeader className="w-0">
                 <span className="sr-only">Actions</span>
               </TableHeader>
@@ -94,12 +90,7 @@ export function PlansPage() {
                 <TableCell className="text-right tabular-nums">{formatLimit(plan.max_sandboxes)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatLimit(plan.max_vcpus)}</TableCell>
                 <TableCell className="text-right tabular-nums">{formatLimit(plan.max_memory_mb, formatMemory)}</TableCell>
-                {credits && (
-                  <TableCell className="text-right tabular-nums">
-                    {plan.monthly_credits_micros ? formatMoney(plan.monthly_credits_micros, currency) : '—'}
-                  </TableCell>
-                )}
-                <TableCell className="text-right tabular-nums">{plan.organizations}</TableCell>
+                <TableCell className="text-right tabular-nums">{plan.subscriptions}</TableCell>
                 <TableCell className="w-0 text-right">
                   <Dropdown>
                     <DropdownButton as={Button} plain aria-label={`Actions for ${plan.name}`}>
@@ -112,7 +103,7 @@ export function PlansPage() {
                       </DropdownItem>
                       <DropdownItem
                         variant="danger"
-                        disabled={plan.default || plan.organizations > 0}
+                        disabled={plan.default || plan.subscriptions > 0}
                         onClick={() => setDeleting(plan)}
                       >
                         <TrashIcon data-slot="icon" />
@@ -132,7 +123,7 @@ export function PlansPage() {
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title={deleting ? `Delete ${deleting.name}?` : 'Delete plan?'}
-        description="No customer is on it. This can’t be undone."
+        description="No customer has it in any region. This can’t be undone."
         confirm="Delete plan"
         variant="danger"
         onConfirm={async () => {
@@ -164,33 +155,23 @@ function PlanDialog({
   )
 }
 
-function text(value: number | null | undefined): string {
-  return value == null ? '' : String(value)
-}
-
-function limit(value: string): number | null {
-  return value.trim() === '' ? null : Number(value)
-}
-
 function PlanForm({ plan, onClose, onSaved }: { plan: api.Plan | null; onClose: () => void; onSaved: () => void }) {
-  const { billing, currency } = useInstance()
   const [name, setName] = useState(plan?.name ?? '')
   const [slug, setSlug] = useState(plan?.slug ?? '')
-  const [sandboxes, setSandboxes] = useState(text(plan?.max_sandboxes))
-  const [vcpus, setVcpus] = useState(text(plan?.max_vcpus))
-  const [memory, setMemory] = useState(text(plan?.max_memory_mb))
-  const [monthly, setMonthly] = useState(plan?.monthly_credits_micros ? String(plan.monthly_credits_micros / 1e6) : '')
+  const [sandboxes, setSandboxes] = useState(limitText(plan?.max_sandboxes))
+  const [vcpus, setVcpus] = useState(limitText(plan?.max_vcpus))
+  const [memory, setMemory] = useState(limitText(plan?.max_memory_mb))
+  const valid = validLimits(sandboxes, vcpus, memory)
 
   const save = useAction(
     () => {
       const input: api.PlanInput = {
         name: name.trim(),
         slug: slug.trim(),
-        max_sandboxes: limit(sandboxes),
-        max_vcpus: limit(vcpus),
-        max_memory_mb: limit(memory),
+        max_sandboxes: parseLimit(sandboxes),
+        max_vcpus: parseLimit(vcpus),
+        max_memory_mb: parseLimit(memory),
       }
-      if (billing !== 'off') input.monthly_credits_micros = Math.round(Number(monthly || 0) * 1e6)
       return plan ? api.updatePlan(plan.id, input) : api.createPlan(input)
     },
     { toError: (failure) => ({ message: failureMessage(failure) }) },
@@ -237,13 +218,6 @@ function PlanForm({ plan, onClose, onSaved }: { plan: api.Plan | null; onClose: 
               <Input type="number" min={1} step={1} value={memory} placeholder="No limit" onChange={(event) => setMemory(event.currentTarget.value)} />
             </Field>
           </div>
-          {billing !== 'off' && (
-            <Field disabled={save.busy}>
-              <Label>Monthly credits{currency ? ` (${currency})` : ''}</Label>
-              <Input type="number" min={0} step="0.01" value={monthly} placeholder="0.00" onChange={(event) => setMonthly(event.currentTarget.value)} />
-              <Description>Added to each customer on the plan on the 1st of the month.</Description>
-            </Field>
-          )}
         </FieldGroup>
       </DialogBody>
       <DialogActions>
@@ -253,8 +227,8 @@ function PlanForm({ plan, onClose, onSaved }: { plan: api.Plan | null; onClose: 
         <Button
           type="submit"
           loading={save.loading}
-          disabled={name.trim() === '' || slug.trim() === ''}
-          disabledReason="Fill in required fields"
+          disabled={name.trim() === '' || slug.trim() === '' || !valid}
+          disabledReason={valid ? 'Fill in required fields' : invalidLimitReason}
         >
           {plan ? 'Save plan' : 'Create plan'}
         </Button>

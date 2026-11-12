@@ -1,4 +1,4 @@
-import { Button, EmptyState, ErrorNotice, ListSkeleton, Notice, TextLink } from '@harlew-dev/ui'
+import { Button, EmptyState, ErrorNotice, ListSkeleton, Notice } from '@harlew-dev/ui'
 import { Outlet, useOutletContext } from 'react-router'
 import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -14,11 +14,11 @@ export interface PortalOrg {
 }
 
 function StatusBanner({ org }: { org: api.Organization }) {
-  const { name, billing } = useInstance()
+  const { name } = useInstance()
   if (org.status === 'pending') {
     return (
       <Notice variant="info" className="mb-8">
-        Your account is waiting for approval. You can look around now; API keys and sandboxes work once
+        Your workspace is waiting for approval. You can look around now; API keys and sandboxes work once
         it’s approved.
       </Notice>
     )
@@ -26,24 +26,12 @@ function StatusBanner({ org }: { org: api.Organization }) {
   if (org.status !== 'suspended') return null
   return (
     <Notice variant="warning" className="mb-8">
-      {org.status_reason === 'credits' ? (
-        <>
-          Your account is paused: it has run out of credits, so its sandboxes are stopped.
-          {billing !== 'off' && (
-            <>
-              {' '}
-              See <TextLink href="/billing">Billing</TextLink>.
-            </>
-          )}
-        </>
-      ) : (
-        `Your account is suspended, so its sandboxes are stopped. Contact ${name} to restore it.`
-      )}
+      Your workspace is suspended, so its sandboxes are stopped. Contact {name} to restore it.
     </Notice>
   )
 }
 
-// Loads the current organization for the portal's pages, with its status
+// Loads the current workspace (organization) for the portal's pages, with its status
 // banner above them.
 export function PortalRoute() {
   const { user } = useAuth()
@@ -57,13 +45,13 @@ export function PortalRoute() {
   if (!current) {
     return (
       <EmptyState
-        title="You’re not in an organization"
+        title="You’re not in a workspace"
         description="Ask someone on your team to add you to theirs."
         action={<Button href="/docs">Read the docs</Button>}
       />
     )
   }
-  if (loading && !data) return <ListSkeleton label="Loading your organization" rows={4} />
+  if (loading && !data) return <ListSkeleton label="Loading your workspace" rows={4} />
   if (error.message || !data) return <ErrorNotice error={error} onRetry={reload} />
 
   const context: PortalOrg = {

@@ -93,7 +93,7 @@ export function UserActions({
         open={removeOpen}
         onClose={() => setRemoveOpen(false)}
         title={`Remove ${user.email}?`}
-        description="The account, its sessions and its organization memberships are deleted. This cannot be undone."
+        description="The account, its sessions and its workspace memberships are deleted. This cannot be undone."
         confirm="Remove account"
         variant="danger"
         onConfirm={async () => {

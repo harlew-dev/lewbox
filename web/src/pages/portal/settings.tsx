@@ -2,16 +2,15 @@ import {
   Button,
   ConfirmationDialog,
   DangerAction,
-  DescriptionDetails,
-  DescriptionList,
-  DescriptionTerm,
   Divider,
   ErrorNotice,
   Field,
   Input,
   Label,
+  ListSkeleton,
   PageHeader,
   SettingsSection,
+  Text,
   toast,
   useAction,
 } from '@harlew-dev/ui'
@@ -19,9 +18,10 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
-import { formatLimit, formatMemory } from '../../lib/format'
+import { noRegionText } from '../../components/no-region'
+import { SubscriptionTable } from '../../components/subscription-table'
 import { useDocumentTitle } from '../../lib/use-document-title'
-import { failureMessage } from '../../lib/use-load'
+import { failureMessage, useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
 
 export function SettingsPage() {
@@ -41,7 +41,7 @@ export function SettingsPage() {
     event.preventDefault()
     const result = await rename.run()
     if (result.ok) {
-      toast.success('Organization renamed.')
+      toast.success('Workspace renamed.')
       reload()
       void reloadOrganizations()
     }
@@ -52,10 +52,10 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
       <Divider className="mb-10" />
 
-      <SettingsSection title="Organization name">
+      <SettingsSection title="Workspace name">
         <form className="space-y-4" onSubmit={submit}>
           <Field disabled={!can.manage || rename.busy}>
-            <Label className="sr-only">Organization name</Label>
+            <Label className="sr-only">Workspace name</Label>
             <Input value={name} onChange={(event) => setName(event.currentTarget.value)} />
           </Field>
           {can.manage && (
@@ -76,25 +76,16 @@ export function SettingsPage() {
 
       <Divider soft className="my-10" />
 
-      <SettingsSection title="Plan" description="Limits hold across every region together.">
-        <DescriptionList>
-          <DescriptionTerm>Plan</DescriptionTerm>
-          <DescriptionDetails>{org.plan?.name ?? 'None'}</DescriptionDetails>
-          <DescriptionTerm>Sandboxes at once</DescriptionTerm>
-          <DescriptionDetails>{formatLimit(org.limits.sandboxes)}</DescriptionDetails>
-          <DescriptionTerm>vCPUs</DescriptionTerm>
-          <DescriptionDetails>{formatLimit(org.limits.vcpus)}</DescriptionDetails>
-          <DescriptionTerm>Memory</DescriptionTerm>
-          <DescriptionDetails>{formatLimit(org.limits.memory_mb, formatMemory)}</DescriptionDetails>
-        </DescriptionList>
+      <SettingsSection title="Regions" description="Your provider sets the plan in each region.">
+        <RegionPlans org={org.slug} />
       </SettingsSection>
 
       <Divider soft className="my-10" />
 
       <SettingsSection title="Leave" variant="danger">
         <DangerAction
-          title="Leave organization"
-          description="You lose access until someone adds you again. An organization keeps at least one owner."
+          title="Leave workspace"
+          description="You lose access until someone adds you again. A workspace keeps at least one owner."
           action={
             <Button color="red" onClick={() => setLeaveOpen(true)}>
               Leave
@@ -108,12 +99,12 @@ export function SettingsPage() {
         onClose={() => setLeaveOpen(false)}
         title={`Leave ${org.name}?`}
         description="You lose access to its sandboxes, keys and usage until someone adds you again."
-        confirm="Leave organization"
+        confirm="Leave workspace"
         variant="danger"
         onConfirm={async () => {
           const members = await api.listMembers(org.slug)
           const self = members.data.find((member) => member.user_id === user?.id)
-          if (!self) throw new Error('You are not a member of this organization.')
+          if (!self) throw new Error('You are not a member of this workspace.')
           await api.removeMember(org.slug, self.id)
         }}
         onConfirmed={async () => {
@@ -124,4 +115,14 @@ export function SettingsPage() {
       />
     </div>
   )
+}
+
+// The workspace's plan and limits in each region, read-only.
+function RegionPlans({ org }: { org: string }) {
+  const subscriptions = useLoad(() => api.listSubscriptions(org), [org])
+  const list = subscriptions.data?.data ?? []
+  if (subscriptions.loading && !subscriptions.data) return <ListSkeleton label="Loading regions" rows={2} />
+  if (subscriptions.error.message) return <ErrorNotice error={subscriptions.error} onRetry={subscriptions.reload} />
+  if (list.length === 0) return <Text>{noRegionText}</Text>
+  return <SubscriptionTable subscriptions={list} />
 }

@@ -124,7 +124,7 @@ export function MembersSection({
                           {self ? (
                             <DropdownItem onClick={() => setRemoveTarget(member)}>
                               <ArrowRightStartOnRectangleIcon data-slot="icon" />
-                              Leave organization
+                              Leave workspace
                             </DropdownItem>
                           ) : (
                             <DropdownItem variant="danger" onClick={() => setRemoveTarget(member)}>
@@ -157,10 +157,10 @@ export function MembersSection({
         title={leaving ? `Leave ${org.name}?` : removeTarget ? `Remove ${removeTarget.email}?` : 'Remove member?'}
         description={
           leaving
-            ? 'You lose access to this organization until someone adds you again.'
-            : 'They lose access to this organization. Their account stays.'
+            ? 'You lose access to this workspace until someone adds you again.'
+            : 'They lose access to this workspace. Their account stays.'
         }
-        confirm={leaving ? 'Leave organization' : 'Remove member'}
+        confirm={leaving ? 'Leave workspace' : 'Remove member'}
         variant="danger"
         onConfirm={async () => {
           if (removeTarget) await api.removeMember(org.slug, removeTarget.id)
@@ -319,7 +319,7 @@ function ChangeRole({
   return (
     <form onSubmit={submit}>
       <DialogTitle>Change {member.email}'s role</DialogTitle>
-      <DialogDescription>An organization always keeps at least one owner.</DialogDescription>
+      <DialogDescription>A workspace always keeps at least one owner.</DialogDescription>
       <DialogBody>
         <div className="space-y-6">
           <ErrorNotice error={save.error} />

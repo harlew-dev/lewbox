@@ -24,6 +24,7 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
 import { formatDate } from '../../lib/format'
+import { noRegionText } from '../../components/no-region'
 import { sandboxSnippets } from '../../lib/snippets'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
@@ -37,7 +38,7 @@ export function CreateKeyDialog({
   onCreated,
 }: {
   open: boolean
-  org: string
+  org: api.Organization
   onClose: () => void
   onCreated: (key: api.NewSandboxKey) => void
 }) {
@@ -66,18 +67,21 @@ function CreateKey({
   onClose,
   onCreated,
 }: {
-  org: string
+  org: api.Organization
   onClose: () => void
   onCreated: (key: api.NewSandboxKey) => void
 }) {
-  const regions = useLoad(() => api.listRegions(), [])
-  const list = regions.data?.data ?? []
+  const regions = useLoad(() => api.listRegions(org.slug), [org.slug])
+  // Only regions the workspace has a plan in: an instance admin is sent
+  // every region, and a key elsewhere would be refused.
+  const subscribed = new Set(org.regions.map((region) => region.slug))
+  const list = (regions.data?.data ?? []).filter((region) => subscribed.has(region.slug))
   const [name, setName] = useState('')
   const [picked, setPicked] = useState('')
   const [expiresIn, setExpiresIn] = useState('90d')
   const [key, setKey] = useState<api.NewSandboxKey | null>(null)
   const region = picked || list[0]?.slug || ''
-  const create = useAction(() => api.createSandboxKey(org, { name: name.trim(), region, expires_in: expiresIn }), {
+  const create = useAction(() => api.createSandboxKey(org.slug, { name: name.trim(), region, expires_in: expiresIn }), {
     toError: (failure) => ({ message: failureMessage(failure) }),
   })
 
@@ -95,14 +99,14 @@ function CreateKey({
   return (
     <form onSubmit={submit}>
       <DialogTitle>Create an API key</DialogTitle>
-      <DialogDescription>A key works in one region, for this organization’s sandboxes.</DialogDescription>
+      <DialogDescription>A key works in one region, for this workspace’s sandboxes.</DialogDescription>
       <DialogBody>
         {regions.loading && !regions.data ? (
           <ListSkeleton label="Loading regions" rows={2} />
         ) : regions.error.message ? (
           <ErrorNotice error={regions.error} onRetry={regions.reload} />
         ) : list.length === 0 ? (
-          <Notice variant="info">No region is available yet. Try again in a few minutes.</Notice>
+          <Notice variant="info">{noRegionText}</Notice>
         ) : (
           <FieldGroup>
             <ErrorNotice error={create.error} />

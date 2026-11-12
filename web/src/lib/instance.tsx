@@ -6,12 +6,12 @@ interface InstanceValue extends Required<api.Instance> {
   reload: () => void
 }
 
-const fallback: Required<api.Instance> = { name: 'Lewbox', signup: 'closed', billing: 'off', currency: '' }
+const fallback: Required<api.Instance> = { name: 'Lewbox', signup: 'closed' }
 
 const InstanceContext = createContext<InstanceValue>({ ...fallback, loaded: false, reload: () => {} })
 
-// The instance's public settings (name, sign-up, billing), loaded once. If
-// they can't be loaded the app behaves as a closed instance without billing.
+// The instance's public settings (name, sign-up), loaded once. If they
+// can't be loaded the app behaves as a closed instance.
 export function InstanceProvider({ children }: { children: ReactNode }) {
   const [instance, setInstance] = useState<Required<api.Instance>>(fallback)
   const [loaded, setLoaded] = useState(false)

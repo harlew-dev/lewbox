@@ -32,11 +32,11 @@ const PlansPage = lazyPage(() => import('./pages/admin/plans'), 'PlansPage')
 const FleetSandboxesPage = lazyPage(() => import('./pages/admin/sandboxes'), 'FleetSandboxesPage')
 const AdminSettingsPage = lazyPage(() => import('./pages/admin/settings'), 'AdminSettingsPage')
 const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
-const BillingPage = lazyPage(() => import('./pages/portal/billing'), 'BillingPage')
 const HomePage = lazyPage(() => import('./pages/portal/home'), 'HomePage')
 const KeysPage = lazyPage(() => import('./pages/portal/keys'), 'KeysPage')
 const SandboxesPage = lazyPage(() => import('./pages/portal/sandboxes'), 'SandboxesPage')
 const SettingsPage = lazyPage(() => import('./pages/portal/settings'), 'SettingsPage')
+const SnapshotsPage = lazyPage(() => import('./pages/portal/snapshots'), 'SnapshotsPage')
 const TeamPage = lazyPage(() => import('./pages/portal/team'), 'TeamPage')
 const UsagePage = lazyPage(() => import('./pages/portal/usage'), 'UsagePage')
 const ClusterDetailPage = lazyPage(() => import('./pages/servers/cluster-detail'), 'ClusterDetailPage')
@@ -44,7 +44,7 @@ const ServersPage = lazyPage(() => import('./pages/servers/servers'), 'ServersPa
 const UserDetailPage = lazyPage(() => import('./pages/users/user-detail'), 'UserDetailPage')
 const UsersPage = lazyPage(() => import('./pages/users/users'), 'UsersPage')
 
-// The customer portal. An instance admin who belongs to no organization
+// The customer portal. An instance admin who belongs to no workspace
 // has nothing here and goes to the console.
 function Portal() {
   const { user, organizations } = useAuth()
@@ -120,9 +120,9 @@ export function App() {
         <Route element={<Portal />}>
           <Route index element={<HomePage />} />
           <Route path="/sandboxes" element={<SandboxesPage />} />
+          <Route path="/snapshots" element={<SnapshotsPage />} />
           <Route path="/keys" element={<KeysPage />} />
           <Route path="/usage" element={<UsagePage />} />
-          <Route path="/billing" element={<BillingPage />} />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

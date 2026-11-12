@@ -24,25 +24,29 @@ export interface Me {
 }
 
 export type SignupMode = 'open' | 'approval' | 'closed'
-export type BillingMode = 'off' | 'show' | 'enforce'
 
 // Public: what the sign-in page and the portal need before anyone signs in.
 export interface Instance {
   name: string
   signup: SignupMode
-  billing?: BillingMode
-  currency?: string
 }
 
 export interface Settings {
   instance_name: string
   signup: SignupMode
-  default_plan: string
-  currency: string
-  price_vcpu_hour_micros: number
-  price_memory_gib_hour_micros: number
-  billing: BillingMode
-  signup_credits_micros: number
+  // A plan slug, or null for none.
+  default_plan: string | null
+  // Cluster slugs new sign-ups get the default plan in.
+  default_regions: string[]
+}
+
+// Fields that are set change. default_plan "none" clears it; an empty
+// default_regions clears them.
+export interface SettingsUpdate {
+  instance_name?: string
+  signup?: SignupMode
+  default_plan?: string
+  default_regions?: string[]
 }
 
 // null is unlimited.
@@ -59,8 +63,8 @@ export interface Plan {
   max_sandboxes: number | null
   max_vcpus: number | null
   max_memory_mb: number | null
-  monthly_credits_micros?: number
-  organizations: number
+  // Subscriptions on this plan, across every workspace and region.
+  subscriptions: number
   default: boolean
   created_at: string
 }
@@ -71,15 +75,60 @@ export interface PlanInput {
   max_sandboxes?: number | null
   max_vcpus?: number | null
   max_memory_mb?: number | null
-  monthly_credits_micros?: number
 }
 
+export interface PlanRef {
+  slug: string
+  name: string
+}
+
+// A cluster as customers see it. For a customer, plan and limits are
+// their workspace's subscription there.
 export interface Region {
   slug: string
   name: string
   endpoint_url: string
   runtime: string
   status?: string
+  plan?: PlanRef
+  limits?: Limits
+}
+
+// A workspace's plan in one region. overrides is only sent to instance
+// admins; a null override uses the plan's limit.
+export interface Subscription {
+  region: Region
+  plan: PlanRef
+  limits: Limits
+  overrides?: Limits
+  created_at: string
+}
+
+// An absent override is unchanged (null on create); null uses the plan's.
+export interface SubscriptionInput {
+  plan: string
+  max_sandboxes?: number | null
+  max_vcpus?: number | null
+  max_memory_mb?: number | null
+}
+
+export interface Snapshot {
+  name: string
+  region: string
+  source_sandbox_id: string
+  image: string
+  created_at: string
+  cpu: number
+  memory_mb: number
+  disk_gb: number
+  push_state: string
+  push_error?: string
+}
+
+export interface SnapshotList {
+  data: Snapshot[]
+  // Nodes that didn't answer, so the list may be missing some.
+  partial_nodes: string[]
 }
 
 export interface SandboxKey {
@@ -129,7 +178,6 @@ export interface UsageAmounts {
   sandbox_hours: number
   vcpu_hours: number
   memory_gib_hours: number
-  cost_micros?: number
 }
 
 export interface UsageBucket extends UsageAmounts {
@@ -146,36 +194,27 @@ export interface Usage {
   data: UsageBucket[]
 }
 
-export interface LimitsReport {
+export interface LimitsUsed {
+  sandboxes: number
+  vcpus: number
+  memory_mb: number
+}
+
+// One subscribed region: its plan's limits and what is in use now.
+export interface RegionLimits {
+  slug: string
+  name: string
+  plan: PlanRef
   limits: Limits
-  used: { sandboxes: number; vcpus: number; memory_mb: number }
-  regions: {
-    slug: string
-    used: { sandboxes: number; vcpus: number; memory_mb: number }
-    quota: { max_sandboxes: number; max_cpu: number; max_memory_mb: number } | null
-    blocked: boolean
-    pushed_at: string
-    error: string
-  }[]
+  used: LimitsUsed
+  quota: { max_sandboxes: number; max_cpu: number; max_memory_mb: number } | null
+  blocked: boolean
+  pushed_at: string | null
+  error: string
 }
 
-export interface CreditTxn {
-  id: string
-  amount_micros: number
-  kind: 'grant' | 'usage' | 'monthly' | 'signup' | string
-  reference: string
-  note: string
-  created_by?: string
-  created_at: string
-}
-
-export interface Credits {
-  currency: string
-  balance_micros: number
-  month_spend_micros: number
-  unbilled_micros: number
-  monthly_credits_micros: number
-  data: CreditTxn[]
+export interface LimitsReport {
+  regions: RegionLimits[]
 }
 
 export interface UptimeDay {
@@ -294,13 +333,11 @@ export interface Organization {
   slug: string
   name: string
   status: OrgStatus
-  status_reason?: '' | 'admin' | 'credits' | string
+  status_reason?: string
   team?: string
-  plan?: { slug: string; name: string }
-  limits: Limits
-  overrides?: Limits
-  balance_micros?: number
-  // Assumed, for the console's customer list: not yet in the plans.
+  // The subscribed regions, with the plan in each.
+  regions: { slug: string; name: string; plan: PlanRef }[]
+  // Instance admins only.
   vcpu_hours_30d?: number
   members: number
   role?: Role
@@ -310,10 +347,6 @@ export interface Organization {
 export interface OrganizationUpdate {
   name?: string
   status?: OrgStatus
-  plan?: string
-  max_sandboxes?: number | null
-  max_vcpus?: number | null
-  max_memory_mb?: number | null
 }
 
 export interface OrganizationList {
@@ -699,7 +732,7 @@ export function getSettings(): Promise<Settings> {
   return request<Settings>('/v0/settings')
 }
 
-export function updateSettings(input: Partial<Settings>): Promise<Settings> {
+export function updateSettings(input: SettingsUpdate): Promise<Settings> {
   return request<Settings>('/v0/settings', { method: 'PATCH', body: input })
 }
 
@@ -719,8 +752,38 @@ export function deletePlan(planRef: string): Promise<Plan> {
   return request<Plan>(`/v0/plans/${ref(planRef)}`, { method: 'DELETE' })
 }
 
-export function listRegions(): Promise<{ data: Region[] }> {
-  return request<{ data: Region[] }>('/v0/regions')
+// Instance admins get every ready region. Anyone else gets the regions
+// `org` is subscribed to, with the plan and limits there.
+export function listRegions(org?: string): Promise<{ data: Region[] }> {
+  return request<{ data: Region[] }>('/v0/regions', { org })
+}
+
+export function listSubscriptions(org: string): Promise<{ data: Subscription[] }> {
+  return request<{ data: Subscription[] }>('/v0/subscriptions', { org })
+}
+
+export function setSubscription(org: string, region: string, input: SubscriptionInput): Promise<Subscription> {
+  return request<Subscription>(`/v0/subscriptions/${ref(region)}`, { method: 'PUT', body: input, org })
+}
+
+// force removes it even when the region's keys can't be revoked (a 502).
+export function deleteSubscription(org: string, region: string, force = false): Promise<Subscription> {
+  return request<Subscription>(`/v0/subscriptions/${ref(region)}${query({ force: force ? 'true' : undefined })}`, {
+    method: 'DELETE',
+    org,
+  })
+}
+
+// Without a region, every subscribed region.
+export function listSnapshots(org: string, region?: string): Promise<SnapshotList> {
+  return request<SnapshotList>(`/v0/snapshots${query({ region })}`, { org })
+}
+
+export function deleteSnapshot(org: string, snapshot: Pick<Snapshot, 'name' | 'region'>): Promise<Snapshot> {
+  return request<Snapshot>(`/v0/snapshots/${ref(snapshot.name)}${query({ region: snapshot.region })}`, {
+    method: 'DELETE',
+    org,
+  })
 }
 
 export function listSandboxKeys(org: string): Promise<{ data: SandboxKey[] }> {
@@ -769,17 +832,6 @@ export function getUsage(filter: {
 
 export function getLimits(org: string): Promise<LimitsReport> {
   return request<LimitsReport>('/v0/limits', { org })
-}
-
-export function getCredits(org: string): Promise<Credits> {
-  return request<Credits>('/v0/credits', { org })
-}
-
-export function addCredits(
-  org: string,
-  input: { amount_micros: number; note: string; reference?: string },
-): Promise<CreditTxn> {
-  return request<CreditTxn>('/v0/credits', { method: 'POST', body: input, org })
 }
 
 export function getOverview(): Promise<Overview> {

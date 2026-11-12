@@ -3,19 +3,22 @@ import * as api from '../lib/api'
 import { useLoad } from '../lib/use-load'
 import { sandboxStatusOptions } from './sandbox-table'
 
-// Region and status pickers for a sandbox list; '' is "all".
+// Region and status pickers for a sandbox list; '' is "all". `org` lists
+// that workspace's regions (a customer sees no others).
 export function SandboxFilters({
+  org,
   region,
   status,
   onRegion,
   onStatus,
 }: {
+  org?: string
   region: string
   status: string
   onRegion: (region: string) => void
   onStatus: (status: string) => void
 }) {
-  const regions = useLoad(() => api.listRegions(), [])
+  const regions = useLoad(() => api.listRegions(org), [org])
   return (
     <div className="mb-6 flex flex-wrap gap-3">
       <Listbox aria-label="Region" value={region} onChange={onRegion} className="sm:w-48">

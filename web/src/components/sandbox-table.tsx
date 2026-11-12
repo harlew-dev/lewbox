@@ -74,7 +74,7 @@ export function SandboxTable({
       <Table>
         <TableHead>
           <TableRow>
-            {fleet && <TableHeader>Customer</TableHeader>}
+            {fleet && <TableHeader>Workspace</TableHeader>}
             <TableHeader>Sandbox</TableHeader>
             <TableHeader>Region</TableHeader>
             <TableHeader>Status</TableHeader>

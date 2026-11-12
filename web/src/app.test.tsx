@@ -44,7 +44,7 @@ describe('routing', () => {
     expect(screen.queryByRole('link', { name: 'Customers' })).toBeNull()
   })
 
-  it('sends an instance admin without an organization to the console', async () => {
+  it('sends an instance admin without a workspace to the console', async () => {
     stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/overview': () => json(200, overview),

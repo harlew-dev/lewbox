@@ -4,7 +4,7 @@ import type * as api from '../../lib/api'
 export const roleOptions: { value: api.Role; label: string; description: string }[] = [
   { value: 'owner', label: 'Owner', description: 'Everything, including making and removing owners.' },
   { value: 'admin', label: 'Admin', description: 'Manages members (except owners) and API keys.' },
-  { value: 'member', label: 'Member', description: 'Uses the organization; can see its members.' },
+  { value: 'member', label: 'Member', description: 'Uses the workspace; can see its members.' },
   { value: 'viewer', label: 'Viewer', description: 'Read-only.' },
 ]
 
@@ -25,12 +25,7 @@ const orgStatuses: Record<api.OrgStatus, { label: string; color: BadgeColor }> =
   suspended: { label: 'Suspended', color: 'red' },
 }
 
-export function OrgStatusBadge({ status, reason }: { status: api.OrgStatus; reason?: string }) {
+export function OrgStatusBadge({ status }: { status: api.OrgStatus }) {
   const { label, color } = orgStatuses[status] ?? { label: status, color: 'zinc' }
-  return (
-    <Badge color={color} title={reason === 'credits' ? 'Out of credits' : undefined}>
-      {label}
-      {status === 'suspended' && reason === 'credits' ? ' · credits' : ''}
-    </Badge>
-  )
+  return <Badge color={color}>{label}</Badge>
 }

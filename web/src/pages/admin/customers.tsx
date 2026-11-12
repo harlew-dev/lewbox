@@ -2,18 +2,8 @@ import {
   Avatar,
   Button,
   ConfirmationDialog,
-  Description,
-  Dialog,
-  DialogActions,
-  DialogBody,
-  DialogDescription,
-  DialogTitle,
   EmptyState,
   ErrorNotice,
-  Field,
-  FieldGroup,
-  Input,
-  Label,
   ListSkeleton,
   PageHeader,
   PageTabs,
@@ -26,20 +16,16 @@ import {
   Text,
   tabFrom,
   toast,
-  useAction,
 } from '@harlew-dev/ui'
-import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
-import { useState, type FormEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
-import { useRefreshPending } from '../../components/console-layout'
+import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
-import { useAuth } from '../../lib/auth'
-import { formatMoney, formatNumber } from '../../lib/format'
-import { useInstance } from '../../lib/instance'
+import { formatNumber } from '../../lib/format'
 import { orgInitials } from '../../lib/organizations'
 import { useDocumentTitle } from '../../lib/use-document-title'
-import { failureMessage, useLoad } from '../../lib/use-load'
+import { useLoad } from '../../lib/use-load'
 import { OrgStatusBadge } from '../organizations/roles'
+import { NewCustomerDialog } from './new-customer'
 
 const tabs = [
   { id: 'all', label: 'All' },
@@ -48,16 +34,15 @@ const tabs = [
 ] as const
 
 const empty = {
-  all: { title: 'No customers yet', description: 'Customers appear here when they sign up, or when you add one.' },
+  all: { title: 'No customers yet', description: 'Add one with New customer. Self sign-ups show here too.' },
   pending: { title: 'No one is waiting', description: 'Sign-ups wait here for approval when sign-up needs it.' },
-  suspended: { title: 'No suspended customers', description: 'Customers you suspend, or who run out of credits, show here.' },
+  suspended: { title: 'No suspended customers', description: 'Customers you suspend show here.' },
 }
 
 export function CustomersPage() {
   useDocumentTitle('Customers')
   const [searchParams] = useSearchParams()
   const tab = tabFrom(searchParams, tabs)
-  const { billing, currency } = useInstance()
   const [createOpen, setCreateOpen] = useState(false)
   const customers = useLoad(() => api.listOrganizations({ status: tab === 'all' ? undefined : tab }), [tab])
   const running = useLoad(() => api.listSandboxes({ status: 'started' }), [])
@@ -84,12 +69,11 @@ export function CustomersPage() {
         <Table>
           <TableHead>
             <TableRow>
-              <TableHeader>Customer</TableHeader>
-              <TableHeader>Plan</TableHeader>
+              <TableHeader>Workspace</TableHeader>
+              <TableHeader>Regions</TableHeader>
               <TableHeader>Status</TableHeader>
               <TableHeader className="text-right">Running</TableHeader>
               <TableHeader className="text-right">vCPU-hours (30 d)</TableHeader>
-              {billing !== 'off' && <TableHeader className="text-right">Balance</TableHeader>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -104,26 +88,25 @@ export function CustomersPage() {
                     </div>
                   </div>
                 </TableCell>
-                <TableCell>{org.plan?.name ?? '—'}</TableCell>
+                <TableCell className="text-zinc-500 dark:text-zinc-400">
+                  {org.regions.length === 0
+                    ? 'None'
+                    : org.regions.map((region) => `${region.slug} · ${region.plan.name}`).join(', ')}
+                </TableCell>
                 <TableCell>
-                  <OrgStatusBadge status={org.status} reason={org.status_reason} />
+                  <OrgStatusBadge status={org.status} />
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{runningBy.get(org.slug) ?? 0}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {org.vcpu_hours_30d === undefined ? '—' : formatNumber(org.vcpu_hours_30d, 1)}
                 </TableCell>
-                {billing !== 'off' && (
-                  <TableCell className="text-right tabular-nums">
-                    {org.balance_micros === undefined ? '—' : formatMoney(org.balance_micros, currency)}
-                  </TableCell>
-                )}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
 
-      <CreateCustomerDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <NewCustomerDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </>
   )
 }
@@ -153,99 +136,5 @@ export function SuspendDialog({
         onSuspended()
       }}
     />
-  )
-}
-
-function CreateCustomerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const count = useOpenCount(open)
-  return (
-    <Dialog open={open} onClose={onClose} size="md">
-      <CreateCustomer key={count} onClose={onClose} />
-    </Dialog>
-  )
-}
-
-function CreateCustomer({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate()
-  const refreshPending = useRefreshPending()
-  const { user } = useAuth()
-  const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [slugEdited, setSlugEdited] = useState(false)
-  const [owner, setOwner] = useState('')
-
-  const create = useAction(() => api.createOrganization({ slug, name, owner }), {
-    toError: (failure) => ({ message: failureMessage(failure) }),
-  })
-
-  function changeName(value: string) {
-    setName(value)
-    if (!slugEdited) {
-      setSlug(
-        value
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-+|-+$/g, '')
-          .slice(0, 63),
-      )
-    }
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    const result = await create.run()
-    if (result.ok) {
-      toast.success(`${result.value.name} created.`)
-      refreshPending()
-      onClose()
-      navigate(`/admin/customers/${encodeURIComponent(result.value.slug)}`)
-    }
-  }
-
-  return (
-    <form onSubmit={submit}>
-      <DialogTitle>New customer</DialogTitle>
-      <DialogDescription>An organization on the default plan, owned by an existing account.</DialogDescription>
-      <DialogBody>
-        <FieldGroup>
-          <ErrorNotice error={create.error} />
-          <Field disabled={create.busy}>
-            <Label>Name</Label>
-            <Input required value={name} placeholder="Acme" onChange={(event) => changeName(event.currentTarget.value)} />
-          </Field>
-          <Field disabled={create.busy}>
-            <Label>Slug</Label>
-            <Input
-              required
-              value={slug}
-              placeholder="acme"
-              onChange={(event) => {
-                setSlugEdited(true)
-                setSlug(event.currentTarget.value.trim())
-              }}
-            />
-            <Description>Used in URLs and with the CLI’s --org. It can’t change later.</Description>
-          </Field>
-          <Field disabled={create.busy}>
-            <Label>Owner</Label>
-            <Input
-              type="email"
-              value={owner}
-              placeholder={user?.email ?? 'you'}
-              onChange={(event) => setOwner(event.currentTarget.value.trim())}
-            />
-            <Description>An existing account’s email. Leave it empty to own it yourself.</Description>
-          </Field>
-        </FieldGroup>
-      </DialogBody>
-      <DialogActions>
-        <Button plain onClick={onClose} disabled={create.busy}>
-          Cancel
-        </Button>
-        <Button type="submit" loading={create.loading} disabled={slug === ''} disabledReason="Fill in required fields">
-          Create customer
-        </Button>
-      </DialogActions>
-    </form>
   )
 }

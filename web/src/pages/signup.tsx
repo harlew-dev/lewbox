@@ -88,7 +88,7 @@ export function SignupPage() {
                   autoFocus={false}
                 />
                 <Field disabled={action.loading}>
-                  <Label>Organization</Label>
+                  <Label>Workspace</Label>
                   <Input
                     name="organization"
                     autoComplete="organization"

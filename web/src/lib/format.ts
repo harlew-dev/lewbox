@@ -30,15 +30,6 @@ export function formatNumber(value: number, digits = 2): string {
   return value.toLocaleString('en-US', { maximumFractionDigits: digits })
 }
 
-// Micro-units of the instance currency: 12500000 → "12.50 USD".
-export function formatMoney(micros: number, currency = ''): string {
-  const amount = (micros / 1e6).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })
-  return currency ? `${amount} ${currency}` : amount
-}
-
 // Memory in MiB as the larger unit people think in: 512 MB, 4 GB, 1.5 GB.
 export function formatMemory(mb: number): string {
   if (mb < 1024) return `${formatNumber(mb, 0)} MB`

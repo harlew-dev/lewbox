@@ -31,8 +31,7 @@ export const acme = {
   name: 'Acme',
   status: 'active',
   status_reason: '',
-  plan: { slug: 'free', name: 'Free' },
-  limits: { sandboxes: 2, vcpus: 2, memory_mb: 4096 },
+  regions: [{ slug: 'eu-west', name: 'EU West', plan: { slug: 'free', name: 'Free' } }],
   members: 1,
   role: 'owner',
   created_at: '2026-11-11T15:22:35.8Z',
@@ -62,7 +61,7 @@ export interface Call {
 
 // Stubs fetch with routes keyed "METHOD /path?query", or "METHOD /path" for
 // any query. /v0/me answers with `user` and `organizations`, /v0/instance
-// with a closed instance without billing, unless a route says otherwise;
+// with a closed instance, unless a route says otherwise;
 // anything else unknown fails the test.
 export function stubAPI(
   routes: Record<string, (call: Call) => Response>,
@@ -85,7 +84,7 @@ export function stubAPI(
       calls.push(call)
       const handler = routes[`${method} ${url}`] ?? routes[`${method} ${url.split('?')[0]}`]
       if (!handler && url === '/v0/me') return json(200, { user, organizations, via: 'session' })
-      if (!handler && url === '/v0/instance') return json(200, { name: 'Lewbox', signup: 'closed', billing: 'off', currency: '' })
+      if (!handler && url === '/v0/instance') return json(200, { name: 'Lewbox', signup: 'closed' })
       if (!handler) throw new Error(`unexpected request: ${method} ${url}`)
       return handler(call)
     }),

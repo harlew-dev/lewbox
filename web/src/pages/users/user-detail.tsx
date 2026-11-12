@@ -118,23 +118,23 @@ export function UserDetailPage() {
       </DescriptionList>
 
       <div className="mt-12 flex flex-wrap items-end justify-between gap-4">
-        <Subheading>Organizations</Subheading>
-        <Button outline disabled={joinable.length === 0} disabledReason="Already in every organization" onClick={() => setAddOpen(true)}>
-          Add to organization
+        <Subheading>Workspaces</Subheading>
+        <Button outline disabled={joinable.length === 0} disabledReason="Already in every workspace" onClick={() => setAddOpen(true)}>
+          Add to workspace
         </Button>
       </div>
       <div className="mt-4">
         {orgs.loading && !orgs.data ? (
-          <ListSkeleton label="Loading organizations" rows={2} />
+          <ListSkeleton label="Loading workspaces" rows={2} />
         ) : orgs.error.message ? (
           <ErrorNotice error={orgs.error} onRetry={orgs.reload} />
         ) : memberships.length === 0 ? (
-          <Text>Not a member of any organization.</Text>
+          <Text>Not a member of any workspace.</Text>
         ) : (
           <Table>
             <TableHead>
               <TableRow>
-                <TableHeader>Organization</TableHeader>
+                <TableHeader>Workspace</TableHeader>
                 <TableHeader>Role</TableHeader>
               </TableRow>
             </TableHead>
@@ -216,13 +216,13 @@ function AddToOrganization({
 
   return (
     <form onSubmit={submit}>
-      <DialogTitle>Add to an organization</DialogTitle>
-      <DialogDescription>Give {user.email} a role in another organization.</DialogDescription>
+      <DialogTitle>Add to a workspace</DialogTitle>
+      <DialogDescription>Give {user.email} a role in another workspace.</DialogDescription>
       <DialogBody>
         <FieldGroup>
           <ErrorNotice error={add.error} />
           <Field disabled={add.busy}>
-            <Label>Organization</Label>
+            <Label>Workspace</Label>
             <Listbox value={org} onChange={setOrg}>
               {organizations.map((item) => (
                 <ListboxOption key={item.id} value={item.slug}>
@@ -239,7 +239,7 @@ function AddToOrganization({
           Cancel
         </Button>
         <Button type="submit" loading={add.loading} disabled={org === ''} disabledReason="Fill in required fields">
-          Add to organization
+          Add to workspace
         </Button>
       </DialogActions>
     </form>
