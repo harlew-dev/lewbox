@@ -327,6 +327,138 @@ func TestAddClusterValidation(t *testing.T) {
 	}
 }
 
+func TestNodeCertificateChecks(t *testing.T) {
+	clock := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	newService := func(t *testing.T) *Service {
+		return newClusterService(t, WithClock(func() time.Time { return clock }))
+	}
+	memberAt := func(url, name string, alive bool) aerolvm.Member {
+		return aerolvm.Member{
+			NodeID:   name,
+			NodeName: name,
+			APIURL:   url,
+			Role:     "mixed",
+			Alive:    alive,
+			Version:  "v0.7.0",
+			Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+		}
+	}
+
+	t.Run("healthy", func(t *testing.T) {
+		s := newService(t)
+		fake := newClusterFake(t)
+		fake.SetCertExpiry(clock.Add(60 * 24 * time.Hour))
+		fake.SetMembers([]aerolvm.Member{memberAt(fake.URL(), "node-a", true)})
+		detail := addTestCluster(t, s, fake, "eu-west")
+		detail, err := s.CheckCluster(localCtx(), detail.Slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != "ready" {
+			t.Errorf("status = %q, detail = %q", detail.Status, detail.StatusDetail)
+		}
+		c, ok := findCheck(detail.Checks, "node certificates")
+		if !ok || !c.OK {
+			t.Errorf("node certificates check = %+v", c)
+		}
+		if len(detail.NodeList) != 1 || detail.NodeList[0].CertExpiresAt == nil {
+			t.Fatalf("nodes = %+v", detail.NodeList)
+		}
+		want := clock.Add(60 * 24 * time.Hour)
+		if !detail.NodeList[0].CertExpiresAt.Equal(want) {
+			t.Errorf("cert_expires_at = %v, want %v", detail.NodeList[0].CertExpiresAt, want)
+		}
+	})
+
+	t.Run("warning", func(t *testing.T) {
+		s := newService(t)
+		admin := newClusterFake(t)
+		admin.SetCertExpiry(clock.Add(60 * 24 * time.Hour))
+		other := aerolvmtest.New(t)
+		other.AdminToken = clusterAdminToken
+		other.SetCertExpiry(clock.Add(9 * 24 * time.Hour))
+		admin.SetMembers([]aerolvm.Member{
+			memberAt(admin.URL(), "node-a", true),
+			memberAt(other.URL(), "node-b", true),
+		})
+		detail := addTestCluster(t, s, admin, "eu-west")
+		detail, err := s.CheckCluster(localCtx(), detail.Slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != "degraded" {
+			t.Errorf("status = %q, detail = %q", detail.Status, detail.StatusDetail)
+		}
+		c, ok := findCheck(detail.Checks, "node certificates")
+		if !ok || c.OK || c.Fatal {
+			t.Fatalf("node certificates check = %+v", c)
+		}
+		for _, want := range []string{"node-b's cluster certificate expires in 9 days (2026-11-21)", "renewal has failed"} {
+			if !strings.Contains(c.Detail, want) {
+				t.Errorf("detail %q does not contain %q", c.Detail, want)
+			}
+		}
+		byName := map[string]*time.Time{}
+		for _, node := range detail.NodeList {
+			byName[node.Name] = node.CertExpiresAt
+		}
+		if at := byName["node-b"]; at == nil || !at.Equal(clock.Add(9*24*time.Hour)) {
+			t.Errorf("node-b cert_expires_at = %v", at)
+		}
+		if at := byName["node-a"]; at == nil || !at.Equal(clock.Add(60*24*time.Hour)) {
+			t.Errorf("node-a cert_expires_at = %v", at)
+		}
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		s := newService(t)
+		fake := newClusterFake(t)
+		fake.SetMembers([]aerolvm.Member{memberAt(fake.URL(), "node-a", true)})
+		detail := addTestCluster(t, s, fake, "eu-west")
+		detail, err := s.CheckCluster(localCtx(), detail.Slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != "ready" {
+			t.Errorf("status = %q, detail = %q", detail.Status, detail.StatusDetail)
+		}
+		c, ok := findCheck(detail.Checks, "node certificates")
+		if !ok || !c.OK || c.Detail != "could not read any node's certificate expiry" {
+			t.Errorf("node certificates check = %+v", c)
+		}
+		if len(detail.NodeList) != 1 || detail.NodeList[0].CertExpiresAt != nil {
+			t.Errorf("nodes = %+v", detail.NodeList)
+		}
+	})
+
+	t.Run("unreachable member skipped", func(t *testing.T) {
+		s := newService(t)
+		fake := newClusterFake(t)
+		fake.SetCertExpiry(clock.Add(60 * 24 * time.Hour))
+		fake.SetMembers([]aerolvm.Member{
+			memberAt(fake.URL(), "node-a", true),
+			memberAt(deadURL(t), "node-b", true),
+		})
+		detail := addTestCluster(t, s, fake, "eu-west")
+		detail, err := s.CheckCluster(localCtx(), detail.Slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Status != "ready" {
+			t.Errorf("status = %q, detail = %q", detail.Status, detail.StatusDetail)
+		}
+		c, ok := findCheck(detail.Checks, "node certificates")
+		if !ok || !c.OK {
+			t.Errorf("node certificates check = %+v", c)
+		}
+		for _, node := range detail.NodeList {
+			if node.Name == "node-b" && node.CertExpiresAt != nil {
+				t.Errorf("node-b has cert_expires_at = %v", node.CertExpiresAt)
+			}
+		}
+	})
+}
+
 func TestCheckClusterStatus(t *testing.T) {
 	s := newClusterService(t)
 	fake := newClusterFake(t)

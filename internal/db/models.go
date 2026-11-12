@@ -81,6 +81,7 @@ type NodeSample struct {
 	MemoryFreeMb  int64
 	DiskFreeGb    int64
 	CanAdmit      int64
+	CertExpiresAt sql.NullTime
 }
 
 type Organization struct {

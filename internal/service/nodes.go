@@ -29,6 +29,9 @@ type Node struct {
 	Version    string     `json:"version,omitempty"`
 	Alive      *bool      `json:"alive,omitempty"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// CertExpiresAt is the node's cluster certificate expiry from its latest
+	// sample; set only in a cluster's node_list.
+	CertExpiresAt *time.Time `json:"cert_expires_at,omitempty"`
 }
 
 // NodeList is returned by ListNodes. Data is never null.

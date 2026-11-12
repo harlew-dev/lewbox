@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -138,6 +139,34 @@ func TestClientMethods(t *testing.T) {
 	var apiErr *aerolvm.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
 		t.Fatalf("DeleteNode missing = %v", err)
+	}
+}
+
+func TestNodeCertExpiry(t *testing.T) {
+	ctx := context.Background()
+	fake := newFake(t)
+	client := aerolvm.New(fake.URL(), adminToken, aerolvm.WithRetry(0))
+
+	expires := time.Date(2026, 12, 1, 12, 0, 0, 0, time.UTC)
+	fake.SetCertExpiry(expires)
+	at, ok, err := client.NodeCertExpiry(ctx)
+	if err != nil || !ok || !at.Equal(expires) {
+		t.Fatalf("NodeCertExpiry = %v, %v, %v", at, ok, err)
+	}
+
+	fake.SetCertExpiry(time.Time{})
+	if _, ok, err := client.NodeCertExpiry(ctx); err != nil || ok {
+		t.Fatalf("NodeCertExpiry without a certificate = %v, %v", ok, err)
+	}
+
+	// Prometheus writes large gauges in scientific notation.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, "aerolvm_cluster_mtls_cert_not_after_unix 1.7648928e+09\n")
+	}))
+	defer srv.Close()
+	at, ok, err = aerolvm.New(srv.URL, adminToken, aerolvm.WithRetry(0)).NodeCertExpiry(ctx)
+	if err != nil || !ok || !at.Equal(time.Unix(1764892800, 0).UTC()) {
+		t.Fatalf("NodeCertExpiry scientific = %v, %v, %v", at, ok, err)
 	}
 }
 

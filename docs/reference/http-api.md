@@ -222,9 +222,12 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "version": "v0.7.0",
   "alive": true,
   "last_seen_at": "2026-11-11T15:22:51.1Z",
+  "cert_expires_at": "2026-12-01T12:00:00Z",
   "created_at": "2026-11-11T15:22:51.1Z"
 }
 ```
+
+`cert_expires_at` is present in a cluster's `node_list` when the latest check read the node's cluster certificate expiry; it is omitted when unknown.
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 

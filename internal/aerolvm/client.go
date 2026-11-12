@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -106,6 +108,44 @@ func (c *Client) Members(ctx context.Context) (Members, error) {
 	var out Members
 	err := c.do(ctx, http.MethodGet, "/v1/cluster/members", nil, &out, true)
 	return out, err
+}
+
+// NodeCertExpiry reads the node's cluster certificate expiry from the
+// aerolvm_cluster_mtls_cert_not_after_unix gauge on GET /v1/metrics. The bool
+// is false when the node isn't in cluster mode (the gauge is absent or 0).
+func (c *Client) NodeCertExpiry(ctx context.Context) (time.Time, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/metrics", nil)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("aerolvm GET /v1/metrics: %w", err)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("aerolvm GET /v1/metrics: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("aerolvm GET /v1/metrics: read response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return time.Time{}, false, parseAPIError(resp.StatusCode, data)
+	}
+	const gauge = "aerolvm_cluster_mtls_cert_not_after_unix"
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != gauge {
+			continue
+		}
+		seconds, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
+			return time.Time{}, false, nil
+		}
+		return time.Unix(int64(seconds), 0).UTC(), true, nil
+	}
+	return time.Time{}, false, nil
 }
 
 // CreateToken calls POST /v1/tokens.
