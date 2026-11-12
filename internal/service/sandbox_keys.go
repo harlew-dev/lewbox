@@ -17,23 +17,15 @@ import (
 // SandboxKey is a customer's runner token on one cluster. Lewbox stores only
 // its ID upstream and the last four characters of the token.
 type SandboxKey struct {
-	ID        string        `json:"id"`
-	Name      string        `json:"name"`
-	Region    SandboxRegion `json:"region"`
-	TokenHint string        `json:"token_hint"`
-	CreatedBy string        `json:"created_by,omitempty"`
-	CreatedAt time.Time     `json:"created_at"`
-	ExpiresAt *time.Time    `json:"expires_at"`
-	RevokedAt *time.Time    `json:"revoked_at"`
-	Expired   bool          `json:"expired"`
-}
-
-// SandboxRegion is the part of a Region a sandbox key names.
-type SandboxRegion struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	EndpointURL string `json:"endpoint_url"`
-	Runtime     string `json:"runtime"`
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Region    Region     `json:"region"`
+	TokenHint string     `json:"token_hint"`
+	CreatedBy string     `json:"created_by,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	RevokedAt *time.Time `json:"revoked_at"`
+	Expired   bool       `json:"expired"`
 }
 
 // NewSandboxKey is returned by CreateSandboxKey: the key, its token and the
@@ -81,7 +73,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
-	ttl, upstreamTTL, err := sandboxLifetime(req.ExpiresIn)
+	ttl, upstreamTTL, requested, err := sandboxLifetime(req.ExpiresIn)
 	if err != nil {
 		return NewSandboxKey{}, err
 	}
@@ -91,6 +83,11 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	}
 	if !c.org.Team.Valid || c.org.Team.String == "" {
 		return NewSandboxKey{}, fmt.Errorf("organization %q has no team", c.org.Slug)
+	}
+	if _, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
+		return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return NewSandboxKey{}, fmt.Errorf("get sandbox key: %w", err)
 	}
 
 	client, err := s.clusterClient(cluster)
@@ -106,7 +103,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		ExpiresIn: upstreamTTL,
 	})
 	if err != nil {
-		return NewSandboxKey{}, sandboxTokenErr(cluster.Slug, err)
+		return NewSandboxKey{}, s.sandboxTokenErr(ctx, cluster.Slug, requested, err)
 	}
 	if token.Token == "" {
 		return NewSandboxKey{}, unavailable("cluster %q returned no token", cluster.Slug)
@@ -133,14 +130,14 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		ExpiresAt:  expires,
 	})
 	if err != nil {
-		_ = client.RevokeToken(ctx, token.ID)
+		_ = client.RevokeToken(context.WithoutCancel(ctx), token.ID)
 		if db.IsUniqueViolation(err) {
 			return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
 		}
 		return NewSandboxKey{}, fmt.Errorf("create sandbox key: %w", err)
 	}
 
-	key := toSandboxKey(row, c.p.Email, cluster, now)
+	key := toSandboxKey(row, c.p.Email, c.p.InstanceAdmin, cluster, now, c.p.InstanceAdmin)
 	out := NewSandboxKey{
 		SandboxKey: key,
 		Token:      token.Token,
@@ -171,7 +168,7 @@ func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyLi
 	if err != nil {
 		return SandboxKeyList{}, fmt.Errorf("list sandbox keys: %w", err)
 	}
-	regions, err := s.sandboxRegions(ctx)
+	regions, err := s.clustersByID(ctx)
 	if err != nil {
 		return SandboxKeyList{}, err
 	}
@@ -179,7 +176,7 @@ func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyLi
 	out := SandboxKeyList{Data: make([]SandboxKey, 0, len(rows))}
 	for _, r := range rows {
 		cluster := regions[r.SandboxKey.ClusterID]
-		out.Data = append(out.Data, toSandboxKey(r.SandboxKey, r.CreatedByEmail.String, cluster, now))
+		out.Data = append(out.Data, toSandboxKey(r.SandboxKey, r.CreatedByEmail.String, r.CreatedByAdmin != 0, cluster, now, c.p.InstanceAdmin))
 	}
 	return out, nil
 }
@@ -197,15 +194,16 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	}
 	var row db.SandboxKey
 	var email sql.NullString
+	var createdByAdmin bool
 	if id, perr := uuid.Parse(ref); perr == nil {
 		r, err := s.q.GetSandboxKeyByID(ctx, db.GetSandboxKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
-		row, email = r.SandboxKey, r.CreatedByEmail
+		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
 		}
 	} else {
 		r, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: ref})
-		row, email = r.SandboxKey, r.CreatedByEmail
+		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
 		}
@@ -213,7 +211,7 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	if row.RevokedAt.Valid {
 		return SandboxKey{}, conflict("sandbox key %q is already revoked", ref)
 	}
-	if c.role == roleMember && !c.p.InstanceAdmin && c.p.Kind != "key" {
+	if c.role == roleMember && !c.p.InstanceAdmin {
 		if !row.CreatedBy.Valid || row.CreatedBy.String != c.p.UserID {
 			return SandboxKey{}, forbidden("only the member who created a key can revoke it; ask an owner or admin")
 		}
@@ -227,7 +225,7 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 		return SandboxKey{}, err
 	}
 	if err := client.RevokeToken(ctx, row.UpstreamID); err != nil {
-		return SandboxKey{}, unavailable("cluster %q: %s", cluster.Slug, err)
+		return SandboxKey{}, s.regionUnavailable(ctx, cluster.Slug, err)
 	}
 	now := s.now()
 	n, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
@@ -242,7 +240,7 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 		return SandboxKey{}, conflict("sandbox key %q is already revoked", ref)
 	}
 	row.RevokedAt = sql.NullTime{Time: now, Valid: true}
-	return toSandboxKey(row, email.String, cluster, now), nil
+	return toSandboxKey(row, email.String, createdByAdmin, cluster, now, c.p.InstanceAdmin), nil
 }
 
 // sandboxOrgReady refuses keys for an organization that is not active.
@@ -259,21 +257,27 @@ func sandboxOrgReady(status string) error {
 	}
 }
 
-// sandboxLifetime returns the stored lifetime (zero for never) and the value
-// sent upstream.
-func sandboxLifetime(raw string) (time.Duration, string, error) {
+// sandboxLifetime returns the stored lifetime (zero for never), the value
+// sent upstream and what the customer asked for. Upstream gets whole hours
+// rounded up, never the raw string.
+func sandboxLifetime(raw string) (time.Duration, string, time.Duration, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return defaultSandboxKeyLifetime, "90d", nil
+		return defaultSandboxKeyLifetime, upstreamLifetime(defaultSandboxKeyLifetime), defaultSandboxKeyLifetime, nil
 	}
 	if strings.EqualFold(raw, "never") {
-		return 0, neverSandboxKeyLifetime, nil
+		requested := 36500 * 24 * time.Hour
+		return 0, neverSandboxKeyLifetime, requested, nil
 	}
 	d, err := parseLifetime(raw)
 	if err != nil {
-		return 0, "", err
+		return 0, "", 0, err
 	}
-	return d, raw, nil
+	return d, upstreamLifetime(d), d, nil
+}
+
+func upstreamLifetime(d time.Duration) string {
+	return fmt.Sprintf("%dh", (d+time.Hour-1)/time.Hour)
 }
 
 // sandboxRegion finds the cluster behind ref. An empty ref means the only
@@ -316,16 +320,17 @@ func regionReady(status string) bool {
 	return status == "ready" || status == "degraded"
 }
 
-func (s *Service) sandboxRegions(ctx context.Context) (map[string]db.Cluster, error) {
+// clustersByID maps cluster IDs to rows, for rendering the region of a key.
+func (s *Service) clustersByID(ctx context.Context) (map[string]db.Cluster, error) {
 	rows, err := s.q.ListClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
-	regions := make(map[string]db.Cluster, len(rows))
+	clusters := make(map[string]db.Cluster, len(rows))
 	for _, row := range rows {
-		regions[row.ID] = row
+		clusters[row.ID] = row
 	}
-	return regions, nil
+	return clusters, nil
 }
 
 // mintSandboxToken mints a runner token, recovering from the 409 a retried 503
@@ -335,8 +340,7 @@ func mintSandboxToken(ctx context.Context, client *aerolvm.Client, req aerolvm.C
 	if err == nil {
 		return token, nil
 	}
-	var apiErr *aerolvm.APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict {
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != http.StatusConflict {
 		return aerolvm.Token{}, err
 	}
 	tokens, err := client.ListTokens(ctx)
@@ -355,13 +359,26 @@ func mintSandboxToken(ctx context.Context, client *aerolvm.Client, req aerolvm.C
 }
 
 // sandboxTokenErr turns an upstream token failure into the error the customer
-// sees. A rejected lifetime is the cluster's cap, not a bad request.
-func sandboxTokenErr(slug string, err error) error {
-	var apiErr *aerolvm.APIError
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusBadRequest {
+// sees. A lifetime over 365 days that the cluster refuses is its cap, not a
+// bad request.
+func (s *Service) sandboxTokenErr(ctx context.Context, slug string, requested time.Duration, err error) error {
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == http.StatusBadRequest && requested > 365*24*time.Hour {
 		return invalid("cluster %q refused the token lifetime: %s; raise SB_TOKEN_MAX_TTL on every node so keys can last", slug, apiErr.Message)
 	}
-	return unavailable("cluster %q: %s", slug, err)
+	return s.regionUnavailable(ctx, slug, err)
+}
+
+// regionUnavailable reports a cluster failure without exposing its URL.
+// AerolVM's own 4xx text is safe to show; instance admins get the detail.
+func (s *Service) regionUnavailable(ctx context.Context, slug string, err error) error {
+	s.log.Warn("region call failed", "region", slug, "err", err)
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status >= 400 && apiErr.Status < 500 {
+		return unavailable("region %q: %s", slug, apiErr.Message)
+	}
+	if p, ok := PrincipalFrom(ctx); ok && p.InstanceAdmin {
+		return unavailable("region %q: %s", slug, err)
+	}
+	return unavailable("region %q is not reachable right now; try again shortly", slug)
 }
 
 func sandboxKeyLookupErr(err error, ref string) error {
@@ -374,25 +391,19 @@ func sandboxKeyLookupErr(err error, ref string) error {
 	return nil
 }
 
-func toSandboxKey(r db.SandboxKey, createdBy string, cluster db.Cluster, now time.Time) SandboxKey {
+func toSandboxKey(r db.SandboxKey, createdBy string, createdByAdmin bool, cluster db.Cluster, now time.Time, callerAdmin bool) SandboxKey {
+	if createdByAdmin && !callerAdmin {
+		createdBy = "operator"
+	}
 	return SandboxKey{
 		ID:        r.ID,
 		Name:      r.Name,
-		Region:    toSandboxRegion(cluster),
+		Region:    toRegion(cluster),
 		TokenHint: "avm_…" + r.Last4,
 		CreatedBy: createdBy,
 		CreatedAt: r.CreatedAt.UTC(),
 		ExpiresAt: nullTime(r.ExpiresAt),
 		RevokedAt: nullTime(r.RevokedAt),
 		Expired:   r.ExpiresAt.Valid && !now.Before(r.ExpiresAt.Time),
-	}
-}
-
-func toSandboxRegion(c db.Cluster) SandboxRegion {
-	return SandboxRegion{
-		Slug:        c.Slug,
-		Name:        c.Name,
-		EndpointURL: c.EndpointURL,
-		Runtime:     c.Runtime,
 	}
 }

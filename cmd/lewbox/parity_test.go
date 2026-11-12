@@ -728,8 +728,14 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	if !strings.Contains(updated, `"slug":"pro"`) || !strings.Contains(updated, `"sandboxes":10`) || !strings.Contains(updated, `"team":"lbx-`) {
 		t.Errorf("updated organization = %s", updated)
 	}
-	e.same([]string{"org", "update", "acme", "--max-sandboxes", "unlimited"},
+	e.same([]string{"org", "update", "acme", "--max-sandboxes", "plan"},
 		"PATCH", "/v0/organizations/acme", `{"max_sandboxes":null}`, 200)
+	if _, errOut, code := e.cli("org", "update", "acme", "--max-sandboxes", "unlimited"); code != 2 || !strings.Contains(errOut, "plan without that limit") {
+		t.Errorf("org update unlimited: exit %d stderr %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("plan", "update", "pro", "--max-sandboxes", "0"); code != 2 || !strings.Contains(errOut, "positive") {
+		t.Errorf("plan update zero: exit %d stderr %s", code, errOut)
+	}
 	e.same([]string{"org", "list", "--status", "active"}, "GET", "/v0/organizations?status=active", "", 200)
 }
 

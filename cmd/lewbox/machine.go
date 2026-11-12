@@ -293,8 +293,7 @@ func (a *app) localClusterSize(ctx context.Context, runner machine.Runner) (int,
 	client := aerolvm.New(a.host().localAPIURL, pat, aerolvm.WithRetry(15*time.Second))
 	members, err := client.Members(ctx)
 	if err != nil {
-		var apiErr *aerolvm.APIError
-		if errors.As(err, &apiErr) && apiErr.Status == http.StatusServiceUnavailable && strings.Contains(apiErr.Message, "not enabled") {
+		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == http.StatusServiceUnavailable && strings.Contains(apiErr.Message, "not enabled") {
 			return 1, nil
 		}
 		return 0, err

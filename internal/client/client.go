@@ -145,9 +145,10 @@ func (c *Client) CheckCluster(ctx context.Context, ref string) (service.ClusterD
 }
 
 // RemoveCluster unregisters a cluster.
-func (c *Client) RemoveCluster(ctx context.Context, ref string) (service.Cluster, error) {
+func (c *Client) RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error) {
+	path := "/v0/clusters/" + url.PathEscape(ref) + "?force=" + strconv.FormatBool(force)
 	var out service.Cluster
-	err := c.do(ctx, http.MethodDelete, "/v0/clusters/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodDelete, path, nil, &out, defaultTimeout)
 	return out, err
 }
 

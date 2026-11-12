@@ -219,8 +219,7 @@ func (s *Service) removeClusterNode(ctx context.Context, row db.Node, req Remove
 		return unavailable("cluster %q: drain %q: %s", cluster.Slug, row.Name, err)
 	}
 	if err := client.DeleteNode(ctx, row.Name, req.Force); err != nil {
-		var apiErr *aerolvm.APIError
-		if !errors.As(err, &apiErr) || apiErr.Status != 404 {
+		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != 404 {
 			return unavailable("cluster %q: delete %q: %s", cluster.Slug, row.Name, err)
 		}
 	}

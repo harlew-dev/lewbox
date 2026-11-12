@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Principal is who is calling.
 type Principal struct {
@@ -48,6 +51,12 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 func PrincipalFrom(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(Principal)
 	return p, ok
+}
+
+// selfRef reports whether ref names the principal's own account, by ID or
+// email.
+func (p Principal) selfRef(ref string) bool {
+	return ref != "" && (ref == p.UserID || strings.EqualFold(ref, p.Email))
 }
 
 // requirePrincipal returns an error unless ctx carries a principal of any

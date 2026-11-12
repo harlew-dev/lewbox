@@ -3,10 +3,12 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -369,5 +371,59 @@ func TestRateLimitedResponse(t *testing.T) {
 	retry, err := strconv.Atoi(res.Header.Get("Retry-After"))
 	if err != nil || retry < 1 || retry > 60 {
 		t.Errorf("Retry-After = %q", res.Header.Get("Retry-After"))
+	}
+}
+
+func openSignup(t *testing.T, ts *testServer) {
+	t.Helper()
+	mode := "open"
+	if _, err := ts.svc.UpdateSettings(service.WithPrincipal(context.Background(), service.LocalPrincipal()),
+		service.UpdateSettingsRequest{Signup: &mode}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func signupBody(email string) string {
+	return `{"email":"` + email + `","password":"password-12345"}`
+}
+
+func TestTrustedProxyUsesForwardedFor(t *testing.T) {
+	ts := newTestServerWithOptions(t, []httpapi.RouterOption{
+		httpapi.WithTrustedProxies([]netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}),
+	})
+	openSignup(t, ts)
+	// The right-most entry is the client; the left one is caller-controlled.
+	headers := map[string]string{"X-Forwarded-For": "198.51.100.1, 203.0.113.7"}
+	for i := 0; i < 5; i++ {
+		res, body := ts.do("POST", "/v0/auth/signup", signupBody(fmt.Sprintf("a%d@example.com", i)), headers)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("signup %d: status %d body %s", i, res.StatusCode, body)
+		}
+	}
+	res, body := ts.do("POST", "/v0/auth/signup", signupBody("sixth@example.com"), headers)
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("sixth signup from the same client: status %d body %s", res.StatusCode, body)
+	}
+	res, body = ts.do("POST", "/v0/auth/signup", signupBody("elsewhere@example.com"),
+		map[string]string{"X-Forwarded-For": "203.0.113.8"})
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("signup from another client: status %d body %s", res.StatusCode, body)
+	}
+}
+
+func TestForwardedForIgnoredWithoutTrustedProxy(t *testing.T) {
+	ts := newTestServer(t)
+	openSignup(t, ts)
+	for i := 0; i < 5; i++ {
+		res, body := ts.do("POST", "/v0/auth/signup", signupBody(fmt.Sprintf("a%d@example.com", i)),
+			map[string]string{"X-Forwarded-For": fmt.Sprintf("198.51.100.%d", i+1)})
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("signup %d: status %d body %s", i, res.StatusCode, body)
+		}
+	}
+	res, body := ts.do("POST", "/v0/auth/signup", signupBody("sixth@example.com"),
+		map[string]string{"X-Forwarded-For": "203.0.113.99"})
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("an untrusted header changed the client IP: status %d body %s", res.StatusCode, body)
 	}
 }

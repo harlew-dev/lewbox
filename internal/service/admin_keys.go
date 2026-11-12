@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 	"uuid"
 
 	"github.com/harlew-dev/lewbox/internal/db"
@@ -140,13 +138,8 @@ func keyName(raw string) (string, error) {
 	if name == "" {
 		return "", invalid("name is required")
 	}
-	if utf8.RuneCountInString(name) > 64 {
-		return "", invalid("name must be at most 64 characters")
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return "", invalid("name must not contain control characters")
-		}
+	if err := displayName(name, "name", 64); err != nil {
+		return "", err
 	}
 	if _, err := uuid.Parse(name); err == nil {
 		return "", invalid("name must not be a UUID")

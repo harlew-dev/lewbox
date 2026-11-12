@@ -14,6 +14,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { roleLabel, useOrganizations } from '../lib/organizations'
 import { useDocumentTitle } from '../lib/use-document-title'
 import { failureMessage } from '../lib/use-load'
 
@@ -26,6 +27,7 @@ function problems(password: string, confirmation: string): Record<string, string
 export function AccountPage() {
   useDocumentTitle('Account')
   const { user } = useAuth()
+  const { current } = useOrganizations()
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -64,7 +66,7 @@ export function AccountPage() {
           <DescriptionDetails>{user.email}</DescriptionDetails>
           <DescriptionTerm>Role</DescriptionTerm>
           <DescriptionDetails>
-            {user.instance_admin ? 'Instance admin' : 'Member'}
+            {user.instance_admin ? 'Instance admin' : roleLabel(current?.role ?? 'member')}
           </DescriptionDetails>
           <DescriptionTerm>Sign-in method</DescriptionTerm>
           <DescriptionDetails>Password</DescriptionDetails>

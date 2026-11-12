@@ -53,8 +53,8 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 	}
 
 	now := s.now()
-	if retry, ok := s.limiter.allowIP(now, clientIPFrom(ctx)); !ok {
-		return "", SessionResponse{}, loginRateLimited(retry)
+	if retry, ok := s.signupLimiter.allowIP(now, clientIPFrom(ctx)); !ok {
+		return "", SessionResponse{}, signupRateLimited(retry)
 	}
 	plan, err := s.defaultPlan(ctx)
 	if err != nil {
@@ -84,7 +84,8 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 		_, _ = s.q.DeleteUser(cleanup, user.ID)
 	}()
 
-	name, err := signupOrganizationName(req.Organization, user.Email)
+	local := emailLocal(user.Email)
+	name, err := signupOrganizationName(req.Organization, local)
 	if err != nil {
 		return "", SessionResponse{}, err
 	}
@@ -92,7 +93,7 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 	if settings.Signup == signupApproval {
 		status = orgPending
 	}
-	org, err := s.createSignupOrganization(ctx, user.Email, name, status, plan.ID)
+	org, err := s.createSignupOrganization(ctx, local, name, status, plan.ID)
 	if err != nil {
 		return "", SessionResponse{}, err
 	}
@@ -117,11 +118,7 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 }
 
 // createSignupOrganization picks an unused slug and creates the organization.
-func (s *Service) createSignupOrganization(ctx context.Context, email, name, status, planID string) (db.Organization, error) {
-	local := email
-	if at := strings.IndexByte(email, '@'); at > 0 {
-		local = email[:at]
-	}
+func (s *Service) createSignupOrganization(ctx context.Context, local, name, status, planID string) (db.Organization, error) {
 	var err error
 	for range signupAttempts {
 		suffix, serr := signupSuffix()
@@ -155,16 +152,19 @@ func (s *Service) createSignupOrganization(ctx context.Context, email, name, sta
 }
 
 // signupOrganizationName defaults the display name from the email.
-func signupOrganizationName(raw, email string) (string, error) {
+func signupOrganizationName(raw, local string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
-		local := email
-		if at := strings.IndexByte(email, '@'); at > 0 {
-			local = email[:at]
-		}
 		name = local + "'s organization"
 	}
 	return orgName(name, "")
+}
+
+func emailLocal(email string) string {
+	if at := strings.IndexByte(email, '@'); at > 0 {
+		return email[:at]
+	}
+	return email
 }
 
 // signupSlug is the email's local part reduced to a DNS label, trimmed to 40

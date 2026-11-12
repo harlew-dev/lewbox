@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,9 @@ type RouterOptions struct {
 	// TrustedOrigins are extra origins allowed through the CSRF check, for a
 	// proxy that rewrites Host.
 	TrustedOrigins []string
+	// TrustedProxies are the networks whose X-Forwarded-For headers are
+	// believed. Empty means the header is ignored.
+	TrustedProxies []netip.Prefix
 	// Docs serves the documentation routes. A nil site answers 404.
 	Docs *docs.Site
 }
@@ -58,6 +62,11 @@ func WithCookieSecure(secure bool) RouterOption {
 // WithTrustedOrigins adds origins the CSRF check should accept.
 func WithTrustedOrigins(origins []string) RouterOption {
 	return func(o *RouterOptions) { o.TrustedOrigins = append(o.TrustedOrigins, origins...) }
+}
+
+// WithTrustedProxies trusts X-Forwarded-For from the given networks.
+func WithTrustedProxies(prefixes []netip.Prefix) RouterOption {
+	return func(o *RouterOptions) { o.TrustedProxies = append(o.TrustedProxies, prefixes...) }
 }
 
 // WithDocs serves the documentation site at /v0/docs.
@@ -210,7 +219,12 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	mux.HandleFunc("DELETE "+Prefix+"/clusters/{ref}", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.RemoveCluster(r.Context(), r.PathValue("ref"))
+		force, err := queryBool(r, "force")
+		if err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.RemoveCluster(r.Context(), r.PathValue("ref"), force)
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -521,7 +535,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		}})
 	}))
 
-	handler := withClientIP(withAuth(svc, log, opts, mux))
+	handler := withClientIP(withAuth(svc, log, opts, mux), opts.TrustedProxies)
 	return withNoStore(cp.Handler(handler))
 }
 
@@ -536,20 +550,67 @@ func withNoStore(next http.Handler) http.Handler {
 	})
 }
 
-// withClientIP records the connection's address for sign-in rate limiting.
-// X-Forwarded-For is deliberately ignored: it is caller-controlled, and
-// trusting it would let one client bypass the per-IP budget.
-func withClientIP(next http.Handler) http.Handler {
+// withClientIP records the connection's address for rate limiting. An
+// X-Forwarded-For header is ignored unless the connection comes from a
+// trusted proxy; then the right-most entry that is not itself trusted wins.
+func withClientIP(next http.Handler, trusted []netip.Prefix) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.RemoteAddr
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
+		host := remoteHost(r.RemoteAddr)
+		if addr := parseHost(host); addr.IsValid() && trustedAddr(addr, trusted) {
+			host = forwardedClient(host, r.Header.Values("X-Forwarded-For"), trusted)
 		}
 		if host != "" {
 			r = r.WithContext(service.WithClientIP(r.Context(), host))
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// remoteHost strips the port from a RemoteAddr.
+func remoteHost(remoteAddr string) string {
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return h
+	}
+	return remoteAddr
+}
+
+// parseHost reads an address, with or without a port.
+func parseHost(raw string) netip.Addr {
+	raw = strings.TrimSpace(raw)
+	if addr, err := netip.ParseAddr(raw); err == nil {
+		return addr.Unmap()
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		if addr, err := netip.ParseAddr(host); err == nil {
+			return addr.Unmap()
+		}
+	}
+	return netip.Addr{}
+}
+
+func trustedAddr(addr netip.Addr, prefixes []netip.Prefix) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedClient is the right-most X-Forwarded-For address that is not
+// trusted, or remote when there is none.
+func forwardedClient(remote string, values []string, trusted []netip.Prefix) string {
+	var entries []string
+	for _, value := range values {
+		entries = append(entries, strings.Split(value, ",")...)
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		addr := parseHost(entries[i])
+		if addr.IsValid() && !trustedAddr(addr, trusted) {
+			return addr.String()
+		}
+	}
+	return remote
 }
 
 // withAuth resolves a bearer token or a browser session cookie into a

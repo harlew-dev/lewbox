@@ -103,8 +103,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 	}
 	index, err := client.SandboxIndex(ctx)
 	if err != nil {
-		var apiErr *aerolvm.APIError
-		if !errors.As(err, &apiErr) || apiErr.Status != 503 || !strings.Contains(apiErr.Message, "not enabled") {
+		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != 503 || !strings.Contains(apiErr.Message, "not enabled") {
 			s.recordSyncError(ctx, row.ID, err)
 			return err
 		}
@@ -293,21 +292,21 @@ func organizationQuota(status string, limits Limits, used, total sandboxUse) (ae
 	quota := aerolvm.TeamQuota{}
 	blocked := false
 	if limits.Sandboxes != nil {
-		n := used.sandboxes + maxInt64(0, *limits.Sandboxes-total.sandboxes)
+		n := used.sandboxes + max(0, *limits.Sandboxes-total.sandboxes)
 		if n == 0 {
 			blocked = true
 		}
 		quota.MaxSandboxes = int(n)
 	}
 	if limits.Vcpus != nil {
-		n := used.vcpus + maxFloat(0, float64(*limits.Vcpus)-total.vcpus)
+		n := used.vcpus + max(0, float64(*limits.Vcpus)-total.vcpus)
 		if n == 0 {
 			blocked = true
 		}
 		quota.MaxCPU = n
 	}
 	if limits.MemoryMB != nil {
-		n := used.memoryMB + maxInt64(0, *limits.MemoryMB-total.memoryMB)
+		n := used.memoryMB + max(0, *limits.MemoryMB-total.memoryMB)
 		if n == 0 {
 			blocked = true
 		}
@@ -398,13 +397,6 @@ func (s *Service) stopOrganizationSandboxes(ctx context.Context, org db.Organiza
 	}
 }
 
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // syncPlanQuotas pushes the new limits to every organization on a plan.
 func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
 	orgs, err := s.q.ListOrganizations(ctx)
@@ -421,11 +413,4 @@ func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
 }

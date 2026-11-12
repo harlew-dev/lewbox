@@ -118,13 +118,13 @@ func newOrgCmd(a *app) *cobra.Command {
 				req.Plan = &updatePlan
 			}
 			var err error
-			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, parseCountLimit); err != nil {
+			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, orgLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, parseCountLimit); err != nil {
+			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, orgLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, parseMemoryLimit); err != nil {
+			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, orgLimits, parseMemoryLimit); err != nil {
 				return err
 			}
 			if req.Name == nil && req.Plan == nil &&
@@ -138,9 +138,9 @@ func newOrgCmd(a *app) *cobra.Command {
 	}
 	update.Flags().StringVar(&updateName, "name", "", "the new display name")
 	update.Flags().StringVar(&updatePlan, "plan", "", "the plan's slug")
-	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes: a number, or 0/unlimited for the plan's")
-	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs: a number, or 0/unlimited for the plan's")
-	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: 4096, 4096MB or 4GB, or 0/unlimited for the plan's")
+	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes: a positive number, or plan (the plan's limit)")
+	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs: a positive number, or plan (the plan's limit)")
+	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: a positive size such as 4096, 4096MB or 4GB, or plan (the plan's limit)")
 
 	status := func(use, short, value, question string) *cobra.Command {
 		return &cobra.Command{
@@ -367,7 +367,7 @@ func newSandboxKeyCmd(a *app) *cobra.Command {
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Revoke a sandbox key; it stops working at once (DELETE /v0/sandbox-keys/{id|name})",
+		Short:   "Revoke a sandbox key; it stops working within a few seconds (DELETE /v0/sandbox-keys/{id|name})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Revoke sandbox key %q? Anything using it stops working.", args[0])); err != nil {

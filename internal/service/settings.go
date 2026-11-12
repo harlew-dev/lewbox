@@ -2,10 +2,11 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/harlew-dev/lewbox/internal/db"
 )
@@ -48,13 +49,15 @@ func (s *Service) GetSettings(ctx context.Context) (Settings, error) {
 }
 
 // getSettings reads the settings without a permission check, because sign-up
-// and the public instance route need them too.
+// and the public instance route need them too. The stored default plan is an
+// ID; the response and the rest of the service use its slug.
 func (s *Service) getSettings(ctx context.Context) (Settings, error) {
 	out := Settings{InstanceName: defaultInstanceName, Signup: signupClosed}
 	rows, err := s.q.ListSettings(ctx)
 	if err != nil {
 		return Settings{}, fmt.Errorf("list settings: %w", err)
 	}
+	planID := ""
 	for _, row := range rows {
 		var value string
 		if err := json.Unmarshal([]byte(row.Value), &value); err != nil {
@@ -66,15 +69,30 @@ func (s *Service) getSettings(ctx context.Context) (Settings, error) {
 				out.InstanceName = value
 			}
 		case "signup":
-			out.Signup = value
+			// An unknown mode fails closed.
+			switch value {
+			case signupOpen, signupApproval, signupClosed:
+				out.Signup = value
+			}
 		case "default_plan":
-			out.DefaultPlan = value
+			planID = value
+		}
+	}
+	if planID != "" {
+		plan, err := s.q.GetPlanByID(ctx, planID)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return Settings{}, fmt.Errorf("get default plan: %w", err)
+		default:
+			out.DefaultPlan = plan.Slug
 		}
 	}
 	return out, nil
 }
 
-// UpdateSettings changes the instance settings. Instance admins only.
+// UpdateSettings changes the instance settings. Instance admins only. Every
+// field is checked before the first write.
 func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest) (Settings, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return Settings{}, err
@@ -82,35 +100,44 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 	if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil {
 		return Settings{}, invalid("nothing to change: set instance_name, signup or default_plan")
 	}
+	name := ""
 	if req.InstanceName != nil {
-		name := strings.TrimSpace(*req.InstanceName)
+		name = strings.TrimSpace(*req.InstanceName)
 		if name == "" {
 			return Settings{}, invalid("instance_name must not be empty")
 		}
-		if utf8.RuneCountInString(name) > 100 {
-			return Settings{}, invalid("instance_name must be at most 100 characters")
-		}
-		if err := s.setSetting(ctx, "instance_name", name); err != nil {
+		if err := displayName(name, "instance_name", 100); err != nil {
 			return Settings{}, err
 		}
 	}
+	mode := ""
 	if req.Signup != nil {
-		mode := strings.ToLower(strings.TrimSpace(*req.Signup))
+		mode = strings.ToLower(strings.TrimSpace(*req.Signup))
 		switch mode {
 		case signupOpen, signupApproval, signupClosed:
 		default:
 			return Settings{}, invalid("signup must be open, approval or closed")
 		}
+	}
+	var plan db.Plan
+	if req.DefaultPlan != nil {
+		var err error
+		if plan, err = s.findPlan(ctx, *req.DefaultPlan); err != nil {
+			return Settings{}, err
+		}
+	}
+	if req.InstanceName != nil {
+		if err := s.setSetting(ctx, "instance_name", name); err != nil {
+			return Settings{}, err
+		}
+	}
+	if req.Signup != nil {
 		if err := s.setSetting(ctx, "signup", mode); err != nil {
 			return Settings{}, err
 		}
 	}
 	if req.DefaultPlan != nil {
-		plan, err := s.findPlan(ctx, *req.DefaultPlan)
-		if err != nil {
-			return Settings{}, err
-		}
-		if err := s.setSetting(ctx, "default_plan", plan.Slug); err != nil {
+		if err := s.setSetting(ctx, "default_plan", plan.ID); err != nil {
 			return Settings{}, err
 		}
 	}

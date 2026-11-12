@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -33,6 +34,7 @@ type serveOptions struct {
 	syncInterval   time.Duration
 	cookieSecure   string
 	trustedOrigins []string
+	trustedProxies []string
 }
 
 func addServeFlags(cmd *cobra.Command, o *serveOptions) {
@@ -48,6 +50,21 @@ func addServeFlags(cmd *cobra.Command, o *serveOptions) {
 		"session cookie security: auto or always (env LEWBOX_COOKIE_SECURE)")
 	cmd.Flags().StringSliceVar(&o.trustedOrigins, "trusted-origin", envList("LEWBOX_TRUSTED_ORIGINS"),
 		"extra origin allowed by the CSRF check (repeatable; env LEWBOX_TRUSTED_ORIGINS, comma-separated)")
+	cmd.Flags().StringSliceVar(&o.trustedProxies, "trusted-proxy", envList("LEWBOX_TRUSTED_PROXIES"),
+		"CIDR of a proxy whose X-Forwarded-For sets the client IP (repeatable; env LEWBOX_TRUSTED_PROXIES, comma-separated)")
+}
+
+// trustedProxyPrefixes parses --trusted-proxy values.
+func (o *serveOptions) trustedProxyPrefixes() ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, raw := range o.trustedProxies {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, usagef("--trusted-proxy %q is not a CIDR such as 10.0.0.0/8", raw)
+		}
+		out = append(out, prefix.Masked())
+	}
+	return out, nil
 }
 
 // secureCookies turns --cookie-secure into a router option.
@@ -140,6 +157,10 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	if err != nil {
 		return err
 	}
+	proxies, err := o.trustedProxyPrefixes()
+	if err != nil {
+		return err
+	}
 	log := slog.New(slog.NewJSONHandler(a.stderr, nil))
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -148,6 +169,7 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	if err != nil {
 		return err
 	}
+	svc.SetLogger(log)
 	if err := bootstrapAdmin(ctx, svc, log); err != nil {
 		return err
 	}
@@ -168,6 +190,7 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	return serve(ctx, addr, webui.Handler(httpapi.NewRouter(svc, log,
 		httpapi.WithCookieSecure(secureCookies),
 		httpapi.WithTrustedOrigins(o.trustedOrigins),
+		httpapi.WithTrustedProxies(proxies),
 		httpapi.WithDocs(site),
 	), dist), log)
 }

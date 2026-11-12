@@ -11,6 +11,11 @@ const (
 	defaultIPAttemptsPerMinute    = 20
 	defaultEmailFailuresPerMinute = 5
 
+	// Sign-up has its own budget, so its spam cannot exhaust sign-in and vice
+	// versa.
+	signupIPAttemptsPerHour = 5
+	signupIPWindow          = time.Hour
+
 	// loginLimiterMaxKeys bounds the memory one limiter may use. Each key is
 	// pruned when its window ends; if the maps are still full, new keys are
 	// rejected (fail closed) instead of growing without bound.
@@ -19,17 +24,18 @@ const (
 )
 
 // loginLimiter is an in-memory, fixed-window rate limiter for sign-in. A key
-// gets a fresh count every loginWindow, starting with its first attempt.
-// Expired entries are pruned opportunistically on every call, and both maps
-// are capped at loginLimiterMaxKeys; a new key that cannot fit is rejected so
-// an attacker cannot grow memory by spraying unknown addresses or emails.
+// gets a fresh count every window, starting with its first attempt. Expired
+// entries are pruned opportunistically on every call, and both maps are
+// capped at loginLimiterMaxKeys; a new key that cannot fit is rejected so an
+// attacker cannot grow memory by spraying unknown addresses or emails.
 //
 // The limiter is shared by Login and WebLogin, so the two entry points have
-// the same budget.
+// the same budget. Sign-up uses its own instance with a longer window.
 type loginLimiter struct {
 	mu       sync.Mutex
 	perIP    int // 0 disables the per-client budget
 	perEmail int // 0 disables the per-email budget
+	window   time.Duration
 	ips      map[string]*loginWindowState
 	emails   map[string]*loginWindowState
 }
@@ -40,9 +46,14 @@ type loginWindowState struct {
 }
 
 func newLoginLimiter(perIP, perEmail int) *loginLimiter {
+	return newLimiter(perIP, perEmail, loginWindow)
+}
+
+func newLimiter(perIP, perEmail int, window time.Duration) *loginLimiter {
 	return &loginLimiter{
 		perIP:    perIP,
 		perEmail: perEmail,
+		window:   window,
 		ips:      make(map[string]*loginWindowState),
 		emails:   make(map[string]*loginWindowState),
 	}
@@ -120,7 +131,7 @@ func (l *loginLimiter) windowLocked(m map[string]*loginWindowState, key string, 
 	if len(m) >= loginLimiterMaxKeys {
 		return nil
 	}
-	w := &loginWindowState{reset: now.Add(loginWindow)}
+	w := &loginWindowState{reset: now.Add(l.window)}
 	m[key] = w
 	return w
 }
@@ -135,7 +146,7 @@ func (l *loginLimiter) fullRetryLocked(m map[string]*loginWindowState, now time.
 		}
 	}
 	if soonest.IsZero() {
-		return loginWindow
+		return l.window
 	}
 	return retryAfter(soonest, now)
 }
@@ -150,9 +161,19 @@ func retryAfter(reset, now time.Time) time.Duration {
 
 // loginRateLimited builds the shared rate_limited error and its message.
 func loginRateLimited(retry time.Duration) error {
+	return rateLimitedAfter(retry, "too many sign-in attempts; try again in %d seconds")
+}
+
+// signupRateLimited is the sign-up budget's version, kept separate so its
+// message names sign-up.
+func signupRateLimited(retry time.Duration) error {
+	return rateLimitedAfter(retry, "too many sign-up attempts; try again in %d seconds")
+}
+
+func rateLimitedAfter(retry time.Duration, format string) error {
 	seconds := int((retry + time.Second - 1) / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}
-	return rateLimited(retry, "too many sign-in attempts; try again in %d seconds", seconds)
+	return rateLimited(retry, format, seconds)
 }

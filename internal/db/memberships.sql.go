@@ -105,7 +105,7 @@ func (q *Queries) GetMembershipByID(ctx context.Context, arg GetMembershipByIDPa
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT memberships.id, memberships.org_id, memberships.user_id, memberships.role, memberships.created_at, users.email
+SELECT memberships.id, memberships.org_id, memberships.user_id, memberships.role, memberships.created_at, users.email, users.instance_admin
 FROM memberships
 JOIN users ON users.id = memberships.user_id
 WHERE memberships.org_id = ?
@@ -113,8 +113,9 @@ ORDER BY users.email
 `
 
 type ListMembersRow struct {
-	Membership Membership
-	Email      string
+	Membership    Membership
+	Email         string
+	InstanceAdmin int64
 }
 
 func (q *Queries) ListMembers(ctx context.Context, orgID string) ([]ListMembersRow, error) {
@@ -133,6 +134,7 @@ func (q *Queries) ListMembers(ctx context.Context, orgID string) ([]ListMembersR
 			&i.Membership.Role,
 			&i.Membership.CreatedAt,
 			&i.Email,
+			&i.InstanceAdmin,
 		); err != nil {
 			return nil, err
 		}

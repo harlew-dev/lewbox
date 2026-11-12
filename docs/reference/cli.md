@@ -88,6 +88,7 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
+| `--trusted-proxy CIDR` | `LEWBOX_TRUSTED_PROXIES` | | Trust `X-Forwarded-For` from this proxy network for the client IP, repeatable (env: comma-separated). Behind Caddy on the same host: `127.0.0.1/32` |
 
 `LEWBOX_BOOTSTRAP_ADMIN_EMAIL` with `LEWBOX_BOOTSTRAP_ADMIN_PASSWORD` (or `…_PASSWORD_FILE`) creates the first instance admin when there are no accounts. See [Run the orchestrator](../setup/run-the-orchestrator.md).
 
@@ -228,9 +229,9 @@ Prints a command that joins a machine without the Lewbox CLI, with a fresh singl
 | `--role ROLE` | `mixed` | The new node's role |
 | `--ttl DURATION` | `15m` | How long the token is valid |
 
-### `lewbox cluster remove ID|SLUG`
+### `lewbox cluster remove ID|SLUG [--force]`
 
-Stops managing the cluster: revokes Lewbox's admin token on it and forgets it and its nodes. The cluster keeps running. Asks to confirm.
+Stops managing the cluster: revokes Lewbox's admin token and the organization keys on it, then forgets it and its nodes. The cluster keeps running. If the keys cannot all be revoked it refuses, so no live token is left behind; `--force` removes it anyway. Asks to confirm.
 
 ***
 
@@ -288,7 +289,7 @@ Lists the organizations you can see (instance admins: all of them), or one. `--u
 
 ### `lewbox org update ID|SLUG [--name NAME] [--plan SLUG] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
 
-Renames an organization (owners, admins and instance admins) or, for instance admins, re-plans it or sets its own limits. `--max-memory` takes `4096`, `4096MB` or `4GB`; `0` or `unlimited` falls back to the plan's limit.
+Renames an organization (owners, admins and instance admins) or, for instance admins, re-plans it or sets its own limits. Limits take a positive number; `plan` falls back to the plan's limit, and `unlimited` is refused. `--max-memory` takes `4096`, `4096MB` or `4GB`.
 
 ### `lewbox org suspend ID|SLUG` · `lewbox org restore ID|SLUG` · `lewbox org approve ID|SLUG`
 
@@ -316,7 +317,7 @@ Creates a sandbox key for the organization's team and prints its `avm_…` token
 
 ### `lewbox key list` · `lewbox key revoke ID|NAME`
 
-Lists the keys, live ones first and revoked ones included; or revokes one at once. A member can revoke only the keys they created; owners and admins can revoke any. Revoke asks to confirm.
+Lists the keys, live ones first and revoked ones included; or revokes one, which stops working within a few seconds. A member can revoke only the keys they created; owners and admins can revoke any. Revoke asks to confirm.
 
 ***
 
@@ -354,11 +355,11 @@ Every plan with its limits, organization count and whether it is the default, or
 
 ### `lewbox plan create SLUG [--name NAME] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
 
-Creates a plan. A missing or cleared limit is unlimited.
+Creates a plan. A missing limit is unlimited; `unlimited` clears one.
 
 ### `lewbox plan update ID|SLUG [--name NAME] [--max-sandboxes N] [--max-vcpus N] [--max-memory SIZE]`
 
-Changes a plan. `--max-memory` takes `4096`, `4096MB` or `4GB`; `0` and `unlimited` clear a limit.
+Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB` or `4GB`. A limit is a positive number, or left out for no change.
 
 ### `lewbox plan delete ID|SLUG`
 

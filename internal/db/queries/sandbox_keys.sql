@@ -4,20 +4,23 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: ListSandboxKeys :many
-SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email
+SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ?
 ORDER BY (sandbox_keys.revoked_at IS NOT NULL), sandbox_keys.created_at DESC, sandbox_keys.id DESC;
 
 -- name: GetSandboxKeyByID :one
-SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email
+SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ? AND sandbox_keys.id = ?;
 
 -- name: GetLiveSandboxKeyByName :one
-SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email
+SELECT sqlc.embed(sandbox_keys), users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ? AND sandbox_keys.name = ? AND sandbox_keys.revoked_at IS NULL;

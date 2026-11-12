@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestCreateSandboxKey(t *testing.T) {
 	if out.TokenHint != "avm_…"+last4(token.Token) || strings.Contains(out.TokenHint, token.Token) {
 		t.Errorf("token hint = %q", out.TokenHint)
 	}
-	if out.Region.Slug != "eu-west" || out.Region.EndpointURL != f.fake.URL() || out.Region.Runtime != "docker" {
+	if out.Region.Slug != "eu-west" || out.Region.EndpointURL != f.fake.URL() || out.Region.Runtime != "docker" || out.Region.Status != "ready" {
 		t.Errorf("region = %+v", out.Region)
 	}
 	if out.Env["SB_API_URL"] != f.fake.URL() || out.Env["SB_API_TOKEN"] != token.Token {
@@ -338,7 +339,7 @@ func TestRemoveClusterRevokesSandboxKeys(t *testing.T) {
 	if !ok {
 		t.Fatal("upstream token not found")
 	}
-	if _, err := f.s.RemoveCluster(f.root, "eu-west"); err != nil {
+	if _, err := f.s.RemoveCluster(f.root, "eu-west", false); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -368,4 +369,102 @@ func TestSandboxKeyAnotherOrganization(t *testing.T) {
 	wantCode(t, err, CodeNotFound)
 	_, err = f.s.RevokeSandboxKey(f.outsider, "acme", "laptop")
 	wantCode(t, err, CodeNotFound)
+}
+
+func TestSandboxKeyErrorsDoNotLeakTheRegionURL(t *testing.T) {
+	f := newSandboxFixture(t)
+	f.fake.Stop()
+	_, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop"})
+	se := wantCode(t, err, CodeUnavailable)
+	if strings.Contains(se.Message, f.fake.URL()) || !strings.Contains(se.Message, "region") {
+		t.Errorf("customer message = %q", se.Message)
+	}
+
+	// Instance admins get the detail.
+	_, err = f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "laptop"})
+	se = wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(se.Message, "eu-west") {
+		t.Errorf("admin message = %q", se.Message)
+	}
+}
+
+func TestSandboxKeyKeepsAerolVM4xxText(t *testing.T) {
+	f := newSandboxFixture(t)
+	f.fake.FailNext("/v1/tokens", http.StatusTooManyRequests, `{"error":"slow down"}`, 1)
+	_, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop", ExpiresIn: "30d"})
+	se := wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(se.Message, "slow down") || strings.Contains(se.Message, "SB_TOKEN_MAX_TTL") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if strings.Contains(se.Message, f.fake.URL()) {
+		t.Errorf("message contains the region URL: %q", se.Message)
+	}
+}
+
+func TestSandboxLifetimeIsCanonical(t *testing.T) {
+	for _, tc := range []struct {
+		raw       string
+		stored    time.Duration
+		upstream  string
+		requested time.Duration
+	}{
+		{"", defaultSandboxKeyLifetime, "2160h", defaultSandboxKeyLifetime},
+		{"90m", 90 * time.Minute, "2h", 90 * time.Minute},
+		{"30d", 30 * 24 * time.Hour, "720h", 30 * 24 * time.Hour},
+		{"never", 0, "36500d", 36500 * 24 * time.Hour},
+	} {
+		stored, upstream, requested, err := sandboxLifetime(tc.raw)
+		if err != nil {
+			t.Fatalf("%q: %v", tc.raw, err)
+		}
+		if stored != tc.stored || upstream != tc.upstream || requested != tc.requested {
+			t.Errorf("%q = %v, %q, %v; want %v, %q, %v", tc.raw, stored, upstream, requested, tc.stored, tc.upstream, tc.requested)
+		}
+	}
+}
+
+func TestRemoveClusterFailsClosedOnLiveKeys(t *testing.T) {
+	f := newSandboxFixture(t)
+	if _, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.Stop()
+	_, err := f.s.RemoveCluster(f.root, "eu-west", false)
+	se := wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(se.Message, "could not revoke") || !strings.Contains(se.Message, "force") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if _, err := f.s.GetCluster(f.root, "eu-west"); err != nil {
+		t.Errorf("the cluster was removed anyway: %v", err)
+	}
+	if _, err := f.s.RemoveCluster(f.root, "eu-west", true); err != nil {
+		t.Errorf("forced removal: %v", err)
+	}
+}
+
+func TestSandboxKeyCreatorIsHidden(t *testing.T) {
+	f := newSandboxFixture(t)
+	out, err := f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.CreatedBy != "root@example.com" {
+		t.Errorf("instance admin sees its own address: %q", out.CreatedBy)
+	}
+	if _, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "mine"}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := f.s.ListSandboxKeys(f.owner, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range list.Data {
+		want := "owner@example.com"
+		if key.Name == "ops" {
+			want = "operator"
+		}
+		if key.CreatedBy != want {
+			t.Errorf("key %q created_by = %q, want %q", key.Name, key.CreatedBy, want)
+		}
+	}
 }

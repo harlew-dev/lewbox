@@ -25,14 +25,13 @@ func (o *OptionalInt) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// raw is the field's JSON in a request body, or nil when it was absent.
-func (o OptionalInt) raw() json.RawMessage {
-	if !o.Set {
-		return nil
-	}
+// MarshalJSON keeps null when the caller cleared the field.
+func (o OptionalInt) MarshalJSON() ([]byte, error) {
 	if o.Value == nil {
-		return json.RawMessage("null")
+		return []byte("null"), nil
 	}
-	data, _ := json.Marshal(*o.Value)
-	return data
+	return json.Marshal(*o.Value)
 }
+
+// IsZero reports the absent state, so omitzero drops an unset field.
+func (o OptionalInt) IsZero() bool { return !o.Set }

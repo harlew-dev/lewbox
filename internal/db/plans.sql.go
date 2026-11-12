@@ -84,11 +84,19 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, e
 }
 
 const deletePlan = `-- name: DeletePlan :execrows
-DELETE FROM plans WHERE id = ?
+DELETE FROM plans
+WHERE plans.id = ?1
+  AND NOT EXISTS (SELECT 1 FROM organizations WHERE organizations.plan_id = ?1)
+  AND NOT EXISTS (
+    SELECT 1 FROM settings
+    WHERE settings.key = 'default_plan' AND json_extract(settings.value, '$') = ?1
+  )
 `
 
-func (q *Queries) DeletePlan(ctx context.Context, id string) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deletePlan, id)
+// Refuses a plan an organization uses or that is the default. The guards are
+// in the statement, so a plan that becomes used is not removed.
+func (q *Queries) DeletePlan(ctx context.Context, planID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePlan, planID)
 	if err != nil {
 		return 0, err
 	}

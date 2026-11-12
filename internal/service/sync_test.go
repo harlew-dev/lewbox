@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,10 +248,9 @@ func TestQuotaHeadroomIsShared(t *testing.T) {
 
 func TestQuotaBlocksAndDeletes(t *testing.T) {
 	f := newSyncFixture(t)
-	// A zero override means a limit of zero, which AerolVM reads as no
-	// limit, so Lewbox must push the blocking quota instead.
-	zero := int64(0)
-	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{MaxSandboxes: OptionalInt{Value: &zero, Set: true}}); err != nil {
+	// A suspended organization gets the blocking quota.
+	suspended := orgSuspended
+	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &suspended}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.s.Sync(localCtx()); err != nil {
@@ -266,7 +266,11 @@ func TestQuotaBlocksAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Plan: &open.Slug, MaxSandboxes: OptionalInt{Set: true}}); err != nil {
+	active := orgActive
+	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &active, Plan: &open.Slug, MaxSandboxes: OptionalInt{Set: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Sync(localCtx()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.fake.QuotaDeletes(f.org.Team); got != 1 {
@@ -348,5 +352,31 @@ func TestSandboxActionsAreScoped(t *testing.T) {
 	}
 	if len(list.Data) != 0 {
 		t.Errorf("deleted sandbox still listed: %+v", list.Data)
+	}
+}
+
+func TestLimitsHidesRegionErrorsFromCustomers(t *testing.T) {
+	f := newSyncFixture(t)
+	createUser(t, f.s, "owner@example.com", false)
+	if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: "owner@example.com", Role: roleOwner}); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.Stop()
+	// The sync records the push failure, which contains the region's URL.
+	_ = f.s.Sync(localCtx())
+
+	admin, err := f.s.Limits(localCtx(), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(admin.Regions) != 1 || !strings.Contains(admin.Regions[0].Error, f.fake.URL()) {
+		t.Errorf("admin limits = %+v", admin.Regions)
+	}
+	customer, err := f.s.Limits(userCtx(t, f.s, "owner@example.com"), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(customer.Regions) != 1 || customer.Regions[0].Error == "" || strings.Contains(customer.Regions[0].Error, f.fake.URL()) {
+		t.Errorf("customer limits = %+v", customer.Regions)
 	}
 }

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+
+	"github.com/harlew-dev/lewbox/internal/db"
 )
 
 // Region is a cluster customers can place sandboxes in. It deliberately
@@ -32,16 +34,20 @@ func (s *Service) ListRegions(ctx context.Context) (RegionList, error) {
 	}
 	out := RegionList{Data: make([]Region, 0, len(rows))}
 	for _, row := range rows {
-		if row.Status != "ready" && row.Status != "degraded" {
+		if !regionReady(row.Status) {
 			continue
 		}
-		out.Data = append(out.Data, Region{
-			Slug:        row.Slug,
-			Name:        row.Name,
-			EndpointURL: row.EndpointURL,
-			Runtime:     row.Runtime,
-			Status:      row.Status,
-		})
+		out.Data = append(out.Data, toRegion(row))
 	}
 	return out, nil
+}
+
+func toRegion(c db.Cluster) Region {
+	return Region{
+		Slug:        c.Slug,
+		Name:        c.Name,
+		EndpointURL: c.EndpointURL,
+		Runtime:     c.Runtime,
+		Status:      c.Status,
+	}
 }

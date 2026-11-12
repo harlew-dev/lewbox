@@ -145,12 +145,14 @@ func (s *Service) GetUser(ctx context.Context, ref string) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	// Check permission before the lookup, so an unknown account is a 403 too.
+	ref = strings.TrimSpace(ref)
+	if !p.InstanceAdmin && !p.selfRef(ref) {
+		return User{}, forbidden("only an instance admin can read another account")
+	}
 	row, err := s.findUser(ctx, ref)
 	if err != nil {
 		return User{}, err
-	}
-	if !p.InstanceAdmin && p.UserID != row.ID {
-		return User{}, forbidden("only an instance admin can read another account")
 	}
 	return toUser(row), nil
 }

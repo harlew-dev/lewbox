@@ -57,6 +57,14 @@ lewbox.example.com {
 
 Then everyone signs in with `lewbox login https://lewbox.example.com`.
 
+Behind a proxy, every request reaches Lewbox from the proxy's address, so the per-IP sign-in and sign-up limits would see one client. Tell Lewbox to trust the proxy's `X-Forwarded-For` header:
+
+```ini
+ExecStart=/usr/local/bin/lewbox serve --listen 127.0.0.1:8080 --trusted-proxy 127.0.0.1/32
+```
+
+`--trusted-proxy` is repeatable. Only add the proxy's own network: Lewbox believes the header only from an address inside those CIDRs, and takes the right-most entry that is not itself trusted. With Caddy on the same host, `127.0.0.1/32` is enough.
+
 ## Back up
 
 Back up these two files together:

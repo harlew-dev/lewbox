@@ -10,7 +10,7 @@ SELECT * FROM memberships WHERE org_id = ? AND user_id = ?;
 SELECT * FROM memberships WHERE org_id = ? AND id = ?;
 
 -- name: ListMembers :many
-SELECT sqlc.embed(memberships), users.email
+SELECT sqlc.embed(memberships), users.email, users.instance_admin
 FROM memberships
 JOIN users ON users.id = memberships.user_id
 WHERE memberships.org_id = ?

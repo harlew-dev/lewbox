@@ -188,7 +188,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req SandboxActio
 	}
 	if remove {
 		if err := client.DeleteSandbox(ctx, id); err != nil {
-			return Sandbox{}, unavailable("cluster %q: %s", cluster.Slug, err)
+			return Sandbox{}, s.regionUnavailable(ctx, cluster.Slug, err)
 		}
 		if err := s.q.MarkSandboxGone(ctx, db.MarkSandboxGoneParams{
 			GoneAt:    sql.NullTime{Time: s.now(), Valid: true},
@@ -200,7 +200,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req SandboxActio
 		row.Sandbox.Status = "destroyed"
 	} else {
 		if err := client.StopSandbox(ctx, id); err != nil {
-			return Sandbox{}, unavailable("cluster %q: %s", cluster.Slug, err)
+			return Sandbox{}, s.regionUnavailable(ctx, cluster.Slug, err)
 		}
 		if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
 			Status:    "stopped",

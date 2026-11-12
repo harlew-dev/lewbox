@@ -249,14 +249,11 @@ func renderNewSandboxKey(w io.Writer, k service.NewSandboxKey, now time.Time) er
 	if err := renderObject(w, k.SandboxKey, now); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\ntoken: %s\n", k.Token)
-	for _, name := range []string{"SB_API_URL", "SB_API_TOKEN", "E2B_API_URL", "E2B_SANDBOX_URL", "E2B_API_KEY"} {
-		if value, ok := k.Env[name]; ok {
-			fmt.Fprintf(w, "%s=%s\n", name, value)
-		}
-		if value, ok := k.E2BEnv[name]; ok {
-			fmt.Fprintf(w, "%s=%s\n", name, value)
-		}
+	fmt.Fprintf(w, "\ntoken: %s\nSB_API_URL=%s\nSB_API_TOKEN=%s\n",
+		k.Token, k.Env["SB_API_URL"], k.Env["SB_API_TOKEN"])
+	if len(k.E2BEnv) > 0 {
+		fmt.Fprintf(w, "E2B_API_URL=%s\nE2B_SANDBOX_URL=%s\nE2B_API_KEY=%s\n",
+			k.E2BEnv["E2B_API_URL"], k.E2BEnv["E2B_SANDBOX_URL"], k.E2BEnv["E2B_API_KEY"])
 	}
 	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its last four characters and cannot show it again.")
 	return nil

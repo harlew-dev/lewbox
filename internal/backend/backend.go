@@ -27,7 +27,7 @@ type Backend interface {
 	ListClusters(ctx context.Context) (service.ClusterList, error)
 	GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
 	CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
-	RemoveCluster(ctx context.Context, ref string) (service.Cluster, error)
+	RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error)
 	ResolveCluster(ctx context.Context, ref string) (service.Cluster, error)
 	CreateJoinToken(ctx context.Context, ref string, req service.JoinTokenRequest) (service.JoinToken, error)
 
@@ -153,8 +153,8 @@ func (l Local) CheckCluster(ctx context.Context, ref string) (service.ClusterDet
 }
 
 // RemoveCluster unregisters a cluster.
-func (l Local) RemoveCluster(ctx context.Context, ref string) (service.Cluster, error) {
-	return l.Svc.RemoveCluster(l.withPrincipal(ctx), ref)
+func (l Local) RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error) {
+	return l.Svc.RemoveCluster(l.withPrincipal(ctx), ref, force)
 }
 
 // ResolveCluster finds a cluster by cluster or node reference.

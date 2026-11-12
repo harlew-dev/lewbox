@@ -283,9 +283,10 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 	return s.clusterDetail(ctx, row.ID)
 }
 
-// RemoveCluster revokes the cluster's admin token (best effort) and deletes
-// the cluster. Its nodes go too.
-func (s *Service) RemoveCluster(ctx context.Context, ref string) (Cluster, error) {
+// RemoveCluster revokes the cluster's admin token and its live sandbox keys
+// (best effort), then deletes the cluster. Its nodes go too. If the keys
+// cannot all be revoked, it refuses unless force is set.
+func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cluster, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return Cluster{}, err
 	}
@@ -300,14 +301,24 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string) (Cluster, error
 	if err != nil {
 		return Cluster{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
+	keys, err := s.q.ListLiveSandboxKeysByCluster(ctx, row.ID)
+	if err != nil && !force {
+		return Cluster{}, sandboxKeysNotRevoked(0, row.Slug)
+	}
 	if token, err := s.clusterToken(row); err == nil {
 		client := s.aerolvmClient(row.AdminURL, token)
-		if keys, err := s.q.ListLiveSandboxKeysByCluster(ctx, row.ID); err == nil {
-			for _, key := range keys {
-				_ = client.RevokeToken(ctx, key.UpstreamID)
+		failed := 0
+		for _, key := range keys {
+			if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
+				failed++
 			}
 		}
 		_ = client.RevokeToken(ctx, row.AdminTokenID)
+		if failed > 0 && !force {
+			return Cluster{}, sandboxKeysNotRevoked(failed, row.Slug)
+		}
+	} else if len(keys) > 0 && !force {
+		return Cluster{}, sandboxKeysNotRevoked(len(keys), row.Slug)
 	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
 	if err != nil {
@@ -317,6 +328,10 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string) (Cluster, error
 		return Cluster{}, notFound("cluster %q not found", ref)
 	}
 	return toCluster(row, len(nodes)), nil
+}
+
+func sandboxKeysNotRevoked(n int, slug string) error {
+	return unavailable("could not revoke %d sandbox keys on %q; fix the connection and try again, or pass force to remove it anyway", n, slug)
 }
 
 // ResolveCluster finds a cluster by its ID or slug, or by the name or ID of
@@ -491,8 +506,7 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 	if err != nil {
 		result.fatal = true
 		detail := fmt.Sprintf("GET %s/v1/whoami failed: %v", spec.AdminURL, err)
-		var apiErr *aerolvm.APIError
-		if errors.As(err, &apiErr) && apiErr.Status == 401 {
+		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == 401 {
 			detail = "whoami returned 401: check SB_IDENTITY_ENABLED=true on every node and that the token is an admin token (aerolvm token create --role admin --team '*' --expires-in 36500d)"
 		}
 		add(Check{Name: "admin_token", Fatal: true, Detail: detail})
@@ -512,8 +526,7 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 
 	members, err := client.Members(ctx)
 	if err != nil {
-		var apiErr *aerolvm.APIError
-		if errors.As(err, &apiErr) && apiErr.Status == 503 && strings.Contains(apiErr.Message, "not enabled") {
+		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == 503 && strings.Contains(apiErr.Message, "not enabled") {
 			result.members = []aerolvm.Member{{
 				NodeID:   spec.Slug,
 				NodeName: spec.Slug,

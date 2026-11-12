@@ -16,6 +16,7 @@ import {
   Cog6ToothIcon,
 } from '@heroicons/react/16/solid'
 import type { User } from '../lib/api'
+import { roleLabel, useOrganizations } from '../lib/organizations'
 
 function initials(email: string): string {
   const name = email.split('@')[0] ?? email
@@ -55,8 +56,9 @@ export function AccountMenu({
   onSignOut: () => void
   placement: 'sidebar' | 'navbar'
 }) {
+  const { current } = useOrganizations()
   if (!user) return null
-  const role = user.instance_admin ? 'Instance admin' : 'Member'
+  const role = user.instance_admin ? 'Instance admin' : roleLabel(current?.role ?? 'member')
   return (
     <Dropdown>
       {placement === 'sidebar' ? (

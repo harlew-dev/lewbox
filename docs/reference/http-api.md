@@ -89,7 +89,7 @@ Instance admins only.
 
 ### Plans
 
-Instance admins only. A `null` limit is unlimited.
+Instance admins only. A limit is a positive integer; `null` is unlimited and `0` is refused.
 
 | Route | Who | |
 |---|---|---|
@@ -106,7 +106,7 @@ Instance admins only. A `null` limit is unlimited.
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
 | `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, admin_token}` → `201` ClusterDetail. A failed required check → `412` with the checks in `details` |
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
-| `DELETE /v0/clusters/{ref}` | admin | Stop managing it → the Cluster |
+| `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
 | `POST /v0/clusters/{ref}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
 | `GET /v0/clusters/resolve/{ref}` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
@@ -141,7 +141,7 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `GET /v0/organizations?user={ref}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
 | `POST /v0/organizations` | admin | `{slug, name, owner, plan}` → `201` Organization. `owner` (an email or ID) defaults to you; `plan` (a slug) defaults to the instance's default plan |
 | `GET /v0/organizations/{ref}` | its members, admins, its keys | Organization |
-| `PATCH /v0/organizations/{ref}` | owner or admin; plan, limits and status: admin | `{name}` renames. Instance admins can also set `{plan, max_sandboxes, max_vcpus, max_memory_mb, status}`. A `null` limit falls back to the plan's; `status` is `active` or `suspended` → Organization |
+| `PATCH /v0/organizations/{ref}` | owner or admin; plan, limits and status: admin | `{name}` renames. Instance admins can also set `{plan, max_sandboxes, max_vcpus, max_memory_mb, status}`. A `null` limit on an organization falls back to the plan's; a limit is a positive integer and `0` is refused; `status` is `active` or `suspended` → Organization |
 | `GET /v0/organization` | as for the header's, or the key's own | Organization |
 | `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |

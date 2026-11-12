@@ -3,17 +3,23 @@
 #
 #   ./dev.sh up && ./dev.sh cluster && ./customers.sh
 #
+# Or against a real instance (see plans/RELEASING.md). It changes settings
+# while it runs and puts them back on exit; it leaves two test customers and
+# an e2e-<time> plan behind:
+#
+#   LEWBOX_URL=https://lewbox.example.com LEWBOX_REGION=eu-west \
+#   LEWBOX_ADMIN_EMAIL=you@example.com LEWBOX_ADMIN_PASSWORD=… ./customers.sh
+#
 # Sign-up, a sandbox key, a sandbox run with that key straight on the cluster,
 # Lewbox's mirror and isolation, the plan's limit enforced by AerolVM, stop and
 # delete from Lewbox, usage, monitoring, suspension, credits and revocation.
 # e2e.sh runs it too. Each step prints PASS or FAIL; it exits 1 on a failure.
 set -euo pipefail
 
-API="http://127.0.0.1:${LEWBOX_DEV_PORT:-8080}"
-CLUSTER="${LEWBOX_DEV_CLUSTER:-lab}"
+API="${LEWBOX_URL:-http://127.0.0.1:${LEWBOX_DEV_PORT:-8080}}"
+CLUSTER="${LEWBOX_REGION:-${LEWBOX_DEV_CLUSTER:-lab}}"
 RUN="$(date +%s)"
 JAR="$(mktemp -d)"
-trap 'rm -rf "$JAR"' EXIT
 
 STEP=0
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
@@ -30,8 +36,12 @@ eventually() {
 
 # The operator, with a bearer token.
 tok=$(curl -fsS -X POST "$API/v0/auth/login" -H 'Content-Type: application/json' \
-	-d "{\"email\":\"${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}\",\"password\":\"${LEWBOX_DEV_PASSWORD:-dev-password-123}\"}" | jq -r .token)
+	-d "$(jq -n --arg e "${LEWBOX_ADMIN_EMAIL:-${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}}" --arg p "${LEWBOX_ADMIN_PASSWORD:-${LEWBOX_DEV_PASSWORD:-dev-password-123}}" '{email: $e, password: $p}')" | jq -r .token)
 admin() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' "$API$p" "$@"; }
+
+# Put the operator's settings back however the run ends.
+ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan} + (if has("billing") then {billing} else {} end)')
+trap 'admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not restore settings: $ORIGINAL" >&2; rm -rf "$JAR"' EXIT
 
 # A customer: a browser session cookie, and their organization in the header.
 declare -A ORG KEY
@@ -147,5 +157,4 @@ cust a DELETE /v0/sandbox-keys/e2e >/dev/null && pass "revoked in Lewbox"
 eventually 30 "the cluster answers 401" whoami_is a 401
 cust b DELETE /v0/sandbox-keys/e2e >/dev/null
 
-admin PATCH /v0/settings -d '{"signup":"closed","default_plan":"free"}' >/dev/null
 printf '\n\033[32mcustomer journey passed\033[0m\n'

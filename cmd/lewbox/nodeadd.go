@@ -167,8 +167,7 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		AdminToken:  token,
 	})
 	if err != nil {
-		var se *service.Error
-		if errors.As(err, &se) && se.Code == service.CodeConflict {
+		if se, ok := errors.AsType[*service.Error](err); ok && se.Code == service.CodeConflict {
 			a.say("  ✓ cluster %q is already registered; checking it instead", slug)
 			detail, err = b.CheckCluster(ctx, slug)
 		}

@@ -58,7 +58,8 @@ func (q *Queries) CreateSandboxKey(ctx context.Context, arg CreateSandboxKeyPara
 }
 
 const getLiveSandboxKeyByName = `-- name: GetLiveSandboxKeyByName :one
-SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email
+SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ? AND sandbox_keys.name = ? AND sandbox_keys.revoked_at IS NULL
@@ -72,6 +73,7 @@ type GetLiveSandboxKeyByNameParams struct {
 type GetLiveSandboxKeyByNameRow struct {
 	SandboxKey     SandboxKey
 	CreatedByEmail sql.NullString
+	CreatedByAdmin int64
 }
 
 func (q *Queries) GetLiveSandboxKeyByName(ctx context.Context, arg GetLiveSandboxKeyByNameParams) (GetLiveSandboxKeyByNameRow, error) {
@@ -89,12 +91,14 @@ func (q *Queries) GetLiveSandboxKeyByName(ctx context.Context, arg GetLiveSandbo
 		&i.SandboxKey.ExpiresAt,
 		&i.SandboxKey.RevokedAt,
 		&i.CreatedByEmail,
+		&i.CreatedByAdmin,
 	)
 	return i, err
 }
 
 const getSandboxKeyByID = `-- name: GetSandboxKeyByID :one
-SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email
+SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ? AND sandbox_keys.id = ?
@@ -108,6 +112,7 @@ type GetSandboxKeyByIDParams struct {
 type GetSandboxKeyByIDRow struct {
 	SandboxKey     SandboxKey
 	CreatedByEmail sql.NullString
+	CreatedByAdmin int64
 }
 
 func (q *Queries) GetSandboxKeyByID(ctx context.Context, arg GetSandboxKeyByIDParams) (GetSandboxKeyByIDRow, error) {
@@ -125,6 +130,7 @@ func (q *Queries) GetSandboxKeyByID(ctx context.Context, arg GetSandboxKeyByIDPa
 		&i.SandboxKey.ExpiresAt,
 		&i.SandboxKey.RevokedAt,
 		&i.CreatedByEmail,
+		&i.CreatedByAdmin,
 	)
 	return i, err
 }
@@ -168,7 +174,8 @@ func (q *Queries) ListLiveSandboxKeysByCluster(ctx context.Context, clusterID st
 }
 
 const listSandboxKeys = `-- name: ListSandboxKeys :many
-SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email
+SELECT sandbox_keys.id, sandbox_keys.org_id, sandbox_keys.cluster_id, sandbox_keys.name, sandbox_keys.upstream_id, sandbox_keys.last4, sandbox_keys.created_by, sandbox_keys.created_at, sandbox_keys.expires_at, sandbox_keys.revoked_at, users.email AS created_by_email,
+       COALESCE(users.instance_admin, 0) AS created_by_admin
 FROM sandbox_keys
 LEFT JOIN users ON users.id = sandbox_keys.created_by
 WHERE sandbox_keys.org_id = ?
@@ -178,6 +185,7 @@ ORDER BY (sandbox_keys.revoked_at IS NOT NULL), sandbox_keys.created_at DESC, sa
 type ListSandboxKeysRow struct {
 	SandboxKey     SandboxKey
 	CreatedByEmail sql.NullString
+	CreatedByAdmin int64
 }
 
 func (q *Queries) ListSandboxKeys(ctx context.Context, orgID string) ([]ListSandboxKeysRow, error) {
@@ -201,6 +209,7 @@ func (q *Queries) ListSandboxKeys(ctx context.Context, orgID string) ([]ListSand
 			&i.SandboxKey.ExpiresAt,
 			&i.SandboxKey.RevokedAt,
 			&i.CreatedByEmail,
+			&i.CreatedByAdmin,
 		); err != nil {
 			return nil, err
 		}

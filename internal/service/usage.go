@@ -236,7 +236,13 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 		if state, ok := stateByCluster[cluster.ID]; ok {
 			at := state.PushedAt.UTC()
 			region.PushedAt = &at
-			region.Error = state.Error
+			if state.Error != "" {
+				if c.p.InstanceAdmin {
+					region.Error = state.Error
+				} else {
+					region.Error = "the region reported an error while syncing"
+				}
+			}
 			if state.Quota != "none" {
 				var quota aerolvm.TeamQuota
 				if json.Unmarshal([]byte(state.Quota), &quota) == nil {

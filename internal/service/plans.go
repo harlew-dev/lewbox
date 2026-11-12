@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,32 +40,13 @@ type CreatePlanRequest struct {
 }
 
 // UpdatePlanRequest changes the fields that are set. For a limit, absent means
-// no change and null means unlimited.
+// no change, null means unlimited and a number means that limit.
 type UpdatePlanRequest struct {
 	Slug         *string     `json:"slug,omitempty"`
 	Name         *string     `json:"name,omitempty"`
-	MaxSandboxes OptionalInt `json:"max_sandboxes,omitempty"`
-	MaxVcpus     OptionalInt `json:"max_vcpus,omitempty"`
-	MaxMemoryMB  OptionalInt `json:"max_memory_mb,omitempty"`
-}
-
-// MarshalJSON omits limits that were not in the request, so the remote client
-// sends the same body the caller meant.
-func (r UpdatePlanRequest) MarshalJSON() ([]byte, error) {
-	type wire struct {
-		Slug         *string         `json:"slug,omitempty"`
-		Name         *string         `json:"name,omitempty"`
-		MaxSandboxes json.RawMessage `json:"max_sandboxes,omitempty"`
-		MaxVcpus     json.RawMessage `json:"max_vcpus,omitempty"`
-		MaxMemoryMB  json.RawMessage `json:"max_memory_mb,omitempty"`
-	}
-	return json.Marshal(wire{
-		Slug:         r.Slug,
-		Name:         r.Name,
-		MaxSandboxes: r.MaxSandboxes.raw(),
-		MaxVcpus:     r.MaxVcpus.raw(),
-		MaxMemoryMB:  r.MaxMemoryMB.raw(),
-	})
+	MaxSandboxes OptionalInt `json:"max_sandboxes,omitzero"`
+	MaxVcpus     OptionalInt `json:"max_vcpus,omitzero"`
+	MaxMemoryMB  OptionalInt `json:"max_memory_mb,omitzero"`
 }
 
 // ListPlans returns every plan, ordered by slug. Instance admins only.
@@ -126,15 +106,15 @@ func (s *Service) CreatePlan(ctx context.Context, req CreatePlanRequest) (Plan, 
 	if err != nil {
 		return Plan{}, err
 	}
-	sandboxes, err := planLimit(req.MaxSandboxes, "max_sandboxes")
+	sandboxes, err := limitValue(req.MaxSandboxes, "max_sandboxes", "for unlimited")
 	if err != nil {
 		return Plan{}, err
 	}
-	vcpus, err := planLimit(req.MaxVcpus, "max_vcpus")
+	vcpus, err := limitValue(req.MaxVcpus, "max_vcpus", "for unlimited")
 	if err != nil {
 		return Plan{}, err
 	}
-	memory, err := planLimit(req.MaxMemoryMB, "max_memory_mb")
+	memory, err := limitValue(req.MaxMemoryMB, "max_memory_mb", "for unlimited")
 	if err != nil {
 		return Plan{}, err
 	}
@@ -142,9 +122,9 @@ func (s *Service) CreatePlan(ctx context.Context, req CreatePlanRequest) (Plan, 
 		ID:           uuid.NewV7().String(),
 		Slug:         slug,
 		Name:         name,
-		MaxSandboxes: nullInt64(sandboxes),
-		MaxVcpus:     nullInt64(vcpus),
-		MaxMemoryMb:  nullInt64(memory),
+		MaxSandboxes: sandboxes,
+		MaxVcpus:     vcpus,
+		MaxMemoryMb:  memory,
 		CreatedAt:    s.now(),
 	})
 	if db.IsUniqueViolation(err) {
@@ -172,7 +152,6 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 	if err != nil {
 		return Plan{}, err
 	}
-	oldSlug := row.Slug
 	if req.Slug != nil {
 		row.Slug, err = planSlug(*req.Slug)
 		if err != nil {
@@ -186,19 +165,19 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 		}
 	}
 	if req.MaxSandboxes.Set {
-		row.MaxSandboxes, err = planLimitNull(req.MaxSandboxes.Value, "max_sandboxes")
+		row.MaxSandboxes, err = limitValue(req.MaxSandboxes.Value, "max_sandboxes", "for unlimited")
 		if err != nil {
 			return Plan{}, err
 		}
 	}
 	if req.MaxVcpus.Set {
-		row.MaxVcpus, err = planLimitNull(req.MaxVcpus.Value, "max_vcpus")
+		row.MaxVcpus, err = limitValue(req.MaxVcpus.Value, "max_vcpus", "for unlimited")
 		if err != nil {
 			return Plan{}, err
 		}
 	}
 	if req.MaxMemoryMB.Set {
-		row.MaxMemoryMb, err = planLimitNull(req.MaxMemoryMB.Value, "max_memory_mb")
+		row.MaxMemoryMb, err = limitValue(req.MaxMemoryMB.Value, "max_memory_mb", "for unlimited")
 		if err != nil {
 			return Plan{}, err
 		}
@@ -218,16 +197,6 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 		return Plan{}, fmt.Errorf("update plan: %w", err)
 	}
 
-	// Keep the default-plan setting pointing at the same plan after a rename.
-	settings, err := s.getSettings(ctx)
-	if err != nil {
-		return Plan{}, err
-	}
-	if settings.DefaultPlan == oldSlug && updated.Slug != oldSlug {
-		if err := s.setSetting(ctx, "default_plan", updated.Slug); err != nil {
-			return Plan{}, err
-		}
-	}
 	if req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set {
 		if err := s.syncPlanQuotas(ctx, updated.ID); err != nil {
 			s.log.Warn("quota sync failed", "plan", updated.Slug, "err", err)
@@ -237,11 +206,16 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 	if err != nil {
 		return Plan{}, err
 	}
-	return toPlan(updated, counts[updated.ID], updated.Slug == settings.DefaultPlan || settings.DefaultPlan == oldSlug), nil
+	settings, err := s.getSettings(ctx)
+	if err != nil {
+		return Plan{}, err
+	}
+	return toPlan(updated, counts[updated.ID], updated.Slug == settings.DefaultPlan), nil
 }
 
 // DeletePlan removes a plan that no organization uses and that is not the
-// default. Instance admins only.
+// default. Instance admins only. The guards are in the DELETE, so a row that
+// becomes used between the lookup and the delete is not removed.
 func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return Plan{}, err
@@ -250,26 +224,19 @@ func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	counts, err := s.planOrganizationCounts(ctx)
-	if err != nil {
-		return Plan{}, err
-	}
-	if n := counts[row.ID]; n > 0 {
-		return Plan{}, conflict("plan %q is used by %d organization(s); move them to another plan first", row.Slug, n)
-	}
-	settings, err := s.getSettings(ctx)
-	if err != nil {
-		return Plan{}, err
-	}
-	if settings.DefaultPlan == row.Slug {
-		return Plan{}, conflict("plan %q is the default plan; choose another default first", row.Slug)
-	}
 	n, err := s.q.DeletePlan(ctx, row.ID)
 	if err != nil {
 		return Plan{}, fmt.Errorf("delete plan: %w", err)
 	}
 	if n == 0 {
-		return Plan{}, notFound("plan %q not found", ref)
+		counts, err := s.planOrganizationCounts(ctx)
+		if err != nil {
+			return Plan{}, err
+		}
+		if count := counts[row.ID]; count > 0 {
+			return Plan{}, conflict("plan %q is used by %d organization(s); move them to another plan first", row.Slug, count)
+		}
+		return Plan{}, conflict("plan %q is the default plan; choose another default first", row.Slug)
 	}
 	return toPlan(row, 0, false), nil
 }
@@ -371,31 +338,16 @@ func planSlug(raw string) (string, error) {
 	return slug, nil
 }
 
-// planLimit normalizes an API limit: nil and 0 are unlimited.
-func planLimit(n *int64, field string) (*int64, error) {
-	if n == nil || *n == 0 {
-		return nil, nil
-	}
-	if *n < 0 {
-		return nil, invalid("%s must be 0 or more", field)
-	}
-	return n, nil
-}
-
-// planLimitNull is planLimit for a PATCH value.
-func planLimitNull(n *int64, field string) (sql.NullInt64, error) {
-	value, err := planLimit(n, field)
-	if err != nil {
-		return sql.NullInt64{}, err
-	}
-	return nullInt64(value), nil
-}
-
-func nullInt64(n *int64) sql.NullInt64 {
+// limitValue checks a limit: a positive number, or nil for the null meaning
+// (unlimited on a plan, the plan's value on an override).
+func limitValue(n *int64, field, nullMeaning string) (sql.NullInt64, error) {
 	if n == nil {
-		return sql.NullInt64{}
+		return sql.NullInt64{}, nil
 	}
-	return sql.NullInt64{Int64: *n, Valid: true}
+	if *n < 1 {
+		return sql.NullInt64{}, invalid("a limit must be at least 1; use null %s", nullMeaning)
+	}
+	return sql.NullInt64{Int64: *n, Valid: true}, nil
 }
 
 func nullInt(n sql.NullInt64) *int64 {

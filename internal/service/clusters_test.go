@@ -624,7 +624,7 @@ func TestRemoveCluster(t *testing.T) {
 	setMembers(fake, "node-a")
 	addTestCluster(t, s, fake, "eu-west")
 
-	removed, err := s.RemoveCluster(localCtx(), "eu-west")
+	removed, err := s.RemoveCluster(localCtx(), "eu-west", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +706,7 @@ func TestClusterPermissions(t *testing.T) {
 	if _, err := s.CreateJoinToken(plainCtx, detail.Slug, JoinTokenRequest{}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.RemoveCluster(plainCtx, detail.Slug); err != nil {
+	if _, err := s.RemoveCluster(plainCtx, detail.Slug, false); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
 }

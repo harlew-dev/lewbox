@@ -301,7 +301,7 @@ func TestBackendsAgree(t *testing.T) {
 			name:  "remove cluster",
 			local: resolveCluster,
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				v, err := b.RemoveCluster(ctx, "eu-west")
+				v, err := b.RemoveCluster(ctx, "eu-west", false)
 				return v, err
 			},
 			compare: true,

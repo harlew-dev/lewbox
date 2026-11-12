@@ -56,6 +56,11 @@ export function useOrganizations(): OrganizationsValue {
   return useContext(OrganizationsContext)
 }
 
+// roleLabel is the display form of a membership role.
+export function roleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
 export type Permissions = ReturnType<typeof orgPermissions>
 
 // What the caller may do in an organization, from its role there.

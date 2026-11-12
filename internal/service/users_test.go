@@ -474,6 +474,9 @@ func TestPermissions(t *testing.T) {
 	if _, err := s.GetUser(plainCtx, other.Email); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
+	// An unknown account is a 403 too, not a 404.
+	_, lookupErr := s.GetUser(plainCtx, "nobody@example.com")
+	wantCode(t, lookupErr, CodeForbidden)
 	if _, err := s.SetPassword(plainCtx, other.Email, SetPasswordRequest{Password: "another-good-password"}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}

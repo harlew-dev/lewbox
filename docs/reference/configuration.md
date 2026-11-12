@@ -25,6 +25,7 @@ Flags win over environment variables, which win over saved settings, which win o
 | `LEWBOX_CHECK_INTERVAL` | `--check-interval` | `1m` (`0` turns checks off) |
 | `LEWBOX_COOKIE_SECURE` | `--cookie-secure` | `auto`. `always` forces `Secure` browser session cookies; use it behind a TLS proxy that does not set `X-Forwarded-Proto` |
 | `LEWBOX_TRUSTED_ORIGINS` | `--trusted-origin` | Extra origins the CSRF check accepts, comma-separated, such as `https://lewbox.example.com` |
+| `LEWBOX_TRUSTED_PROXIES` | `--trusted-proxy` | CIDRs of proxies whose `X-Forwarded-For` sets the client IP, comma-separated. Empty trusts no proxy |
 | `LEWBOX_DB` | `--db` | `$XDG_DATA_HOME/lewbox/lewbox.db`, i.e. `~/.local/share/lewbox/lewbox.db` |
 | `LEWBOX_KEYRING_FILE` | `--keyring` | `keyring.key` next to the database |
 | `LEWBOX_BOOTSTRAP_ADMIN_EMAIL` | | First instance admin, created only when there are no accounts |

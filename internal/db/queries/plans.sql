@@ -23,4 +23,12 @@ WHERE id = ?
 RETURNING *;
 
 -- name: DeletePlan :execrows
-DELETE FROM plans WHERE id = ?;
+-- Refuses a plan an organization uses or that is the default. The guards are
+-- in the statement, so a plan that becomes used is not removed.
+DELETE FROM plans
+WHERE plans.id = sqlc.arg(plan_id)
+  AND NOT EXISTS (SELECT 1 FROM organizations WHERE organizations.plan_id = sqlc.arg(plan_id))
+  AND NOT EXISTS (
+    SELECT 1 FROM settings
+    WHERE settings.key = 'default_plan' AND json_extract(settings.value, '$') = sqlc.arg(plan_id)
+  );

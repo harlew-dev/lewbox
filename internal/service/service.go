@@ -23,7 +23,8 @@ type Service struct {
 	keyring        *secrets.Keyring
 	aerolvmOptions []aerolvm.Option
 
-	limiter *loginLimiter
+	limiter       *loginLimiter
+	signupLimiter *loginLimiter
 
 	log          *slog.Logger
 	syncInterval time.Duration
@@ -89,14 +90,22 @@ func (s *Service) SetSyncInterval(d time.Duration) {
 	}
 }
 
+// SetLogger gives a running service the server's logger.
+func (s *Service) SetLogger(log *slog.Logger) {
+	if log != nil {
+		s.log = log
+	}
+}
+
 // New returns a Service backed by q.
 func New(q *db.Queries, opts ...Option) *Service {
 	s := &Service{
-		q:            q,
-		now:          func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
-		limiter:      newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
-		log:          slog.New(slog.DiscardHandler),
-		syncInterval: 15 * time.Second,
+		q:             q,
+		now:           func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
+		limiter:       newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
+		signupLimiter: newLimiter(signupIPAttemptsPerHour, 0, signupIPWindow),
+		log:           slog.New(slog.DiscardHandler),
+		syncInterval:  15 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(s)

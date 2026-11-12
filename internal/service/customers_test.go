@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -392,5 +394,215 @@ func TestCustomerRoutesNeedAnInstanceAdmin(t *testing.T) {
 	keyCtx := WithPrincipal(context.Background(), keyPrincipal)
 	if regions, err := s.ListRegions(keyCtx); err != nil || len(regions.Data) != 1 {
 		t.Errorf("regions with a key = %+v, %v", regions, err)
+	}
+}
+
+func TestSignupHasItsOwnRateLimit(t *testing.T) {
+	s := newTestServiceWith(t, WithLoginLimits(1, 0))
+	createUser(t, s, "root@example.com", true)
+	setSignup(t, s, signupOpen)
+	ctx := WithClientIP(context.Background(), "203.0.113.7")
+
+	for i := 0; i < signupIPAttemptsPerHour; i++ {
+		email := fmt.Sprintf("user%d@example.com", i)
+		if _, _, err := s.Signup(ctx, SignupRequest{Email: email, Password: testPassword}); err != nil {
+			t.Fatalf("signup %d: %v", i, err)
+		}
+	}
+	_, _, err := s.Signup(ctx, SignupRequest{Email: "one-too-many@example.com", Password: testPassword})
+	se := wantCode(t, err, CodeRateLimited)
+	if !strings.Contains(se.Message, "sign-up") {
+		t.Errorf("message = %q", se.Message)
+	}
+
+	// Sign-up spam did not spend the sign-in budget.
+	if _, err := s.Login(ctx, LoginRequest{Email: "user0@example.com", Password: testPassword}); err != nil {
+		t.Errorf("sign-in after sign-up spam: %v", err)
+	}
+	// A failed sign-in did not spend the sign-up budget.
+	spent := WithClientIP(context.Background(), "203.0.113.8")
+	if _, err := s.Login(spent, LoginRequest{Email: "root@example.com", Password: "wrong-password-1"}); err != nil {
+		wantCode(t, err, CodeUnauthorized)
+	}
+	if _, _, err := s.Signup(spent, SignupRequest{Email: "elsewhere@example.com", Password: testPassword}); err != nil {
+		t.Errorf("signup after a failed sign-in: %v", err)
+	}
+}
+
+func TestLimitsArePositive(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	zero, negative := int64(0), int64(-1)
+
+	for _, n := range []*int64{&zero, &negative} {
+		_, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "bad", MaxSandboxes: n})
+		se := wantCode(t, err, CodeInvalid)
+		if !strings.Contains(se.Message, "at least 1") || !strings.Contains(se.Message, "unlimited") {
+			t.Errorf("plan message = %q", se.Message)
+		}
+	}
+	if _, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []*int64{&zero, &negative} {
+		_, err := s.UpdatePlan(localCtx(), "pro", UpdatePlanRequest{MaxVcpus: OptionalInt{Set: true, Value: n}})
+		se := wantCode(t, err, CodeInvalid)
+		if !strings.Contains(se.Message, "at least 1") {
+			t.Errorf("update plan message = %q", se.Message)
+		}
+	}
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Plan: "pro"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []*int64{&zero, &negative} {
+		_, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{MaxSandboxes: OptionalInt{Set: true, Value: n}})
+		se := wantCode(t, err, CodeInvalid)
+		if !strings.Contains(se.Message, "at least 1") || !strings.Contains(se.Message, "plan's limit") {
+			t.Errorf("organization message = %q", se.Message)
+		}
+	}
+}
+
+func TestDefaultPlanStoredAsID(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	pro, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro", Name: "Pro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &pro.Slug}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored string
+	rows, err := s.q.ListSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Key == "default_plan" {
+			if err := json.Unmarshal([]byte(row.Value), &stored); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if stored != pro.ID {
+		t.Errorf("stored default_plan = %q, want the plan ID %q", stored, pro.ID)
+	}
+
+	// Renaming the slug keeps it the default; no setting rewrite is needed.
+	slug := "paid"
+	updated, err := s.UpdatePlan(localCtx(), pro.ID, UpdatePlanRequest{Slug: &slug})
+	if err != nil || !updated.Default {
+		t.Fatalf("renamed plan = %+v, %v", updated, err)
+	}
+	settings, err := s.GetSettings(localCtx())
+	if err != nil || settings.DefaultPlan != "paid" {
+		t.Errorf("settings default plan = %+v, %v", settings, err)
+	}
+}
+
+func TestUnknownSignupModeFailsClosed(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	if err := s.setSetting(context.Background(), "signup", "wide-open"); err != nil {
+		t.Fatal(err)
+	}
+	instance, err := s.Instance(context.Background())
+	if err != nil || instance.Signup != signupClosed {
+		t.Errorf("instance = %+v, %v", instance, err)
+	}
+	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@example.com", Password: testPassword}); err != nil {
+		wantCode(t, err, CodeForbidden)
+	}
+}
+
+func TestUpdateSettingsValidatesBeforeWriting(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	name := "Original"
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{InstanceName: &name}); err != nil {
+		t.Fatal(err)
+	}
+	changed, bad := "Changed", "sometimes"
+	_, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{InstanceName: &changed, Signup: &bad})
+	wantCode(t, err, CodeInvalid)
+	_, err = s.UpdateSettings(localCtx(), UpdateSettingsRequest{InstanceName: &changed, DefaultPlan: strPtr("missing")})
+	wantCode(t, err, CodeNotFound)
+	settings, err := s.GetSettings(localCtx())
+	if err != nil || settings.InstanceName != "Original" {
+		t.Errorf("settings after a failed patch = %+v, %v", settings, err)
+	}
+}
+
+func TestUpdateOrganizationValidatesBeforeWriting(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Name: "Acme"}); err != nil {
+		t.Fatal(err)
+	}
+	name := "Changed"
+	_, err := s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Name: &name, Plan: strPtr("missing")})
+	wantCode(t, err, CodeNotFound)
+	org, err := s.GetOrganization(localCtx(), "acme")
+	if err != nil || org.Name != "Acme" {
+		t.Errorf("organization after a failed patch = %+v, %v", org, err)
+	}
+}
+
+func TestDisplayNamesRejectControlCharacters(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	for _, name := range []string{"Acme\nInc", "Acme\u202eInc", "Acme\u2066Inc"} {
+		_, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Name: name})
+		wantCode(t, err, CodeInvalid)
+		_, err = s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro", Name: name})
+		wantCode(t, err, CodeInvalid)
+		_, err = s.UpdateSettings(localCtx(), UpdateSettingsRequest{InstanceName: &name})
+		wantCode(t, err, CodeInvalid)
+	}
+}
+
+func TestOptionalIntJSON(t *testing.T) {
+	for _, tc := range []struct {
+		in   any
+		want string
+	}{
+		{UpdateOrganizationRequest{}, `{}`},
+		{UpdateOrganizationRequest{MaxSandboxes: OptionalInt{Set: true}}, `{"max_sandboxes":null}`},
+		{UpdatePlanRequest{MaxVcpus: OptionalInt{Set: true, Value: intValue(5)}}, `{"max_vcpus":5}`},
+		{UpdatePlanRequest{Name: strPtr("Pro")}, `{"name":"Pro"}`},
+	} {
+		data, err := json.Marshal(tc.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != tc.want {
+			t.Errorf("%T = %s, want %s", tc.in, data, tc.want)
+		}
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestDeletePlanGuardsAreInTheStatement(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	free, err := s.findPlan(localCtx(), "free")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.q.DeletePlan(context.Background(), free.ID); err != nil || n != 0 {
+		t.Errorf("deleting the default plan: n=%d err=%v", n, err)
+	}
+	pro, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme", Plan: "pro"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.q.DeletePlan(context.Background(), pro.ID); err != nil || n != 0 {
+		t.Errorf("deleting a used plan: n=%d err=%v", n, err)
 	}
 }

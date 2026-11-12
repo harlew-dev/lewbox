@@ -34,6 +34,7 @@ describe('routing', () => {
     expect(within(nav).queryByRole('link', { name: 'Customers' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'Plans' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'Servers' })).toBeNull()
+    expect(await screen.findByText('Owner')).toBeInTheDocument()
   })
 
   it('gives a customer the not-found page for the console', async () => {

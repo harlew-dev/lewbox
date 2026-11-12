@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 	"uuid"
 
@@ -77,30 +77,9 @@ type UpdateOrganizationRequest struct {
 	Name         *string     `json:"name,omitempty"`
 	Status       *string     `json:"status,omitempty"`
 	Plan         *string     `json:"plan,omitempty"`
-	MaxSandboxes OptionalInt `json:"max_sandboxes,omitempty"`
-	MaxVcpus     OptionalInt `json:"max_vcpus,omitempty"`
-	MaxMemoryMB  OptionalInt `json:"max_memory_mb,omitempty"`
-}
-
-// MarshalJSON omits limits that were not in the request, so the remote client
-// sends the same body the caller meant.
-func (r UpdateOrganizationRequest) MarshalJSON() ([]byte, error) {
-	type wire struct {
-		Name         *string         `json:"name,omitempty"`
-		Status       *string         `json:"status,omitempty"`
-		Plan         *string         `json:"plan,omitempty"`
-		MaxSandboxes json.RawMessage `json:"max_sandboxes,omitempty"`
-		MaxVcpus     json.RawMessage `json:"max_vcpus,omitempty"`
-		MaxMemoryMB  json.RawMessage `json:"max_memory_mb,omitempty"`
-	}
-	return json.Marshal(wire{
-		Name:         r.Name,
-		Status:       r.Status,
-		Plan:         r.Plan,
-		MaxSandboxes: r.MaxSandboxes.raw(),
-		MaxVcpus:     r.MaxVcpus.raw(),
-		MaxMemoryMB:  r.MaxMemoryMB.raw(),
-	})
+	MaxSandboxes OptionalInt `json:"max_sandboxes,omitzero"`
+	MaxVcpus     OptionalInt `json:"max_vcpus,omitzero"`
+	MaxMemoryMB  OptionalInt `json:"max_memory_mb,omitzero"`
 }
 
 // Member is an account's membership in an organization.
@@ -421,12 +400,12 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	}
 
 	if ref := strings.TrimSpace(req.User); ref != "" {
+		if !p.InstanceAdmin && !p.selfRef(ref) {
+			return OrganizationList{}, forbidden("only an instance admin can list another account's organizations")
+		}
 		user, err := s.findUser(ctx, ref)
 		if err != nil {
 			return OrganizationList{}, err
-		}
-		if !p.InstanceAdmin && p.UserID != user.ID {
-			return OrganizationList{}, forbidden("only an instance admin can list another account's organizations")
 		}
 		return s.organizationsOf(ctx, user.ID, counts, plans, usage, p.InstanceAdmin, keep)
 	}
@@ -560,10 +539,24 @@ func orgName(raw, slug string) (string, error) {
 	if name == "" {
 		return slug, nil
 	}
-	if utf8.RuneCountInString(name) > 100 {
-		return "", invalid("name must be at most 100 characters")
+	if err := displayName(name, "name", 100); err != nil {
+		return "", err
 	}
 	return name, nil
+}
+
+// displayName rejects characters that would corrupt a terminal line: control
+// characters and the bidi overrides and isolates.
+func displayName(name, field string, max int) error {
+	if utf8.RuneCountInString(name) > max {
+		return invalid("%s must be at most %d characters", field, max)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
+			return invalid("%s must not contain control characters", field)
+		}
+	}
+	return nil
 }
 
 // GetOrganization returns an organization by ID or slug, or the admin key's
@@ -596,26 +589,59 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 	if adminOnly && !c.p.InstanceAdmin {
 		return Organization{}, forbidden("only an instance admin can change an organization's plan, limits or status")
 	}
+	// Validate every field before the first write, so a failed request never
+	// half-applies.
 	row := c.org
+	name := row.Name
 	if req.Name != nil {
-		name, err := orgName(*req.Name, row.Slug)
-		if err != nil {
+		if name, err = orgName(*req.Name, row.Slug); err != nil {
 			return Organization{}, err
 		}
+	}
+	status := ""
+	if req.Status != nil {
+		status = strings.ToLower(strings.TrimSpace(*req.Status))
+		switch status {
+		case orgActive, orgSuspended:
+		default:
+			return Organization{}, invalid("status must be active or suspended")
+		}
+	}
+	var plan db.Plan
+	if req.Plan != nil {
+		if plan, err = s.findPlan(ctx, *req.Plan); err != nil {
+			return Organization{}, err
+		}
+	}
+	sandboxes := row.MaxSandboxes
+	vcpus := row.MaxVcpus
+	memory := row.MaxMemoryMb
+	if req.MaxSandboxes.Set {
+		if sandboxes, err = limitValue(req.MaxSandboxes.Value, "max_sandboxes", "to use the plan's limit"); err != nil {
+			return Organization{}, err
+		}
+	}
+	if req.MaxVcpus.Set {
+		if vcpus, err = limitValue(req.MaxVcpus.Value, "max_vcpus", "to use the plan's limit"); err != nil {
+			return Organization{}, err
+		}
+	}
+	if req.MaxMemoryMB.Set {
+		if memory, err = limitValue(req.MaxMemoryMB.Value, "max_memory_mb", "to use the plan's limit"); err != nil {
+			return Organization{}, err
+		}
+	}
+
+	if req.Name != nil {
 		row, err = s.q.SetOrganizationName(ctx, db.SetOrganizationNameParams{Name: name, ID: row.ID})
 		if err != nil {
 			return Organization{}, fmt.Errorf("rename organization: %w", err)
 		}
 	}
 	if req.Status != nil {
-		status := strings.ToLower(strings.TrimSpace(*req.Status))
 		reason := ""
-		switch status {
-		case orgActive:
-		case orgSuspended:
+		if status == orgSuspended {
 			reason = statusReasonAdmin
-		default:
-			return Organization{}, invalid("status must be active or suspended")
 		}
 		row, err = s.q.SetOrganizationStatus(ctx, db.SetOrganizationStatusParams{
 			Status:       status,
@@ -627,10 +653,6 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		}
 	}
 	if req.Plan != nil {
-		plan, err := s.findPlan(ctx, *req.Plan)
-		if err != nil {
-			return Organization{}, err
-		}
 		row, err = s.q.SetOrganizationPlan(ctx, db.SetOrganizationPlanParams{
 			PlanID: sql.NullString{String: plan.ID, Valid: true},
 			ID:     row.ID,
@@ -640,24 +662,6 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		}
 	}
 	if req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set {
-		sandboxes := row.MaxSandboxes
-		vcpus := row.MaxVcpus
-		memory := row.MaxMemoryMb
-		if req.MaxSandboxes.Set {
-			if sandboxes, err = overrideLimit(req.MaxSandboxes.Value, "max_sandboxes"); err != nil {
-				return Organization{}, err
-			}
-		}
-		if req.MaxVcpus.Set {
-			if vcpus, err = overrideLimit(req.MaxVcpus.Value, "max_vcpus"); err != nil {
-				return Organization{}, err
-			}
-		}
-		if req.MaxMemoryMB.Set {
-			if memory, err = overrideLimit(req.MaxMemoryMB.Value, "max_memory_mb"); err != nil {
-				return Organization{}, err
-			}
-		}
 		row, err = s.q.SetOrganizationOverrides(ctx, db.SetOrganizationOverridesParams{
 			MaxSandboxes: sandboxes,
 			MaxVcpus:     vcpus,
@@ -676,18 +680,6 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 	return s.toOrganization(ctx, row, c.role, c.p.InstanceAdmin)
 }
 
-// overrideLimit turns a PATCH limit into a column value: null falls back to
-// the plan, a number is the organization's own limit.
-func overrideLimit(n *int64, field string) (sql.NullInt64, error) {
-	if n == nil {
-		return sql.NullInt64{}, nil
-	}
-	if *n < 0 {
-		return sql.NullInt64{}, invalid("%s must be 0 or more", field)
-	}
-	return sql.NullInt64{Int64: *n, Valid: true}, nil
-}
-
 // ListMembers returns an organization's members, ordered by email.
 func (s *Service) ListMembers(ctx context.Context, org string) (MemberList, error) {
 	c, err := s.orgFor(ctx, org, accessRead)
@@ -700,7 +692,11 @@ func (s *Service) ListMembers(ctx context.Context, org string) (MemberList, erro
 	}
 	out := MemberList{Data: make([]Member, 0, len(rows))}
 	for _, r := range rows {
-		out.Data = append(out.Data, toMember(r.Membership, r.Email))
+		email := r.Email
+		if !c.p.InstanceAdmin && r.InstanceAdmin != 0 {
+			email = "operator"
+		}
+		out.Data = append(out.Data, toMember(r.Membership, email))
 	}
 	return out, nil
 }
@@ -728,6 +724,10 @@ func (s *Service) AddMember(ctx context.Context, org string, req AddMemberReques
 	user, err := s.findUser(ctx, req.Email)
 	if err != nil {
 		return Member{}, err
+	}
+	// A customer cannot learn that an account is an operator's.
+	if !c.p.InstanceAdmin && user.InstanceAdmin != 0 {
+		return Member{}, notFound("no account with that email")
 	}
 	row, err := s.q.CreateMembership(ctx, db.CreateMembershipParams{
 		ID:        uuid.NewV7().String(),
@@ -760,6 +760,9 @@ func (s *Service) SetMemberRole(ctx context.Context, org, ref string, req SetMem
 	if err != nil {
 		return Member{}, err
 	}
+	if email, err = s.memberEmail(ctx, m.UserID, email, c.p.InstanceAdmin); err != nil {
+		return Member{}, err
+	}
 	if (role == roleOwner || m.Role == roleOwner) && !c.owner() {
 		return Member{}, forbidden("only an owner can make or change an owner")
 	}
@@ -786,6 +789,9 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 	}
 	m, email, err := s.findMember(ctx, c.org, ref)
 	if err != nil {
+		return Member{}, err
+	}
+	if email, err = s.memberEmail(ctx, m.UserID, email, c.p.InstanceAdmin); err != nil {
 		return Member{}, err
 	}
 	self := c.p.Kind == "user" && m.UserID == c.p.UserID
@@ -855,4 +861,19 @@ func toMember(m db.Membership, email string) Member {
 		Role:           m.Role,
 		CreatedAt:      m.CreatedAt.UTC(),
 	}
+}
+
+// memberEmail hides an instance admin's address from customers.
+func (s *Service) memberEmail(ctx context.Context, userID, email string, admin bool) (string, error) {
+	if admin {
+		return email, nil
+	}
+	user, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("get user: %w", err)
+	}
+	if user.InstanceAdmin != 0 {
+		return "operator", nil
+	}
+	return email, nil
 }

@@ -13,26 +13,59 @@ import (
 	"github.com/harlew-dev/lewbox/internal/service"
 )
 
-// parseCountLimit reads a whole-number limit. "unlimited" or "0" clears it.
-func parseCountLimit(raw string) (service.OptionalInt, error) {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	if s == "" || s == "unlimited" || s == "0" {
+// limitTarget decides what a null limit means.
+type limitTarget int
+
+const (
+	planLimits limitTarget = iota // null is unlimited
+	orgLimits                     // null falls back to the plan
+)
+
+// limitWord handles the word that clears a limit. The other target's word is
+// refused with what to do instead.
+func limitWord(raw string, target limitTarget) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return true, nil
+	case "unlimited":
+		if target == orgLimits {
+			return false, usagef("put the organization on a plan without that limit")
+		}
+		return true, nil
+	case "plan":
+		if target == planLimits {
+			return false, usagef("a plan limit is a positive number or unlimited")
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// parseCountLimit reads a whole-number limit.
+func parseCountLimit(raw string, target limitTarget) (service.OptionalInt, error) {
+	if clear, err := limitWord(raw, target); clear || err != nil {
+		if err != nil {
+			return service.OptionalInt{}, err
+		}
 		return service.OptionalInt{Set: true}, nil
 	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n < 0 {
-		return service.OptionalInt{}, usagef("%q is not a whole number: use a number, 0 or unlimited", raw)
+	n, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || n < 1 {
+		return service.OptionalInt{}, usagef("%q is not a whole number: use a positive number", raw)
 	}
 	return service.OptionalInt{Set: true, Value: &n}, nil
 }
 
 // parseMemoryLimit reads a memory limit in MB. It accepts 4096, 4096MB and
-// 4GB; "unlimited" or "0" clears it.
-func parseMemoryLimit(raw string) (service.OptionalInt, error) {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	if s == "" || s == "unlimited" || s == "0" {
+// 4GB.
+func parseMemoryLimit(raw string, target limitTarget) (service.OptionalInt, error) {
+	if clear, err := limitWord(raw, target); clear || err != nil {
+		if err != nil {
+			return service.OptionalInt{}, err
+		}
 		return service.OptionalInt{Set: true}, nil
 	}
+	s := strings.ToLower(strings.TrimSpace(raw))
 	multiplier := int64(1)
 	switch {
 	case strings.HasSuffix(s, "gb"):
@@ -45,19 +78,19 @@ func parseMemoryLimit(raw string) (service.OptionalInt, error) {
 		s = strings.TrimSuffix(s, "m")
 	}
 	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
-	if err != nil || n < 0 || n > math.MaxInt64/multiplier {
-		return service.OptionalInt{}, usagef("%q is not a memory size: use 4096, 4096MB or 4GB", raw)
+	if err != nil || n < 1 || n > math.MaxInt64/multiplier {
+		return service.OptionalInt{}, usagef("%q is not a memory size: use a positive size such as 4096, 4096MB or 4GB", raw)
 	}
 	n *= multiplier
 	return service.OptionalInt{Set: true, Value: &n}, nil
 }
 
 // parseLimitFlag parses a flag only when it was given.
-func parseLimitFlag(cmd *cobra.Command, flag, raw string, parse func(string) (service.OptionalInt, error)) (service.OptionalInt, error) {
+func parseLimitFlag(cmd *cobra.Command, flag, raw string, target limitTarget, parse func(string, limitTarget) (service.OptionalInt, error)) (service.OptionalInt, error) {
 	if !cmd.Flags().Changed(flag) {
 		return service.OptionalInt{}, nil
 	}
-	return parse(raw)
+	return parse(raw, target)
 }
 
 func newRegionCmd(a *app) *cobra.Command {
@@ -134,15 +167,15 @@ func newPlanCmd(a *app) *cobra.Command {
 		Short: "Create a plan (POST /v0/plans)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sandboxes, err := parseLimitFlag(cmd, "max-sandboxes", createSandboxes, parseCountLimit)
+			sandboxes, err := parseLimitFlag(cmd, "max-sandboxes", createSandboxes, planLimits, parseCountLimit)
 			if err != nil {
 				return err
 			}
-			vcpus, err := parseLimitFlag(cmd, "max-vcpus", createVcpus, parseCountLimit)
+			vcpus, err := parseLimitFlag(cmd, "max-vcpus", createVcpus, planLimits, parseCountLimit)
 			if err != nil {
 				return err
 			}
-			memory, err := parseLimitFlag(cmd, "max-memory", createMemory, parseMemoryLimit)
+			memory, err := parseLimitFlag(cmd, "max-memory", createMemory, planLimits, parseMemoryLimit)
 			if err != nil {
 				return err
 			}
@@ -158,9 +191,9 @@ func newPlanCmd(a *app) *cobra.Command {
 		},
 	}
 	create.Flags().StringVar(&createName, "name", "", "a display name (default: the slug)")
-	create.Flags().StringVar(&createSandboxes, "max-sandboxes", "", "maximum sandboxes (0 or unlimited for none)")
-	create.Flags().StringVar(&createVcpus, "max-vcpus", "", "maximum vCPUs (0 or unlimited for none)")
-	create.Flags().StringVar(&createMemory, "max-memory", "", "maximum memory: 4096, 4096MB or 4GB (0 or unlimited for none)")
+	create.Flags().StringVar(&createSandboxes, "max-sandboxes", "", "maximum sandboxes: a positive number, or unlimited")
+	create.Flags().StringVar(&createVcpus, "max-vcpus", "", "maximum vCPUs: a positive number, or unlimited")
+	create.Flags().StringVar(&createMemory, "max-memory", "", "maximum memory: a positive size such as 4096, 4096MB or 4GB, or unlimited")
 
 	list := &cobra.Command{
 		Use:     "list",
@@ -192,13 +225,13 @@ func newPlanCmd(a *app) *cobra.Command {
 				req.Name = &updateName
 			}
 			var err error
-			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, parseCountLimit); err != nil {
+			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", updateSandboxes, planLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, parseCountLimit); err != nil {
+			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", updateVcpus, planLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, parseMemoryLimit); err != nil {
+			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", updateMemory, planLimits, parseMemoryLimit); err != nil {
 				return err
 			}
 			if req.Name == nil && !req.MaxSandboxes.Set && !req.MaxVcpus.Set && !req.MaxMemoryMB.Set {
@@ -210,9 +243,9 @@ func newPlanCmd(a *app) *cobra.Command {
 		},
 	}
 	update.Flags().StringVar(&updateName, "name", "", "the new display name")
-	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes (0 or unlimited for none)")
-	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs (0 or unlimited for none)")
-	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: 4096, 4096MB or 4GB (0 or unlimited for none)")
+	update.Flags().StringVar(&updateSandboxes, "max-sandboxes", "", "maximum sandboxes: a positive number, or unlimited")
+	update.Flags().StringVar(&updateVcpus, "max-vcpus", "", "maximum vCPUs: a positive number, or unlimited")
+	update.Flags().StringVar(&updateMemory, "max-memory", "", "maximum memory: a positive size such as 4096, 4096MB or 4GB, or unlimited")
 
 	remove := &cobra.Command{
 		Use:     "delete <id|slug>",

@@ -72,12 +72,10 @@ func runWithApp(ctx context.Context, args []string, stdin io.Reader, stdout, std
 	if errors.Is(err, errCanceled) {
 		return 0
 	}
-	var exit *exitError
-	if errors.As(err, &exit) {
+	if exit, ok := errors.AsType[*exitError](err); ok {
 		return exit.code
 	}
-	var usage *usageError
-	if errors.As(err, &usage) {
+	if usage, ok := errors.AsType[*usageError](err); ok {
 		fmt.Fprintln(stderr, "Error:", usage.err)
 		return 2
 	}
@@ -494,6 +492,7 @@ func newClusterCmd(a *app) *cobra.Command {
 		}),
 	}
 
+	var removeForce bool
 	remove := &cobra.Command{
 		Use:     "remove <id|slug>",
 		Aliases: []string{"rm", "delete"},
@@ -504,10 +503,11 @@ func newClusterCmd(a *app) *cobra.Command {
 				return err
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.RemoveCluster(ctx, args[0])
+				return b.RemoveCluster(ctx, args[0], removeForce)
 			})(cmd, args)
 		},
 	}
+	remove.Flags().BoolVar(&removeForce, "force", false, "remove it even if its sandbox keys cannot be revoked")
 
 	var joinRole, joinTTL string
 	joinCommand := &cobra.Command{

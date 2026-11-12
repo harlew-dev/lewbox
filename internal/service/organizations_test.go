@@ -110,6 +110,13 @@ func TestOrganizationVisibility(t *testing.T) {
 	}
 	_, err = s.ListOrganizations(f.member, ListOrganizationsRequest{User: "viewer@example.com"})
 	wantCode(t, err, CodeForbidden)
+	// An unknown account is a 403 too, not a 404.
+	_, err = s.ListOrganizations(f.member, ListOrganizationsRequest{User: "nobody@example.com"})
+	wantCode(t, err, CodeForbidden)
+	// Asking about yourself by email is allowed.
+	if _, err := s.ListOrganizations(f.member, ListOrganizationsRequest{User: "member@example.com"}); err != nil {
+		t.Errorf("list own organizations by email: %v", err)
+	}
 
 	// No organization named and not an admin key: the caller must choose.
 	_, err = s.ListMembers(f.member, "")
@@ -158,6 +165,47 @@ func TestMemberRoles(t *testing.T) {
 	wantCode(t, err, CodeForbidden)
 	_, err = s.RemoveMember(f.admin, "acme", "nobody@example.com")
 	wantCode(t, err, CodeNotFound)
+
+	// A customer cannot add an instance admin, but an instance admin can.
+	_, err = s.AddMember(f.owner, "acme", AddMemberRequest{Email: "root@example.com"})
+	se := wantCode(t, err, CodeNotFound)
+	if se.Message != "no account with that email" {
+		t.Errorf("message = %q", se.Message)
+	}
+	rootUser, err := s.findUser(context.Background(), "root@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddMember(f.root, "acme", AddMemberRequest{Email: "root@example.com"}); err != nil {
+		t.Fatalf("instance admin adds an instance admin: %v", err)
+	}
+	// A customer sees "operator" instead of the operator's address.
+	list, err := s.ListMembers(f.owner, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	masked := false
+	for _, m := range list.Data {
+		if m.UserID == rootUser.ID {
+			masked = m.Email == "operator"
+		}
+	}
+	if !masked {
+		t.Errorf("members = %+v, want the instance admin shown as operator", list.Data)
+	}
+	list, err = s.ListMembers(f.root, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	masked = false
+	for _, m := range list.Data {
+		if m.UserID == rootUser.ID {
+			masked = m.Email == "root@example.com"
+		}
+	}
+	if !masked {
+		t.Errorf("instance admin sees its own address: %+v", list.Data)
+	}
 }
 
 func TestLastOwnerStays(t *testing.T) {
