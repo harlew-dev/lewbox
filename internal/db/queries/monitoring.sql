@@ -7,8 +7,9 @@ ON CONFLICT(cluster_id, at) DO UPDATE SET
 
 -- name: InsertNodeSample :exec
 INSERT INTO node_samples (node_id, at, alive, sandboxes, cpu_cores, cpu_reserved,
-                          memory_total_mb, memory_free_mb, disk_free_gb, can_admit)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          memory_total_mb, memory_free_mb, disk_free_gb, can_admit,
+                          cert_expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(node_id, at) DO UPDATE SET
     alive = excluded.alive,
     sandboxes = excluded.sandboxes,
@@ -17,7 +18,8 @@ ON CONFLICT(node_id, at) DO UPDATE SET
     memory_total_mb = excluded.memory_total_mb,
     memory_free_mb = excluded.memory_free_mb,
     disk_free_gb = excluded.disk_free_gb,
-    can_admit = excluded.can_admit;
+    can_admit = excluded.can_admit,
+    cert_expires_at = excluded.cert_expires_at;
 
 -- name: ListClusterSamples :many
 SELECT * FROM cluster_samples

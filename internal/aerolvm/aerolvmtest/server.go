@@ -35,6 +35,7 @@ type Server struct {
 	revoked     []string
 	failures    map[string]*failure
 	tokenTTLCap time.Duration
+	certExpiry  time.Time
 	nextID      int
 
 	sandboxes    []aerolvm.Sandbox
@@ -125,6 +126,14 @@ func (s *Server) SetTokenTTLCap(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokenTTLCap = d
+}
+
+// SetCertExpiry makes GET /v1/metrics report this node's cluster certificate
+// expiring at t. The zero time reports no certificate (gauge 0).
+func (s *Server) SetCertExpiry(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.certExpiry = t
 }
 
 // AddSandbox adds a sandbox owned by team on the first member. Tests use it
@@ -240,6 +249,7 @@ func (s *Server) Stop() { s.srv.Close() }
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /v1/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /v1/whoami", s.handleWhoAmI)
 	mux.HandleFunc("GET /v1/cluster/members", s.handleMembers)
 	mux.HandleFunc("POST /v1/tokens", s.handleCreateToken)
@@ -319,6 +329,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		"version":       version,
 		"cluster_nodes": n,
 	})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	at := s.certExpiry
+	clusterOn := s.clusterOn
+	s.mu.Unlock()
+	value := int64(0)
+	if clusterOn && !at.IsZero() {
+		value = at.Unix()
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	fmt.Fprintf(w, "# HELP aerolvm_cluster_mtls_cert_not_after_unix Cluster certificate expiry.\n")
+	fmt.Fprintf(w, "# TYPE aerolvm_cluster_mtls_cert_not_after_unix gauge\n")
+	fmt.Fprintf(w, "aerolvm_cluster_mtls_cert_not_after_unix %d\n", value)
 }
 
 func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {

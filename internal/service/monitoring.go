@@ -429,7 +429,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 
 // recordSamples stores one check's cluster and node rows, then prunes old
 // samples once a day.
-func (s *Service) recordSamples(ctx context.Context, clusterID, status string, latency time.Duration, healthOK, membersAvailable bool, members []aerolvm.Member) error {
+func (s *Service) recordSamples(ctx context.Context, clusterID, status string, latency time.Duration, healthOK, membersAvailable bool, members []aerolvm.Member, certExpiries map[string]time.Time) error {
 	now := s.now()
 	latencyMs := int64(-1)
 	if healthOK {
@@ -473,6 +473,9 @@ func (s *Service) recordSamples(ctx context.Context, clusterID, status string, l
 			sample.MemoryFreeMb = member.Capacity.LiveMemoryFreeMB
 			sample.DiskFreeGb = member.Capacity.HostDiskFreeGB
 			sample.CanAdmit = boolInt(member.Capacity.CanAdmit)
+			if at, ok := certExpiries[node.Name]; ok {
+				sample.CertExpiresAt = sql.NullTime{Time: at, Valid: true}
+			}
 		default:
 			// Reachable but the members call failed: nothing to say about
 			// the nodes this pass.

@@ -30,8 +30,11 @@ They run in this order. The first three are **required**: when you register a cl
 | `admin_token` | The token is an admin token for every team (`*`) | Check `SB_IDENTITY_ENABLED=true` on every node, and the token's role |
 | `members` | Every node the cluster lists is alive | Check `sandboxd` on the nodes it names |
 | `runtime` | Every node offers the cluster's runtime | Install the runtime there, or register the cluster with the other runtime |
+| `node certificates` | Every node that reports a certificate expiry has more than 14 days left | Renewal has failed; check `sandboxd`'s log on the node it names |
 | `token_ttl` | A 100-year key can be created | Set `SB_TOKEN_MAX_TTL=876000h` on every node, or keys will expire |
 | `endpoint` | The customer endpoint answers `/health` | Check the endpoint URL and its DNS |
+
+AerolVM node certificates last 90 days and renew at two-thirds of their life, so a certificate with 14 days left means renewal has failed and the node will leave the cluster at day 90. `node certificates` reads each member's `aerolvm_cluster_mtls_cert_not_after_unix` metric from `GET /v1/metrics`. A node that does not answer is skipped, and the check stays ok when no node reports an expiry.
 
 A node that isn't in cluster mode (a local-mode install) counts as a one-node cluster.
 

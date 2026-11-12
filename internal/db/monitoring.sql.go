@@ -56,8 +56,9 @@ func (q *Queries) InsertClusterSample(ctx context.Context, arg InsertClusterSamp
 
 const insertNodeSample = `-- name: InsertNodeSample :exec
 INSERT INTO node_samples (node_id, at, alive, sandboxes, cpu_cores, cpu_reserved,
-                          memory_total_mb, memory_free_mb, disk_free_gb, can_admit)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                          memory_total_mb, memory_free_mb, disk_free_gb, can_admit,
+                          cert_expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(node_id, at) DO UPDATE SET
     alive = excluded.alive,
     sandboxes = excluded.sandboxes,
@@ -66,7 +67,8 @@ ON CONFLICT(node_id, at) DO UPDATE SET
     memory_total_mb = excluded.memory_total_mb,
     memory_free_mb = excluded.memory_free_mb,
     disk_free_gb = excluded.disk_free_gb,
-    can_admit = excluded.can_admit
+    can_admit = excluded.can_admit,
+    cert_expires_at = excluded.cert_expires_at
 `
 
 type InsertNodeSampleParams struct {
@@ -80,6 +82,7 @@ type InsertNodeSampleParams struct {
 	MemoryFreeMb  int64
 	DiskFreeGb    int64
 	CanAdmit      int64
+	CertExpiresAt sql.NullTime
 }
 
 func (q *Queries) InsertNodeSample(ctx context.Context, arg InsertNodeSampleParams) error {
@@ -94,12 +97,13 @@ func (q *Queries) InsertNodeSample(ctx context.Context, arg InsertNodeSamplePara
 		arg.MemoryFreeMb,
 		arg.DiskFreeGb,
 		arg.CanAdmit,
+		arg.CertExpiresAt,
 	)
 	return err
 }
 
 const latestNodeSamples = `-- name: LatestNodeSamples :many
-SELECT node_samples.node_id, node_samples.at, node_samples.alive, node_samples.sandboxes, node_samples.cpu_cores, node_samples.cpu_reserved, node_samples.memory_total_mb, node_samples.memory_free_mb, node_samples.disk_free_gb, node_samples.can_admit FROM node_samples
+SELECT node_samples.node_id, node_samples.at, node_samples.alive, node_samples.sandboxes, node_samples.cpu_cores, node_samples.cpu_reserved, node_samples.memory_total_mb, node_samples.memory_free_mb, node_samples.disk_free_gb, node_samples.can_admit, node_samples.cert_expires_at FROM node_samples
 JOIN (SELECT node_id, MAX(at) AS at FROM node_samples GROUP BY node_id) latest
 ON node_samples.node_id = latest.node_id AND node_samples.at = latest.at
 `
@@ -124,6 +128,7 @@ func (q *Queries) LatestNodeSamples(ctx context.Context) ([]NodeSample, error) {
 			&i.MemoryFreeMb,
 			&i.DiskFreeGb,
 			&i.CanAdmit,
+			&i.CertExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -255,7 +260,7 @@ func (q *Queries) ListNodeMetricBuckets(ctx context.Context, arg ListNodeMetricB
 }
 
 const listNodeSamples = `-- name: ListNodeSamples :many
-SELECT node_samples.node_id, node_samples.at, node_samples.alive, node_samples.sandboxes, node_samples.cpu_cores, node_samples.cpu_reserved, node_samples.memory_total_mb, node_samples.memory_free_mb, node_samples.disk_free_gb, node_samples.can_admit FROM node_samples
+SELECT node_samples.node_id, node_samples.at, node_samples.alive, node_samples.sandboxes, node_samples.cpu_cores, node_samples.cpu_reserved, node_samples.memory_total_mb, node_samples.memory_free_mb, node_samples.disk_free_gb, node_samples.can_admit, node_samples.cert_expires_at FROM node_samples
 JOIN nodes ON nodes.id = node_samples.node_id
 WHERE nodes.cluster_id = ? AND node_samples.at >= ? AND node_samples.at < ?
 ORDER BY node_samples.node_id, node_samples.at
@@ -287,6 +292,7 @@ func (q *Queries) ListNodeSamples(ctx context.Context, arg ListNodeSamplesParams
 			&i.MemoryFreeMb,
 			&i.DiskFreeGb,
 			&i.CanAdmit,
+			&i.CertExpiresAt,
 		); err != nil {
 			return nil, err
 		}

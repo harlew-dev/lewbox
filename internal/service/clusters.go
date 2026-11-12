@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"uuid"
 
@@ -21,11 +23,17 @@ const (
 	defaultRuntime    = "docker"
 	defaultJoinTTL    = "15m"
 	defaultJoinRole   = "mixed"
+
+	// Node certificates renew at two-thirds of their 90-day life, so a
+	// fortnight left means renewal has failed.
+	certWarnWindow   = 14 * 24 * time.Hour
+	certCheckTimeout = 3 * time.Second
+	certCheckWorkers = 4
 )
 
 // Check is one requirement a cluster must meet.
 type Check struct {
-	Name   string `json:"name"` // health, admin_token, version, runtime, token_ttl, endpoint, members
+	Name   string `json:"name"` // health, admin_token, version, runtime, token_ttl, endpoint, members, node certificates
 	OK     bool   `json:"ok"`
 	Fatal  bool   `json:"fatal,omitempty"`  // a failed fatal check blocks registration
 	Detail string `json:"detail,omitempty"` // what was found, and how to fix it when not OK
@@ -280,7 +288,7 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 	if err := s.storeCheck(ctx, row.ID, status, detail, version, checks); err != nil {
 		return ClusterDetail{}, err
 	}
-	if err := s.recordSamples(ctx, row.ID, status, result.healthLatency, !healthFailed(checks), result.membersAvailable, result.members); err != nil {
+	if err := s.recordSamples(ctx, row.ID, status, result.healthLatency, !healthFailed(checks), result.membersAvailable, result.members, result.certExpiries); err != nil {
 		return ClusterDetail{}, err
 	}
 	return s.clusterDetail(ctx, row.ID)
@@ -490,6 +498,7 @@ type checkResult struct {
 	healthLatency    time.Duration
 	members          []aerolvm.Member
 	membersAvailable bool
+	certExpiries     map[string]time.Time
 }
 
 // runChecks runs the cluster requirements in order and stops at the first
@@ -593,6 +602,10 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 
 	add(runtimeCheck(result.members, spec.Runtime))
 
+	certCheck, certExpiries := s.nodeCertCheck(ctx, spec.AdminToken, result.members)
+	result.certExpiries = certExpiries
+	add(certCheck)
+
 	token, err := client.CreateToken(ctx, aerolvm.CreateTokenRequest{
 		Name:      "lewbox-ttl-check",
 		Role:      "runner",
@@ -660,6 +673,68 @@ func runtimeCheck(members []aerolvm.Member, runtime string) Check {
 		detail += "; not reported yet by " + strings.Join(unknown, ", ")
 	}
 	return Check{Name: "runtime", OK: true, Detail: detail}
+}
+
+// nodeCertCheck reads each alive member's cluster certificate expiry from its
+// metrics endpoint. Members that do not answer are skipped.
+func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aerolvm.Member) (Check, map[string]time.Time) {
+	expiries := make(map[string]time.Time, len(members))
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, certCheckWorkers)
+	)
+	for _, member := range members {
+		if !member.Alive || member.APIURL == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(member aerolvm.Member) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			reqCtx, cancel := context.WithTimeout(ctx, certCheckTimeout)
+			defer cancel()
+			at, ok, err := s.aerolvmClient(member.APIURL, token).NodeCertExpiry(reqCtx)
+			if err != nil || !ok {
+				return
+			}
+			mu.Lock()
+			expiries[memberName(member)] = at
+			mu.Unlock()
+		}(member)
+	}
+	wg.Wait()
+
+	if len(expiries) == 0 {
+		return Check{Name: "node certificates", OK: true, Detail: "could not read any node's certificate expiry"}, expiries
+	}
+	now := s.now()
+	names := make([]string, 0, len(expiries))
+	for name := range expiries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var expiring []string
+	var earliest time.Time
+	for _, name := range names {
+		at := expiries[name]
+		if earliest.IsZero() || at.Before(earliest) {
+			earliest = at
+		}
+		if at.Sub(now) > certWarnWindow {
+			continue
+		}
+		days := int(at.Sub(now).Hours() / 24)
+		if days < 0 {
+			days = 0
+		}
+		expiring = append(expiring, fmt.Sprintf("%s's cluster certificate expires in %d days (%s); AerolVM renews it automatically at two-thirds of its life, so renewal has failed: check sandboxd's log on that node", name, days, at.Format("2006-01-02")))
+	}
+	if len(expiring) > 0 {
+		return Check{Name: "node certificates", Detail: strings.Join(expiring, "; ")}, expiries
+	}
+	return Check{Name: "node certificates", OK: true, Detail: "earliest expires " + earliest.Format("2006-01-02")}, expiries
 }
 
 // syncNodes mirrors members into nodes. It returns a failed members check for
@@ -760,10 +835,23 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
+	latest, err := s.q.LatestNodeSamples(ctx)
+	if err != nil {
+		return ClusterDetail{}, fmt.Errorf("latest node samples: %w", err)
+	}
+	certExpiries := make(map[string]time.Time, len(latest))
+	for _, sample := range latest {
+		if sample.CertExpiresAt.Valid {
+			certExpiries[sample.NodeID] = sample.CertExpiresAt.Time.UTC()
+		}
+	}
 	nodes := make([]Node, 0, len(rows))
 	for _, r := range rows {
 		n := toNode(r)
 		n.Cluster = row.Slug
+		if at, ok := certExpiries[r.ID]; ok {
+			n.CertExpiresAt = &at
+		}
 		nodes = append(nodes, n)
 	}
 	return ClusterDetail{Cluster: toCluster(row, len(nodes)), Checks: checks, NodeList: nodes}, nil
