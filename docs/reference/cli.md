@@ -222,7 +222,7 @@ Runs every check now and syncs the node list. See [Health and checks](../cluster
 
 ### `lewbox cluster health ID|SLUG [--days 30]`
 
-A 30-day uptime bar for the cluster and each node, and the percentage. `--days` is 1–90.
+A 30-day uptime bar for the cluster and each node, and the percentage. `--days` is 1–31.
 
 ### `lewbox cluster metrics ID|SLUG [--range 24h]`
 

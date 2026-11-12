@@ -45,7 +45,7 @@ func newSandboxCmd(a *app) *cobra.Command {
 		Short: "Stop a sandbox (POST /v0/sandboxes/{id}/stop)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-			return b.StopSandbox(ctx, args[0], service.SandboxActionRequest{Region: stopRegion, Org: a.org})
+			return b.StopSandbox(ctx, args[0], service.RegionScope{Region: stopRegion, Org: a.org})
 		}),
 	}
 	stop.Flags().StringVar(&stopRegion, "region", "", "the region to stop it in, when the ID is not unique")
@@ -61,7 +61,7 @@ func newSandboxCmd(a *app) *cobra.Command {
 				return err
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.DeleteSandbox(ctx, args[0], service.SandboxActionRequest{Region: deleteRegion, Org: a.org})
+				return b.DeleteSandbox(ctx, args[0], service.RegionScope{Region: deleteRegion, Org: a.org})
 			})(cmd, args)
 		},
 	}

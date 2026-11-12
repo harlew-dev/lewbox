@@ -84,6 +84,17 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if !c.org.Team.Valid || c.org.Team.String == "" {
 		return NewSandboxKey{}, fmt.Errorf("organization %q has no team", c.org.Slug)
 	}
+	desired, err := s.subscriptionDesiredQuota(ctx, c.org, cluster)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return NewSandboxKey{}, fmt.Errorf("subscription quota: %w", err)
+	}
+	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return NewSandboxKey{}, fmt.Errorf("get quota state: %w", err)
+	}
+	if errors.Is(err, sql.ErrNoRows) || state.Error != "" || state.Quota != desired {
+		return NewSandboxKey{}, precondition(nil, "region %q is still being set up for your workspace; try again in a few seconds", cluster.Slug)
+	}
 	if _, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
 		return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -96,17 +107,19 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	}
 	keyID := sandboxKeyID()
 	upstreamName := "lbx." + keyID
-	token, err := mintSandboxToken(ctx, client, aerolvm.CreateTokenRequest{
+	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	token, err := mintSandboxToken(mintCtx, client, aerolvm.CreateTokenRequest{
 		Name:      upstreamName,
 		Role:      "runner",
 		Team:      c.org.Team.String,
 		ExpiresIn: upstreamTTL,
 	})
+	cancel()
 	if err != nil {
 		return NewSandboxKey{}, s.sandboxTokenErr(ctx, cluster.Slug, requested, err)
 	}
 	if token.Token == "" {
-		return NewSandboxKey{}, unavailable("cluster %q returned no token", cluster.Slug)
+		return NewSandboxKey{}, unavailable("region %q returned no token", cluster.Slug)
 	}
 
 	now := s.now()
@@ -130,7 +143,9 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		ExpiresAt:  expires,
 	})
 	if err != nil {
-		_ = client.RevokeToken(context.WithoutCancel(ctx), token.ID)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
+		_ = client.RevokeToken(cleanup, token.ID)
+		cancel()
 		if db.IsUniqueViolation(err) {
 			return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
 		}
@@ -224,8 +239,11 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	if err != nil {
 		return SandboxKey{}, err
 	}
-	if err := client.RevokeToken(ctx, row.UpstreamID); err != nil {
-		return SandboxKey{}, s.regionUnavailable(ctx, cluster.Slug, err)
+	callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	revokeErr := client.RevokeToken(callCtx, row.UpstreamID)
+	cancel()
+	if revokeErr != nil {
+		return SandboxKey{}, s.regionUnavailable(ctx, cluster.Slug, revokeErr)
 	}
 	now := s.now()
 	n, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
@@ -251,9 +269,9 @@ func sandboxOrgReady(status string) error {
 	case orgPending:
 		return precondition(nil, "your account is waiting for approval")
 	case orgSuspended:
-		return precondition(nil, "your organization is suspended")
+		return precondition(nil, "your workspace is suspended")
 	default:
-		return precondition(nil, "organization is %s", status)
+		return precondition(nil, "workspace is %s", status)
 	}
 }
 
@@ -306,18 +324,18 @@ func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Clus
 		case 1:
 			return ready[0], nil
 		default:
-			return db.Cluster{}, invalid("choose a region: pass --region <slug>")
+			return db.Cluster{}, invalid("choose a region")
 		}
 	}
 	for _, row := range rows {
 		if row.ID != ref && row.Slug != ref {
 			continue
 		}
+		if _, ok := subs[row.ID]; !ok {
+			return db.Cluster{}, notFound("region %q not found", ref)
+		}
 		if !regionReady(row.Status) {
 			return db.Cluster{}, precondition(nil, "region %q is %s", row.Slug, row.Status)
-		}
-		if _, ok := subs[row.ID]; !ok {
-			return db.Cluster{}, precondition(nil, "your account has no plan in region %q; ask your provider", row.Slug)
 		}
 		return row, nil
 	}
@@ -371,9 +389,53 @@ func mintSandboxToken(ctx context.Context, client *aerolvm.Client, req aerolvm.C
 // bad request.
 func (s *Service) sandboxTokenErr(ctx context.Context, slug string, requested time.Duration, err error) error {
 	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == http.StatusBadRequest && requested > 365*24*time.Hour {
-		return invalid("cluster %q refused the token lifetime: %s; raise SB_TOKEN_MAX_TTL on every node so keys can last", slug, apiErr.Message)
+		if p, ok := PrincipalFrom(ctx); ok && p.InstanceAdmin {
+			return invalid("region %q refused the token lifetime: %s; raise SB_TOKEN_MAX_TTL on every node so keys can last", slug, apiErr.Message)
+		}
+		return invalid("this region can't issue keys that last that long; choose a shorter expiry")
 	}
 	return s.regionUnavailable(ctx, slug, err)
+}
+
+// revokeCreatedSandboxKeys revokes every live sandbox key userID created, in
+// one workspace (orgID non-empty) or in every workspace. It fails closed: a
+// failed revoke refuses the caller's change with 502.
+func (s *Service) revokeCreatedSandboxKeys(ctx context.Context, orgID, userID string) error {
+	keys, err := s.q.ListLiveSandboxKeysByCreator(ctx, db.ListLiveSandboxKeysByCreatorParams{
+		CreatedBy: sql.NullString{String: userID, Valid: true},
+		OrgID:     orgID,
+	})
+	if err != nil {
+		return fmt.Errorf("list sandbox keys: %w", err)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	clusters, err := s.clustersByID(ctx)
+	if err != nil {
+		return err
+	}
+	byCluster := make(map[string][]db.SandboxKey, len(keys))
+	for _, key := range keys {
+		byCluster[key.ClusterID] = append(byCluster[key.ClusterID], key)
+	}
+	failed := 0
+	for clusterID, group := range byCluster {
+		cluster, ok := clusters[clusterID]
+		if !ok {
+			failed += len(group)
+			continue
+		}
+		n, revoked := s.revokeKeys(ctx, cluster, group)
+		if !revoked {
+			n = len(group)
+		}
+		failed += n
+	}
+	if failed > 0 {
+		return unavailable("could not revoke %d sandbox keys; try again", failed)
+	}
+	return nil
 }
 
 // regionUnavailable reports a cluster failure without exposing its URL.

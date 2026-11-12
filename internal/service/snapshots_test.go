@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"regexp"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 )
@@ -53,7 +56,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 		"member": f.member,
 		"viewer": f.viewer,
 	} {
-		list, err := f.s.ListSnapshots(ctx, ListSnapshotsRequest{Org: "acme"})
+		list, err := f.s.ListSnapshots(ctx, RegionScope{Org: "acme"})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -63,10 +66,10 @@ func TestListSnapshotsScoping(t *testing.T) {
 		}
 	}
 
-	if _, err := f.s.ListSnapshots(f.outsider, ListSnapshotsRequest{Org: "acme"}); err != nil {
+	if _, err := f.s.ListSnapshots(f.outsider, RegionScope{Org: "acme"}); err != nil {
 		wantCode(t, err, CodeNotFound)
 	}
-	list, err := f.s.ListSnapshots(f.outsider, ListSnapshotsRequest{Org: "other"})
+	list, err := f.s.ListSnapshots(f.outsider, RegionScope{Org: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +88,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 	} else {
 		keyCtx = WithPrincipal(keyCtx, p)
 	}
-	list, err = f.s.ListSnapshots(keyCtx, ListSnapshotsRequest{})
+	list, err = f.s.ListSnapshots(keyCtx, RegionScope{})
 	if err != nil || len(list.Data) != 1 || list.Data[0].Name != "ckpt-a" {
 		t.Errorf("key sees %+v, %v", list.Data, err)
 	}
@@ -113,7 +116,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 	}
 	first.AddSnapshot(org.Team, testSnapshot("ckpt-a"))
 
-	list, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
+	list, err := s.ListSnapshots(root, RegionScope{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +136,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 		second.AcceptToken(token)
 	}
 	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
-	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
+	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +145,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 	}
 
 	now = now.Add(31 * time.Second)
-	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
+	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +158,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 
 	// After the reuse window the viewer token is minted again.
 	now = now.Add(51 * time.Minute)
-	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
+	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,14 +194,14 @@ func TestDeleteSnapshotOnAnotherNode(t *testing.T) {
 	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
 
 	// The viewer token is minted on the admin node; let the other node see it.
-	if _, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"}); err != nil {
+	if _, err := s.ListSnapshots(root, RegionScope{Org: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range first.Tokens() {
 		second.AcceptToken(token)
 	}
 
-	out, err := s.DeleteSnapshot(root, "ckpt-b", SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+	out, err := s.DeleteSnapshot(root, "ckpt-b", RegionScope{Org: "acme", Region: "eu-west"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,14 +221,14 @@ func TestDeleteSnapshot(t *testing.T) {
 	pointAtFake(t, f)
 	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
 
-	if _, err := f.s.DeleteSnapshot(f.viewer, "ckpt-a", SnapshotActionRequest{Org: "acme", Region: "eu-west"}); err != nil {
+	if _, err := f.s.DeleteSnapshot(f.viewer, "ckpt-a", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := f.s.DeleteSnapshot(f.outsider, "ckpt-a", SnapshotActionRequest{Org: "acme", Region: "eu-west"}); err != nil {
+	if _, err := f.s.DeleteSnapshot(f.outsider, "ckpt-a", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
 		wantCode(t, err, CodeNotFound)
 	}
 
-	out, err := f.s.DeleteSnapshot(f.member, "ckpt-a", SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+	out, err := f.s.DeleteSnapshot(f.member, "ckpt-a", RegionScope{Org: "acme", Region: "eu-west"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,11 +252,70 @@ func TestDeleteSnapshot(t *testing.T) {
 		t.Errorf("the runner token is still listed: %+v", f.fake.Tokens())
 	}
 
-	list, err := f.s.ListSnapshots(f.owner, ListSnapshotsRequest{Org: "acme"})
+	list, err := f.s.ListSnapshots(f.owner, RegionScope{Org: "acme"})
 	if err != nil || len(list.Data) != 0 {
 		t.Errorf("list after delete = %+v, %v", list.Data, err)
 	}
-	if _, err := f.s.DeleteSnapshot(f.owner, "ckpt-a", SnapshotActionRequest{Org: "acme", Region: "eu-west"}); err != nil {
+	if _, err := f.s.DeleteSnapshot(f.owner, "ckpt-a", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
 		wantCode(t, err, CodeNotFound)
+	}
+}
+
+func TestListSnapshotsPartialRegion(t *testing.T) {
+	f := newSandboxFixture(t)
+	pointAtFake(t, f)
+	f.fake.Stop()
+	list, err := f.s.ListSnapshots(f.root, RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatalf("an unreachable region failed the list: %v", err)
+	}
+	if len(list.PartialNodes) == 0 {
+		t.Error("an unreachable region was not reported as partial")
+	}
+}
+
+func TestSnapshotToken401Retries(t *testing.T) {
+	first := newClusterFake(t)
+	second := newClusterFake(t)
+	client := aerolvm.New(first.URL(), first.AdminToken, aerolvm.WithRetry(0))
+	token, err := client.CreateToken(context.Background(), aerolvm.CreateTokenRequest{
+		Name: "viewer", Role: "viewer", Team: "lbx-test", ExpiresIn: "1h",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		second.AcceptToken(token)
+	}()
+	s := newClusterService(t)
+	if _, err := s.listNodeSnapshots(context.Background(), second.URL(), snapshotToken{value: token.Token, minted: s.now()}); err != nil {
+		t.Fatalf("a fresh token's 401 was not retried: %v", err)
+	}
+}
+
+func TestDeleteSnapshotUnreachableNodeIsNotNotFound(t *testing.T) {
+	f := newSandboxFixture(t)
+	pointAtFake(t, f)
+	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
+	if _, err := f.s.ListSnapshots(f.root, RegionScope{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.Stop()
+	_, err := f.s.DeleteSnapshot(f.root, "missing", RegionScope{Org: "acme", Region: "eu-west"})
+	wantCode(t, err, CodeUnavailable)
+}
+
+func TestTempTokenNameFitsAerolVM(t *testing.T) {
+	valid := regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	id := uuid.NewV7().String()
+	now := time.Date(2026, 11, 12, 15, 0, 0, 123_000_000, time.UTC)
+	for _, kind := range []string{"view", "del"} {
+		if name := tempTokenName(kind, id, now); !valid.MatchString(name) {
+			t.Errorf("tempTokenName(%q) = %q (%d chars), not a valid AerolVM token name", kind, name, len(name))
+		}
+	}
+	if old := fmt.Sprintf("lbx.view.%s.%d", id, now.UnixNano()); valid.MatchString(old) {
+		t.Errorf("the old name %q should be too long; the check above proves nothing", old)
 	}
 }

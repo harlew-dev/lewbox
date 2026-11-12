@@ -5,7 +5,7 @@ description: Group accounts into organizations with roles, and give an organizat
 
 An **organization** is one business using Lewbox. It has **members** (Lewbox accounts, each with a role) and **API keys** (`lba_…`) that its own backend uses to call the Lewbox API. Instance admins create organizations; their owners and admins run them.
 
-You can do everything here in the web console (the organization menu at the top of the sidebar, then **Members**, **API keys** and **Settings**) or with the CLI.
+You can do everything here in the web console (customers: **Team** in the portal; instance admins: the customer's page in the console) or with the CLI. The web app calls an organization a **workspace**.
 
 ## Create an organization
 
@@ -48,6 +48,8 @@ lewbox member remove dev@acme.dev
 
 Members are existing accounts: an instance admin creates the account first ([Manage accounts](manage-accounts.md)). Anyone can leave an organization. An organization always keeps at least one owner, so the last owner can't be demoted or removed.
 
+Removing a member, changing their role to viewer, disabling their account or deleting their account revokes every sandbox key they created. If a key cannot be revoked, the change is refused with `502` and nothing changes, so you can try again.
+
 ## API keys
 
 An API key lets the organization's own backend call the Lewbox API as the organization. Owners and admins create them:
@@ -72,7 +74,7 @@ A key is deliberately narrow. It can read its organization, its members and its 
 
 ## Suspend an organization
 
-Instance admins can suspend an organization (`lewbox org suspend acme`, or **Settings** in the console). Its API keys stop working, its members can only look and it cannot mint sandbox keys until it is restored with `lewbox org restore acme`. Nothing is deleted.
+Instance admins can suspend an organization (`lewbox org suspend acme`, or **Suspend** on the customer's page in the console). Its API keys stop working, its members can only look and it cannot mint sandbox keys until it is restored with `lewbox org restore acme`. Nothing is deleted.
 
 ## Not yet
 

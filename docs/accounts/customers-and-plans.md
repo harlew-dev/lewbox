@@ -26,7 +26,7 @@ At sign-up the new organization is subscribed to `default_plan` in each existing
 
 ## Plans
 
-A plan is a set of limits. A limit is a positive whole number, or not set, which means unlimited. Plans have no price; billing is usage-based.
+A plan is a set of limits. A limit is a positive whole number, or not set, which means unlimited. Plans have no price; usage is recorded for charts and reporting only.
 
 ```bash
 lewbox plan list
@@ -64,6 +64,8 @@ Only instance admins change a subscription or an organization's status. Owners a
 
 An organization also has a **team** (`lbx-…`) for AerolVM, derived from its ID and never reused. Only instance admins see the team.
 
+Removing a member, changing their role to viewer, disabling their account or deleting it revokes every sandbox key they created (in that workspace for member changes, everywhere for account changes). If a key cannot be revoked, the change is refused with `502` until it succeeds. The workspace's `lba_` keys and other members' keys are untouched.
+
 ## Regions
 
 Customers place sandboxes in **regions**: the clusters that are ready or degraded. Instance admins see every one; a customer sees only the regions its organization is subscribed to, with the plan and limits there. A signed-in customer with no organization chosen sees none. The route carries no admin URL, token, node or version.
@@ -72,7 +74,7 @@ Customers place sandboxes in **regions**: the clusters that are ready or degrade
 lewbox region list --org acme
 ```
 
-A sandbox key can only be created for a subscribed region. Without one, the request fails with `412` and the message "your account has no plan in region …; ask your provider".
+A sandbox key can only be created for a subscribed region. Another region is `404 region … not found`. A subscription's quota is pushed before sign-up or a plan change returns; a key created in that region before the push succeeds gets `412` ("still being set up") until it does.
 
 ## How limits are enforced
 

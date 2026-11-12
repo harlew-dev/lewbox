@@ -55,7 +55,7 @@ type UsageRequest struct {
 
 // Usage returns metered usage per hour or day, zero-filled over the range.
 func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
-	_, org, fleet, err := s.scopeOrg(ctx, req.Org)
+	org, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return Usage{}, err
 	}
@@ -90,7 +90,7 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	start := from.UTC().Truncate(step)
 	end := to.UTC().Truncate(step)
 	orgID := ""
-	if !fleet && org != nil {
+	if org != nil {
 		orgID = org.ID
 	}
 	rows, err := s.q.ListUsageHourly(ctx, db.ListUsageHourlyParams{
@@ -111,6 +111,7 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	}
 
 	buckets := make(map[time.Time]*UsageBucket)
+	clusterPeaks := make(map[time.Time]map[string]int64)
 	order := make([]time.Time, 0)
 	for at := start; !at.After(end); at = at.Add(step) {
 		buckets[at] = &UsageBucket{Start: at, Regions: map[string]UsageRegion{}}
@@ -129,8 +130,13 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 		bucket.SandboxHours += sandboxHours
 		bucket.VcpuHours += vcpuHours
 		bucket.MemoryGiBHours += memoryGiBHours
-		if row.PeakSandboxes > bucket.PeakSandboxes {
-			bucket.PeakSandboxes = row.PeakSandboxes
+		peaks := clusterPeaks[at]
+		if peaks == nil {
+			peaks = make(map[string]int64)
+			clusterPeaks[at] = peaks
+		}
+		if row.PeakSandboxes > peaks[row.ClusterID] {
+			peaks[row.ClusterID] = row.PeakSandboxes
 		}
 		slug := regionSlug[row.ClusterID]
 		if slug != "" {
@@ -144,11 +150,18 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	}
 
 	out := Usage{
-		From:        from.UTC(),
-		To:          to.UTC(),
+		From:        from.UTC().Truncate(time.Millisecond),
+		To:          to.UTC().Truncate(time.Millisecond),
 		Granularity: granularity,
 		Totals:      roundAmounts(totals),
 		Data:        make([]UsageBucket, 0, len(order)),
+	}
+	for at, peaks := range clusterPeaks {
+		var peak int64
+		for _, n := range peaks {
+			peak += n
+		}
+		buckets[at].PeakSandboxes = peak
 	}
 	for _, at := range order {
 		bucket := buckets[at]

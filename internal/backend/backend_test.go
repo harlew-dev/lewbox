@@ -636,7 +636,7 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 			return b.ListSandboxes(ctx, service.ListSandboxesRequest{Org: "acme"})
 		}),
 		both("stop a sandbox", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.StopSandbox(ctx, "sb-1", service.SandboxActionRequest{Org: "acme", Region: "eu-west"})
+			return b.StopSandbox(ctx, "sb-1", service.RegionScope{Org: "acme", Region: "eu-west"})
 		}),
 		both("usage", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.Usage(ctx, service.UsageRequest{From: "2026-11-01", To: "2026-12-01", Org: "acme"})
@@ -645,7 +645,7 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 			return b.Limits(ctx, "acme")
 		}),
 	})
-	if _, err := h.remote.DeleteSandbox(ctx, "sb-2", service.SandboxActionRequest{Org: "acme"}); err != nil {
+	if _, err := h.remote.DeleteSandbox(ctx, "sb-2", service.RegionScope{Org: "acme"}); err != nil {
 		t.Fatalf("delete sandbox: %v", err)
 	}
 	list, err := h.local.ListSandboxes(ctx, service.ListSandboxesRequest{Org: "acme"})
@@ -686,17 +686,17 @@ func TestSnapshotBackendsAgree(t *testing.T) {
 	})
 
 	listSnapshots := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListSnapshots(ctx, service.ListSnapshotsRequest{Org: "acme"})
+		return b.ListSnapshots(ctx, service.RegionScope{Org: "acme"})
 	}
 	runSteps(t, h, []step{
 		both("list snapshots", listSnapshots),
 		{
 			name: "delete snapshots",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.DeleteSnapshot(ctx, "ckpt-a", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+				return b.DeleteSnapshot(ctx, "ckpt-a", service.RegionScope{Org: "acme", Region: "eu-west"})
 			},
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.DeleteSnapshot(ctx, "ckpt-b", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+				return b.DeleteSnapshot(ctx, "ckpt-b", service.RegionScope{Org: "acme", Region: "eu-west"})
 			},
 			check: func(t *testing.T, v any) {
 				if snapshot, ok := v.(service.Snapshot); !ok || snapshot.Region != "eu-west" {
@@ -706,7 +706,7 @@ func TestSnapshotBackendsAgree(t *testing.T) {
 		},
 		both("list snapshots after delete", listSnapshots),
 		both("missing snapshot", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.DeleteSnapshot(ctx, "missing", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+			return b.DeleteSnapshot(ctx, "missing", service.RegionScope{Org: "acme", Region: "eu-west"})
 		}),
 	})
 }

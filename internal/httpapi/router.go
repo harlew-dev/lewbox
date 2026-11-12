@@ -482,7 +482,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	mux.HandleFunc("POST "+Prefix+"/sandboxes/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.StopSandbox(r.Context(), r.PathValue("id"), service.SandboxActionRequest{
+		resp, err := svc.StopSandbox(r.Context(), r.PathValue("id"), service.RegionScope{
 			Region: r.URL.Query().Get("region"),
 			Org:    requestOrganization(r),
 		})
@@ -490,7 +490,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	mux.HandleFunc("DELETE "+Prefix+"/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.DeleteSandbox(r.Context(), r.PathValue("id"), service.SandboxActionRequest{
+		resp, err := svc.DeleteSandbox(r.Context(), r.PathValue("id"), service.RegionScope{
 			Region: r.URL.Query().Get("region"),
 			Org:    requestOrganization(r),
 		})
@@ -498,16 +498,16 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	mux.HandleFunc("GET "+Prefix+"/snapshots", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.ListSnapshots(r.Context(), service.ListSnapshotsRequest{
+		resp, err := svc.ListSnapshots(r.Context(), service.RegionScope{
 			Region: r.URL.Query().Get("region"),
 			Org:    requestOrganization(r),
 		})
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
-	// {name} is the snapshot's name, which is unique per member team.
+	// {name} is the snapshot's name, which is unique per workspace.
 	mux.HandleFunc("DELETE "+Prefix+"/snapshots/{name}", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.DeleteSnapshot(r.Context(), r.PathValue("name"), service.SnapshotActionRequest{
+		resp, err := svc.DeleteSnapshot(r.Context(), r.PathValue("name"), service.RegionScope{
 			Region: r.URL.Query().Get("region"),
 			Org:    requestOrganization(r),
 		})

@@ -120,7 +120,7 @@ func TestOrganizationVisibility(t *testing.T) {
 
 	// No organization named and not an admin key: the caller must choose.
 	_, err = s.ListMembers(f.member, "")
-	if se := wantCode(t, err, CodeInvalid); !strings.Contains(se.Message, "--org") {
+	if se := wantCode(t, err, CodeInvalid); !strings.Contains(se.Message, "choose a workspace") {
 		t.Errorf("message = %q", se.Message)
 	}
 }

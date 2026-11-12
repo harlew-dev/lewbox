@@ -361,12 +361,8 @@ func TestNodeCertificateChecks(t *testing.T) {
 		if !ok || !c.OK {
 			t.Errorf("node certificates check = %+v", c)
 		}
-		if len(detail.NodeList) != 1 || detail.NodeList[0].CertExpiresAt == nil {
+		if len(detail.NodeList) != 1 {
 			t.Fatalf("nodes = %+v", detail.NodeList)
-		}
-		want := clock.Add(60 * 24 * time.Hour)
-		if !detail.NodeList[0].CertExpiresAt.Equal(want) {
-			t.Errorf("cert_expires_at = %v, want %v", detail.NodeList[0].CertExpiresAt, want)
 		}
 	})
 
@@ -398,16 +394,6 @@ func TestNodeCertificateChecks(t *testing.T) {
 				t.Errorf("detail %q does not contain %q", c.Detail, want)
 			}
 		}
-		byName := map[string]*time.Time{}
-		for _, node := range detail.NodeList {
-			byName[node.Name] = node.CertExpiresAt
-		}
-		if at := byName["node-b"]; at == nil || !at.Equal(clock.Add(9*24*time.Hour)) {
-			t.Errorf("node-b cert_expires_at = %v", at)
-		}
-		if at := byName["node-a"]; at == nil || !at.Equal(clock.Add(60*24*time.Hour)) {
-			t.Errorf("node-a cert_expires_at = %v", at)
-		}
 	})
 
 	t.Run("unknown", func(t *testing.T) {
@@ -426,7 +412,7 @@ func TestNodeCertificateChecks(t *testing.T) {
 		if !ok || !c.OK || c.Detail != "could not read any node's certificate expiry" {
 			t.Errorf("node certificates check = %+v", c)
 		}
-		if len(detail.NodeList) != 1 || detail.NodeList[0].CertExpiresAt != nil {
+		if len(detail.NodeList) != 1 {
 			t.Errorf("nodes = %+v", detail.NodeList)
 		}
 	})
@@ -450,11 +436,6 @@ func TestNodeCertificateChecks(t *testing.T) {
 		c, ok := findCheck(detail.Checks, "node certificates")
 		if !ok || !c.OK {
 			t.Errorf("node certificates check = %+v", c)
-		}
-		for _, node := range detail.NodeList {
-			if node.Name == "node-b" && node.CertExpiresAt != nil {
-				t.Errorf("node-b has cert_expires_at = %v", node.CertExpiresAt)
-			}
 		}
 	})
 }

@@ -3,7 +3,7 @@ title: Concepts
 description: The few ideas Lewbox is built on — orchestrator, cluster, node, account, context — and how they fit together.
 ---
 
-Lewbox sits **next to** your AerolVM clusters, not in front of them. Your customers' apps talk to the clusters directly. Lewbox installs and registers the clusters, checks them, and (later) handles accounts, keys, limits and billing around them.
+Lewbox sits **next to** your AerolVM clusters, not in front of them. Your customers' apps talk to the clusters directly. Lewbox installs and registers the clusters, checks them, and handles customer accounts, workspaces, per-region plans, keys, usage and monitoring around them.
 
 ```
   you (lewbox CLI) ──────────────►  orchestrator  ──── admin token ────►  cluster "eu-west"

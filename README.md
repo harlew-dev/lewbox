@@ -1,6 +1,6 @@
 # Lewbox
 
-Run your own sandbox cloud. Lewbox installs [AerolVM](https://github.com/aerol-ai/microvm) on your servers, groups them into regions, and lets other people sign up, create API keys and run isolated sandboxes on your compute with the AerolVM SDK or the E2B SDK. You set plans and limits; Lewbox keeps them in force across every region, records usage, and can charge credits for it.
+Run your own sandbox cloud. Lewbox installs [AerolVM](https://github.com/aerol-ai/microvm) on your servers, groups them into regions, and lets other people sign up, create API keys and run isolated sandboxes on your compute with the AerolVM SDK or the E2B SDK. You set plans and limits; Lewbox keeps them in force across every region and records usage.
 
 It's one Go binary: the server (`lewbox serve`: API, web app, background jobs, SQLite) and the CLI that sets up machines.
 

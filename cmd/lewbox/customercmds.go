@@ -17,8 +17,8 @@ import (
 type limitTarget int
 
 const (
-	planLimits limitTarget = iota // null is unlimited
-	orgLimits                     // null falls back to the plan
+	planLimits         limitTarget = iota // null is unlimited
+	subscriptionLimits                    // null falls back to the plan
 )
 
 // limitWord handles the word that clears a limit. The other target's word is
@@ -28,7 +28,7 @@ func limitWord(raw string, target limitTarget) (bool, error) {
 	case "":
 		return true, nil
 	case "unlimited":
-		if target == orgLimits {
+		if target == subscriptionLimits {
 			return false, usagef("put the organization on a plan without that limit")
 		}
 		return true, nil
@@ -193,13 +193,13 @@ func newSubscriptionCmd(a *app) *cobra.Command {
 			}
 			req := service.SetSubscriptionRequest{Plan: setPlan}
 			var err error
-			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", setSandboxes, orgLimits, parseCountLimit); err != nil {
+			if req.MaxSandboxes, err = parseLimitFlag(cmd, "max-sandboxes", setSandboxes, subscriptionLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", setVcpus, orgLimits, parseCountLimit); err != nil {
+			if req.MaxVcpus, err = parseLimitFlag(cmd, "max-vcpus", setVcpus, subscriptionLimits, parseCountLimit); err != nil {
 				return err
 			}
-			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", setMemory, orgLimits, parseMemoryLimit); err != nil {
+			if req.MaxMemoryMB, err = parseLimitFlag(cmd, "max-memory", setMemory, subscriptionLimits, parseMemoryLimit); err != nil {
 				return err
 			}
 			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {

@@ -434,14 +434,14 @@ func (c *Client) ListSandboxes(ctx context.Context, req service.ListSandboxesReq
 }
 
 // StopSandbox stops a sandbox on its cluster.
-func (c *Client) StopSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+func (c *Client) StopSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error) {
 	var out service.Sandbox
 	err := c.doOrg(ctx, req.Org, http.MethodPost, sandboxActionPath(id, "stop", req.Region), nil, &out)
 	return out, err
 }
 
 // DeleteSandbox deletes a sandbox on its cluster.
-func (c *Client) DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+func (c *Client) DeleteSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error) {
 	var out service.Sandbox
 	err := c.doOrg(ctx, req.Org, http.MethodDelete, sandboxActionPath(id, "", req.Region), nil, &out)
 	return out, err
@@ -459,7 +459,7 @@ func sandboxActionPath(id, action, region string) string {
 }
 
 // ListSnapshots lists snapshots, optionally filtered by region.
-func (c *Client) ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error) {
+func (c *Client) ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error) {
 	query := url.Values{}
 	if req.Region != "" {
 		query.Set("region", req.Region)
@@ -474,7 +474,7 @@ func (c *Client) ListSnapshots(ctx context.Context, req service.ListSnapshotsReq
 }
 
 // DeleteSnapshot deletes a snapshot on its cluster.
-func (c *Client) DeleteSnapshot(ctx context.Context, name string, req service.SnapshotActionRequest) (service.Snapshot, error) {
+func (c *Client) DeleteSnapshot(ctx context.Context, name string, req service.RegionScope) (service.Snapshot, error) {
 	path := "/v0/snapshots/" + url.PathEscape(name)
 	if req.Region != "" {
 		path += "?region=" + url.QueryEscape(req.Region)

@@ -31,6 +31,12 @@ SELECT * FROM sandbox_keys WHERE cluster_id = ? AND revoked_at IS NULL;
 -- name: ListLiveSandboxKeysByOrg :many
 SELECT * FROM sandbox_keys WHERE org_id = ? AND revoked_at IS NULL;
 
+-- name: ListLiveSandboxKeysByCreator :many
+SELECT * FROM sandbox_keys
+WHERE created_by = sqlc.arg(created_by) AND revoked_at IS NULL
+  AND (sqlc.arg(org_id) = '' OR org_id = sqlc.arg(org_id))
+ORDER BY cluster_id, id;
+
 -- name: RevokeSandboxKey :execrows
 UPDATE sandbox_keys SET revoked_at = ?
 WHERE org_id = ? AND id = ? AND revoked_at IS NULL;

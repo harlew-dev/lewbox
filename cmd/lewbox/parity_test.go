@@ -873,8 +873,8 @@ func TestSubscriptions(t *testing.T) {
 		t.Fatalf("key create without a subscription: exit %d stdout %q", code, out)
 	}
 	status, got := e.httpOrg("acme", "POST", "/v0/sandbox-keys", `{"name":"laptop","region":"eu-west"}`)
-	if status != http.StatusPreconditionFailed || errOut != got {
-		t.Fatalf("key create without a subscription: status %d error %q, want 412 %q", status, errOut, got)
+	if status != http.StatusNotFound || errOut != got {
+		t.Fatalf("key create without a subscription: status %d error %q, want 404 %q", status, errOut, got)
 	}
 	if got := e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200); got != `{"data":[]}`+"\n" {
 		t.Errorf("empty subscription list = %q", got)

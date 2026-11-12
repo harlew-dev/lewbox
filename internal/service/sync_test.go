@@ -353,28 +353,28 @@ func TestSandboxActionsAreScoped(t *testing.T) {
 	f.sync(t)
 
 	viewer := userCtx(t, f.s, "viewer@example.com")
-	if _, err := f.s.StopSandbox(viewer, "sb-1", SandboxActionRequest{Org: "acme"}); err == nil {
+	if _, err := f.s.StopSandbox(viewer, "sb-1", RegionScope{Org: "acme"}); err == nil {
 		t.Error("a viewer stopped a sandbox")
 	} else {
 		wantCode(t, err, CodeForbidden)
 	}
 
 	outsider := userCtx(t, f.s, "outsider@example.com")
-	if _, err := f.s.StopSandbox(outsider, "sb-1", SandboxActionRequest{Org: "other"}); err == nil {
+	if _, err := f.s.StopSandbox(outsider, "sb-1", RegionScope{Org: "other"}); err == nil {
 		t.Error("another organization stopped a sandbox")
 	} else {
 		wantCode(t, err, CodeNotFound)
 	}
 
 	owner := userCtx(t, f.s, "owner@example.com")
-	stopped, err := f.s.StopSandbox(owner, "sb-1", SandboxActionRequest{Org: "acme", Region: "eu-west"})
+	stopped, err := f.s.StopSandbox(owner, "sb-1", RegionScope{Org: "acme", Region: "eu-west"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stopped.Status != "stopped" {
 		t.Errorf("stopped = %+v", stopped)
 	}
-	if _, err := f.s.DeleteSandbox(owner, "sb-1", SandboxActionRequest{Org: "acme"}); err != nil {
+	if _, err := f.s.DeleteSandbox(owner, "sb-1", RegionScope{Org: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	list, err := f.s.ListSandboxes(localCtx(), ListSandboxesRequest{Org: "acme"})
@@ -416,4 +416,84 @@ func TestLimitsHidesRegionErrorsFromCustomers(t *testing.T) {
 	if len(customer.Regions) != 1 || customer.Regions[0].Error == "" || strings.Contains(customer.Regions[0].Error, f.fake.URL()) {
 		t.Errorf("customer limits = %+v", customer.Regions)
 	}
+}
+
+func TestUsagePeakSumsClustersAndTimesAreMilliseconds(t *testing.T) {
+	clock := &testClock{at: time.Date(2026, 11, 1, 10, 10, 0, 0, time.UTC)}
+	s := newClusterService(t, WithClock(func() time.Time { return clock.at }))
+	first := newClusterFake(t)
+	setMembers(first, "node-a")
+	addTestCluster(t, s, first, "eu-west")
+	second := newClusterFake(t)
+	setMembers(second, "node-b")
+	addTestCluster(t, s, second, "us-east")
+	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, region := range []string{"eu-west", "us-east"} {
+		if _, err := s.SetSubscription(localCtx(), "acme", region, SetSubscriptionRequest{Plan: "free"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 2 {
+		first.AddSandbox(org.Team, startedSandbox("eu-"+string(rune('a'+i)), 1, 512))
+	}
+	for i := range 3 {
+		second.AddSandbox(org.Team, startedSandbox("us-"+string(rune('a'+i)), 1, 512))
+	}
+	clock.advance(15 * time.Second)
+	if err := s.Sync(localCtx()); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := s.Usage(localCtx(), UsageRequest{
+		From: "2026-11-01T10:00:00.123456789Z", To: "2026-11-01T11:00:00.987654321Z", Granularity: "hour", Org: "acme",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var peak int64
+	for _, bucket := range report.Data {
+		if bucket.PeakSandboxes > peak {
+			peak = bucket.PeakSandboxes
+		}
+	}
+	if peak != 5 {
+		t.Errorf("peak = %d, want the sum of both clusters' peaks", peak)
+	}
+	if report.From.Nanosecond()%int(time.Millisecond) != 0 || report.To.Nanosecond()%int(time.Millisecond) != 0 {
+		t.Errorf("from/to = %v, %v; want milliseconds", report.From, report.To)
+	}
+}
+
+func TestSyncSkipsQuotaPushForAFailedCluster(t *testing.T) {
+	f := newSyncFixture(t)
+	f.clock.advance(11 * time.Minute) // old enough that a push would refresh
+	before := len(f.fake.QuotaPushes(f.org.Team))
+	f.fake.FailNext("/v1/cluster/sandbox-index", 500, `{"error":"boom"}`, 1)
+	if err := f.s.Sync(localCtx()); err == nil {
+		t.Fatal("Sync succeeded with a failed cluster")
+	}
+	if after := len(f.fake.QuotaPushes(f.org.Team)); after != before {
+		t.Errorf("quota pushes = %d, want %d (the failed cluster is skipped)", after, before)
+	}
+}
+
+func TestSandboxRegionIsScopedToSubscriptions(t *testing.T) {
+	f := newSyncFixture(t)
+	second := newClusterFake(t)
+	setMembers(second, "node-b")
+	addTestCluster(t, f.s, second, "us-east")
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
+	f.clock.advance(15 * time.Second)
+	f.sync(t)
+
+	_, err := f.s.StopSandbox(localCtx(), "sb-1", RegionScope{Org: "acme", Region: "us-east"})
+	se := wantCode(t, err, CodeNotFound)
+	if !strings.Contains(se.Message, "region") {
+		t.Errorf("message = %q", se.Message)
+	}
+	_, err = f.s.ListSandboxes(localCtx(), ListSandboxesRequest{Org: "acme", Region: "us-east"})
+	wantCode(t, err, CodeNotFound)
 }

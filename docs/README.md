@@ -88,9 +88,9 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Design: CLI commands](design/cli-commands.md) | The full planned command set, what's built and what's next |
 | [Design: CLI conventions](design/cli-conventions.md) | Command shape, output and sign-in rules the CLI follows |
 | [Design: AerolVM integration](design/aerolvm-integration.md) | How install and join work with AerolVM, and what was verified |
-| [MVP specification](../MVP.md) | The product plan: organizations, workspaces, keys, limits, billing |
+| [MVP specification](../MVP.md) | The original, larger product plan; partly superseded by [plans/](../plans/README.md) |
 | [Feasibility review](../REVIEW.md) | Why Lewbox builds on stock AerolVM clusters |
 
 ## What's built
 
-Built and tested end to end: the orchestrator, the admin web console, accounts and sign-in, installing AerolVM, starting and joining clusters, registering existing clusters, health checks, removing nodes and clusters, and updating. Planned (see [MVP.md](../MVP.md)): organizations, workspaces, per-cluster customer keys, limits, metering, credits, webhooks, a customer portal, and cluster-wide rolling upgrades.
+Built and tested end to end: the orchestrator, the admin web console, accounts and sign-in, organizations with members and API keys, customer sign-up, plans and per-region limits, sandbox keys, sandboxes and usage, snapshots, the customer portal, installing AerolVM, starting and joining clusters, registering existing clusters, health checks, removing nodes and clusters, and updating. Planned (see [MVP.md](../MVP.md)): webhooks and cluster-wide rolling upgrades.

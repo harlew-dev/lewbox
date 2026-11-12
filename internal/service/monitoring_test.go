@@ -156,8 +156,11 @@ func TestClusterHealth(t *testing.T) {
 		t.Errorf("node-b uptime = %v", nodeB.Uptime)
 	}
 
-	if _, err := s.ClusterHealth(localCtx(), "eu-west", 91); err == nil {
-		t.Error("days=91 was accepted")
+	if _, err := s.ClusterHealth(localCtx(), "eu-west", 32); err == nil {
+		t.Error("days=32 was accepted")
+	}
+	if _, err := s.ClusterHealth(localCtx(), "eu-west", 31); err != nil {
+		t.Errorf("days=31 was refused: %v", err)
 	}
 }
 

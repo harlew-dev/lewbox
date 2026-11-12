@@ -99,6 +99,9 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 		return Subscription{}, err
 	}
 
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	existing, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	switch {
 	case err == nil:
@@ -157,6 +160,9 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	if err != nil {
 		return Subscription{}, err
 	}
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	sub, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
@@ -170,9 +176,8 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	}
 	out := toSubscription(sub, plan, cluster, true)
 
-	if err := s.revokeSubscriptionKeys(ctx, c.org, cluster, force); err != nil {
-		return Subscription{}, err
-	}
+	// Remove the row first, so no new key can be minted while its keys are
+	// being revoked.
 	n, err := s.q.DeleteSubscription(ctx, db.DeleteSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if err != nil {
 		return Subscription{}, fmt.Errorf("delete subscription: %w", err)
@@ -180,13 +185,27 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	if n == 0 {
 		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
 	}
+	if err := s.revokeSubscriptionKeys(ctx, c.org, cluster, force); err != nil {
+		if _, rerr := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+			OrgID:        sub.OrgID,
+			ClusterID:    sub.ClusterID,
+			PlanID:       sub.PlanID,
+			MaxSandboxes: sub.MaxSandboxes,
+			MaxVcpus:     sub.MaxVcpus,
+			MaxMemoryMb:  sub.MaxMemoryMb,
+			CreatedAt:    sub.CreatedAt,
+		}); rerr != nil {
+			return Subscription{}, fmt.Errorf("restore subscription: %w", rerr)
+		}
+		return Subscription{}, err
+	}
 
 	now := s.now()
 	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Subscription{}, fmt.Errorf("get quota state: %w", err)
 	}
-	s.pushQuota(ctx, c.org, cluster, blockingQuota(), false, state, err == nil, now)
+	s.pushQuota(ctx, c.org, cluster, blockingQuota(), false, state, err == nil, now, 0)
 	s.stopSandboxes(ctx, c.org, map[string]bool{cluster.ID: true})
 	return out, nil
 }
@@ -241,7 +260,23 @@ func (s *Service) pushSubscriptionQuota(ctx context.Context, org db.Organization
 		s.log.Warn("get quota state failed", "cluster", cluster.Slug, "organization", org.Slug, "err", err)
 		return
 	}
-	s.pushQuota(ctx, org, cluster, quota, remove, state, err == nil, s.now())
+	s.pushQuota(ctx, org, cluster, quota, remove, state, err == nil, s.now(), 0)
+}
+
+// subscriptionDesiredQuota is the quota_state value the subscription calls for
+// now: what a successful push must have stored before a key can be minted.
+func (s *Service) subscriptionDesiredQuota(ctx context.Context, org db.Organization, cluster db.Cluster) (string, error) {
+	sub, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: org.ID, ClusterID: cluster.ID})
+	if err != nil {
+		return "", err
+	}
+	plan, err := s.q.GetPlanByID(ctx, sub.PlanID)
+	if err != nil {
+		return "", err
+	}
+	limits := effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb)
+	quota, remove := subscriptionQuota(org.Status, true, limits)
+	return quotaDesired(quota, remove), nil
 }
 
 func toSubscription(sub db.Subscription, plan db.Plan, cluster db.Cluster, admin bool) Subscription {

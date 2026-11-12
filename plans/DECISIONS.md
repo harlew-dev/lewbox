@@ -248,6 +248,16 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 **What Lewbox adds on top of AerolVM, for the record:** accounts, workspaces, members and sign-up (AerolVM has no users); plans as named limit sets (each pushed as a native team quota); the sandbox list and usage charts (read from AerolVM's lists every 15 s); monitoring history (read from AerolVM's members and metrics); snapshot listing (native team-scoped tokens). Enforcement of every limit is AerolVM's own.
 
+## D30. A member's sandbox keys are revoked when they leave
+
+**Chosen.** Removing someone from a workspace, making them a viewer, disabling their account or deleting it revokes the sandbox keys **they created**. If a revoke fails, the change is refused until it succeeds. The workspace's management keys (`lba_`) and other members' keys are untouched.
+
+**Why.** Every key in a workspace drives the same AerolVM team (D29), so a departed member's key would still see and run every sandbox in the workspace. The final review flagged it.
+
+**Other options.** Keep keys alive and warn the owner, the way some products treat keys as the team's rather than the person's. Safer to revoke by default. A workspace that needs a key to outlive a person should have an owner create it.
+
+**Caveats.** A production app using a departed member's key stops working. Create long-lived keys from an account that will stay.
+
 ---
 
 *Later decisions are appended below as they are made.*

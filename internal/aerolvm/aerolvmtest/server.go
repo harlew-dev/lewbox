@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -146,13 +147,6 @@ func (s *Server) AddSandbox(team string, sandbox aerolvm.Sandbox) {
 	s.addSandboxLocked(team, "", sandbox)
 }
 
-// AddSandboxOn is AddSandbox with an explicit owner node.
-func (s *Server) AddSandboxOn(team, node string, sandbox aerolvm.Sandbox) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.addSandboxLocked(team, node, sandbox)
-}
-
 func (s *Server) addSandboxLocked(team, node string, sandbox aerolvm.Sandbox) {
 	if sandbox.CreatedAt.IsZero() {
 		sandbox.CreatedAt = time.Now().UTC().Truncate(time.Second)
@@ -218,14 +212,6 @@ func (s *Server) QuotaDeletes(team string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.quotaDeletes[team]
-}
-
-// TeamQuota returns the quota currently set for team.
-func (s *Server) TeamQuota(team string) (aerolvm.TeamQuota, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q, ok := s.quotas[team]
-	return q, ok
 }
 
 // FailNext makes the next n requests to path fail with status and body,
@@ -411,10 +397,17 @@ func (s *Server) handleMembers(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, aerolvm.Members{Members: members})
 }
 
+var tokenName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	var req aerolvm.CreateTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// AerolVM v0.7.0 refuses other names with 400 (pkg/models/tokens.go).
+	if !tokenName.MatchString(req.Name) {
+		s.writeError(w, http.StatusBadRequest, "invalid token request: name must be 1 to 64 characters of A-Z, a-z, 0-9, '.', '_' and '-'")
 		return
 	}
 	ttl, err := parseTTL(req.ExpiresIn)

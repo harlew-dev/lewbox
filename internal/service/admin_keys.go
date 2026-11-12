@@ -297,7 +297,7 @@ func (s *Service) authenticateAdminKey(ctx context.Context, token string) (Princ
 		return Principal{}, fmt.Errorf("get organization: %w", err)
 	}
 	if org.Status != orgActive {
-		return Principal{}, forbidden("organization %q is %s", org.Slug, org.Status)
+		return Principal{}, forbidden("workspace %q is %s", org.Slug, org.Status)
 	}
 	// Like sessions, last_used_at is written at most once a minute.
 	if !row.LastUsedAt.Valid || now.Sub(row.LastUsedAt.Time) >= time.Minute {

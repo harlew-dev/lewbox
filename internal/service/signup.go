@@ -94,7 +94,7 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 		return "", SessionResponse{}, err
 	}
 	orgID = org.ID
-	if err := s.subscribeDefaults(ctx, org.ID); err != nil {
+	if err := s.subscribeDefaults(ctx, org, settings); err != nil {
 		return "", SessionResponse{}, err
 	}
 
@@ -150,12 +150,9 @@ func (s *Service) createSignupOrganization(ctx context.Context, local, name, sta
 }
 
 // subscribeDefaults gives a new organization the default plan in each default
-// region that still exists. With no default plan or regions, it gets none.
-func (s *Service) subscribeDefaults(ctx context.Context, orgID string) error {
-	settings, err := s.getSettings(ctx)
-	if err != nil {
-		return err
-	}
+// region that still exists, pushing each quota before it returns. With no
+// default plan or regions, it gets none.
+func (s *Service) subscribeDefaults(ctx context.Context, org db.Organization, settings Settings) error {
 	if settings.DefaultPlan == nil || len(settings.DefaultRegions) == 0 {
 		return nil
 	}
@@ -174,14 +171,16 @@ func (s *Service) subscribeDefaults(ctx context.Context, orgID string) error {
 		if err != nil {
 			return fmt.Errorf("get cluster %q: %w", slug, err)
 		}
-		if _, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
-			OrgID:     orgID,
+		sub, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+			OrgID:     org.ID,
 			ClusterID: cluster.ID,
 			PlanID:    plan.ID,
 			CreatedAt: s.now(),
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("subscribe %q: %w", slug, err)
 		}
+		s.pushSubscriptionQuota(ctx, org, cluster, plan, sub)
 	}
 	return nil
 }

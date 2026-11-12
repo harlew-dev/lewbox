@@ -25,7 +25,7 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		Short:   "List snapshots (GET /v0/snapshots)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListSnapshots(ctx, service.ListSnapshotsRequest{Region: listRegion, Org: a.org})
+			return b.ListSnapshots(ctx, service.RegionScope{Region: listRegion, Org: a.org})
 		}),
 	}
 	list.Flags().StringVar(&listRegion, "region", "", "only snapshots in this region")
@@ -41,7 +41,7 @@ func newSnapshotCmd(a *app) *cobra.Command {
 				return err
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.DeleteSnapshot(ctx, args[0], service.SnapshotActionRequest{Region: deleteRegion, Org: a.org})
+				return b.DeleteSnapshot(ctx, args[0], service.RegionScope{Region: deleteRegion, Org: a.org})
 			})(cmd, args)
 		},
 	}

@@ -79,7 +79,7 @@ func requireUser(ctx context.Context) (Principal, error) {
 		return Principal{}, err
 	}
 	if p.Kind == "key" {
-		return Principal{}, forbidden("an admin key can only use its organization's routes")
+		return Principal{}, forbidden("an admin key can only use its workspace's routes")
 	}
 	return p, nil
 }

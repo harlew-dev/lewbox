@@ -288,7 +288,7 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 	if err := s.storeCheck(ctx, row.ID, status, detail, version, checks); err != nil {
 		return ClusterDetail{}, err
 	}
-	if err := s.recordSamples(ctx, row.ID, status, result.healthLatency, !healthFailed(checks), result.membersAvailable, result.members, result.certExpiries); err != nil {
+	if err := s.recordSamples(ctx, row.ID, status, result.healthLatency, !healthFailed(checks), result.membersAvailable, result.members); err != nil {
 		return ClusterDetail{}, err
 	}
 	return s.clusterDetail(ctx, row.ID)
@@ -330,7 +330,9 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	}
 	if token, err := s.clusterToken(row); err == nil {
 		client := s.aerolvmClient(row.AdminURL, token)
-		_ = client.RevokeToken(ctx, row.AdminTokenID)
+		callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+		_ = client.RevokeToken(callCtx, row.AdminTokenID)
+		cancel()
 	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
 	if err != nil {
@@ -343,7 +345,7 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 }
 
 func sandboxKeysNotRevoked(n int, slug string) error {
-	return unavailable("could not revoke %d sandbox keys on %q; fix the connection and try again, or pass force to remove it anyway", n, slug)
+	return unavailable("could not revoke %d sandbox keys on %q; fix the connection and try again, or remove it anyway (force)", n, slug)
 }
 
 // revokeKeys revokes live sandbox keys on one cluster and reports how many
@@ -356,7 +358,10 @@ func (s *Service) revokeKeys(ctx context.Context, cluster db.Cluster, keys []db.
 	}
 	client := s.aerolvmClient(cluster.AdminURL, token)
 	for _, key := range keys {
-		if err := client.RevokeToken(ctx, key.UpstreamID); err != nil {
+		callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+		err := client.RevokeToken(callCtx, key.UpstreamID)
+		cancel()
+		if err != nil {
 			failed++
 			continue
 		}
@@ -507,7 +512,6 @@ type checkResult struct {
 	healthLatency    time.Duration
 	members          []aerolvm.Member
 	membersAvailable bool
-	certExpiries     map[string]time.Time
 }
 
 // runChecks runs the cluster requirements in order and stops at the first
@@ -611,9 +615,7 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 
 	add(runtimeCheck(result.members, spec.Runtime))
 
-	certCheck, certExpiries := s.nodeCertCheck(ctx, spec.AdminToken, result.members)
-	result.certExpiries = certExpiries
-	add(certCheck)
+	add(s.nodeCertCheck(ctx, spec.AdminToken, result.members))
 
 	token, err := client.CreateToken(ctx, aerolvm.CreateTokenRequest{
 		Name:      "lewbox-ttl-check",
@@ -686,7 +688,7 @@ func runtimeCheck(members []aerolvm.Member, runtime string) Check {
 
 // nodeCertCheck reads each alive member's cluster certificate expiry from its
 // metrics endpoint. Members that do not answer are skipped.
-func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aerolvm.Member) (Check, map[string]time.Time) {
+func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aerolvm.Member) Check {
 	expiries := make(map[string]time.Time, len(members))
 	var (
 		mu  sync.Mutex
@@ -716,7 +718,7 @@ func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aer
 	wg.Wait()
 
 	if len(expiries) == 0 {
-		return Check{Name: "node certificates", OK: true, Detail: "could not read any node's certificate expiry"}, expiries
+		return Check{Name: "node certificates", OK: true, Detail: "could not read any node's certificate expiry"}
 	}
 	now := s.now()
 	names := make([]string, 0, len(expiries))
@@ -741,9 +743,9 @@ func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aer
 		expiring = append(expiring, fmt.Sprintf("%s's cluster certificate expires in %d days (%s); AerolVM renews it automatically at two-thirds of its life, so renewal has failed: check sandboxd's log on that node", name, days, at.Format("2006-01-02")))
 	}
 	if len(expiring) > 0 {
-		return Check{Name: "node certificates", Detail: strings.Join(expiring, "; ")}, expiries
+		return Check{Name: "node certificates", Detail: strings.Join(expiring, "; ")}
 	}
-	return Check{Name: "node certificates", OK: true, Detail: "earliest expires " + earliest.Format("2006-01-02")}, expiries
+	return Check{Name: "node certificates", OK: true, Detail: "earliest expires " + earliest.Format("2006-01-02")}
 }
 
 // syncNodes mirrors members into nodes. It returns a failed members check for
@@ -844,23 +846,10 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
-	latest, err := s.q.LatestNodeSamples(ctx)
-	if err != nil {
-		return ClusterDetail{}, fmt.Errorf("latest node samples: %w", err)
-	}
-	certExpiries := make(map[string]time.Time, len(latest))
-	for _, sample := range latest {
-		if sample.CertExpiresAt.Valid {
-			certExpiries[sample.NodeID] = sample.CertExpiresAt.Time.UTC()
-		}
-	}
 	nodes := make([]Node, 0, len(rows))
 	for _, r := range rows {
 		n := toNode(r)
 		n.Cluster = row.Slug
-		if at, ok := certExpiries[r.ID]; ok {
-			n.CertExpiresAt = &at
-		}
 		nodes = append(nodes, n)
 	}
 	return ClusterDetail{Cluster: toCluster(row, len(nodes)), Checks: checks, NodeList: nodes}, nil
@@ -984,6 +973,17 @@ func (s *Service) clusterClient(row db.Cluster) (*aerolvm.Client, error) {
 		return nil, err
 	}
 	return s.aerolvmClient(row.AdminURL, token), nil
+}
+
+// quotaClient caps the retry budget for one quota push: none in a request,
+// a few seconds in the sync loop.
+func (s *Service) quotaClient(row db.Cluster, retry time.Duration) (*aerolvm.Client, error) {
+	token, err := s.clusterToken(row)
+	if err != nil {
+		return nil, err
+	}
+	opts := append(append([]aerolvm.Option(nil), s.aerolvmOptions...), aerolvm.WithRetry(retry))
+	return aerolvm.New(row.AdminURL, token, opts...), nil
 }
 
 func (s *Service) nodeCounts(ctx context.Context) (map[string]int, error) {

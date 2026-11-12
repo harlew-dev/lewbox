@@ -493,13 +493,12 @@ func (q *Queries) UpsertQuotaState(ctx context.Context, arg UpsertQuotaStatePara
 }
 
 const upsertSandbox = `-- name: UpsertSandbox :exec
-INSERT INTO sandboxes (cluster_id, id, org_id, team, node, name, image, status,
+INSERT INTO sandboxes (cluster_id, id, org_id, node, name, image, status,
                        status_reason, runtime, cpu, memory_mb, disk_gb, created_at,
                        last_seen_at, gone_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 ON CONFLICT(cluster_id, id) DO UPDATE SET
     org_id = COALESCE(excluded.org_id, sandboxes.org_id),
-    team = CASE WHEN excluded.team = '' THEN sandboxes.team ELSE excluded.team END,
     node = CASE WHEN excluded.node = '' THEN sandboxes.node ELSE excluded.node END,
     name = excluded.name,
     image = excluded.image,
@@ -518,7 +517,6 @@ type UpsertSandboxParams struct {
 	ClusterID    string
 	ID           string
 	OrgID        sql.NullString
-	Team         string
 	Node         string
 	Name         string
 	Image        string
@@ -537,7 +535,6 @@ func (q *Queries) UpsertSandbox(ctx context.Context, arg UpsertSandboxParams) er
 		arg.ClusterID,
 		arg.ID,
 		arg.OrgID,
-		arg.Team,
 		arg.Node,
 		arg.Name,
 		arg.Image,

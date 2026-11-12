@@ -12,7 +12,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/db"
 )
 
-// Plan is a set of limits the operator sells. A nil limit is unlimited.
+// Plan is a set of limits. A nil limit is unlimited.
 type Plan struct {
 	ID            string    `json:"id"`
 	Slug          string    `json:"slug"`

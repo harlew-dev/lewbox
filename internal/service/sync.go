@@ -16,6 +16,8 @@ import (
 
 const (
 	syncClusterTimeout = 20 * time.Second
+	quotaPushTimeout   = 5 * time.Second
+	quotaPushRetry     = 3 * time.Second
 	quotaPushEvery     = 10 * time.Minute
 	blockingCPU        = 0.001
 	blockingMemoryMB   = 1
@@ -53,10 +55,11 @@ func (s *Service) Sync(ctx context.Context) error {
 	}
 
 	var (
-		mu   sync.Mutex
-		errs []error
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, syncConcurrency)
+		mu     sync.Mutex
+		errs   []error
+		failed = make(map[string]bool)
+		wg     sync.WaitGroup
+		sem    = make(chan struct{}, syncConcurrency)
 	)
 	for _, row := range clusters {
 		if !row.CheckedAt.Valid {
@@ -71,6 +74,7 @@ func (s *Service) Sync(ctx context.Context) error {
 				s.log.Warn("cluster sync failed", "cluster", row.Slug, "err", err)
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("sync cluster %q: %w", row.Slug, err))
+				failed[row.ID] = true
 				mu.Unlock()
 			}
 		}(row)
@@ -78,13 +82,13 @@ func (s *Service) Sync(ctx context.Context) error {
 	wg.Wait()
 
 	for _, org := range orgs {
-		if err := s.syncOrganizationQuotas(ctx, org); err != nil {
+		if err := s.syncOrganizationQuotas(ctx, org, failed); err != nil {
 			s.log.Warn("quota sync failed", "organization", org.Slug, "err", err)
 		}
 	}
 	for _, org := range orgs {
-		if org.Status == orgSuspended && (org.StatusReason == statusReasonAdmin || org.StatusReason == "credits") {
-			s.stopOrganizationSandboxes(ctx, org)
+		if org.Status == orgSuspended {
+			s.stopSandboxes(ctx, org, nil)
 			continue
 		}
 		subs, err := s.subscriptionsByCluster(ctx, org.ID)
@@ -159,7 +163,6 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 			ClusterID:    row.ID,
 			ID:           sandbox.ID,
 			OrgID:        orgID,
-			Team:         team,
 			Node:         placement.OwnerNodeID,
 			Name:         sandbox.Name,
 			Image:        sandbox.Image,
@@ -236,9 +239,9 @@ func (s *Service) recordSyncError(ctx context.Context, id string, err error) {
 }
 
 // syncOrganizationQuotas pushes one organization's quota on every cluster it
-// is subscribed to or has used. Errors are recorded per cluster and never
-// fail the caller.
-func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organization) error {
+// is subscribed to or has used. Clusters in skip are left until the next pass.
+// Errors are recorded per cluster and never fail the caller.
+func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organization, skip map[string]bool) error {
 	if !org.Team.Valid || org.Team.String == "" {
 		return nil
 	}
@@ -279,8 +282,18 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 		stateByCluster[state.ClusterID] = state
 	}
 
-	now := s.now()
+	type push struct {
+		cluster   db.Cluster
+		quota     aerolvm.TeamQuota
+		remove    bool
+		state     db.QuotaState
+		haveState bool
+	}
+	pushes := make([]push, 0, len(clusters))
 	for _, cluster := range clusters {
+		if skip[cluster.ID] {
+			continue
+		}
 		sub, subscribed := subs[cluster.ID]
 		state, haveState := stateByCluster[cluster.ID]
 		if !subscribed && !used[cluster.ID] && !keyed[cluster.ID] && !haveState {
@@ -295,8 +308,22 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 			limits = effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb)
 		}
 		quota, remove := subscriptionQuota(org.Status, subscribed, limits)
-		s.pushQuota(ctx, org, cluster, quota, remove, state, haveState, now)
+		pushes = append(pushes, push{cluster: cluster, quota: quota, remove: remove, state: state, haveState: haveState})
 	}
+
+	now := s.now()
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, syncConcurrency)
+	for _, p := range pushes {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(p push) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			s.pushQuota(ctx, org, p.cluster, p.quota, p.remove, p.state, p.haveState, now, quotaPushRetry)
+		}(p)
+	}
+	wg.Wait()
 	return nil
 }
 
@@ -331,27 +358,36 @@ func isBlockingQuota(q aerolvm.TeamQuota) bool {
 	return q.MaxCPU > 0 && q.MaxCPU <= blockingCPU
 }
 
-// pushQuota sends a quota only when it changed, the last push failed, or it
-// is old enough to refresh.
-func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db.Cluster, quota aerolvm.TeamQuota, remove bool, state db.QuotaState, haveState bool, now time.Time) {
-	desired := "none"
-	if !remove {
-		data, err := json.Marshal(quota)
-		if err != nil {
-			return
-		}
-		desired = string(data)
+// quotaDesired is what quota_state stores for a push: the JSON body, or "none"
+// when there is no quota.
+func quotaDesired(quota aerolvm.TeamQuota, remove bool) string {
+	if remove {
+		return "none"
 	}
+	data, err := json.Marshal(quota)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// pushQuota sends a quota only when it changed, the last push failed, or it
+// is old enough to refresh. retry bounds the 503 retry budget; it is zero in
+// a request and a few seconds in the sync loop.
+func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db.Cluster, quota aerolvm.TeamQuota, remove bool, state db.QuotaState, haveState bool, now time.Time, retry time.Duration) {
+	desired := quotaDesired(quota, remove)
 	if haveState && state.Error == "" && state.Quota == desired && now.Sub(state.PushedAt) < quotaPushEvery {
 		return
 	}
 
-	client, err := s.clusterClient(cluster)
+	client, err := s.quotaClient(cluster, retry)
 	if err == nil {
+		pushCtx, cancel := context.WithTimeout(ctx, quotaPushTimeout)
+		defer cancel()
 		if remove {
-			err = client.DeleteTeamQuota(ctx, org.Team.String)
+			err = client.DeleteTeamQuota(pushCtx, org.Team.String)
 		} else {
-			err = client.PutTeamQuota(ctx, org.Team.String, quota)
+			err = client.PutTeamQuota(pushCtx, org.Team.String, quota)
 		}
 	}
 	errText := ""
@@ -370,12 +406,6 @@ func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db
 	}
 }
 
-// stopOrganizationSandboxes stops every running sandbox of a suspended
-// organization, so it stops accruing compute.
-func (s *Service) stopOrganizationSandboxes(ctx context.Context, org db.Organization) {
-	s.stopSandboxes(ctx, org, nil)
-}
-
 // stopSandboxes stops an organization's running sandboxes, restricted to
 // only's clusters when it is not nil.
 func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only map[string]bool) {
@@ -388,14 +418,16 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 		if only != nil && !only[row.Sandbox.ClusterID] {
 			continue
 		}
-		cluster, err := s.findCluster(ctx, row.Sandbox.ClusterID)
+		cluster, err := s.q.GetClusterBySlug(ctx, row.ClusterSlug)
 		if err != nil {
 			s.log.Warn("find sandbox cluster failed", "sandbox", row.Sandbox.ID, "err", err)
 			continue
 		}
 		client, err := s.clusterClient(cluster)
 		if err == nil {
-			err = client.StopSandbox(ctx, row.Sandbox.ID)
+			callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+			err = client.StopSandbox(callCtx, row.Sandbox.ID)
+			cancel()
 		}
 		if err != nil {
 			s.log.Warn("stop sandbox failed", "sandbox", row.Sandbox.ID, "err", err)
@@ -429,7 +461,7 @@ func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
 			errs = append(errs, fmt.Errorf("get organization %q: %w", sub.OrgID, err))
 			continue
 		}
-		if err := s.syncOrganizationQuotas(ctx, org); err != nil {
+		if err := s.syncOrganizationQuotas(ctx, org, nil); err != nil {
 			errs = append(errs, fmt.Errorf("sync %q: %w", org.Slug, err))
 		}
 	}

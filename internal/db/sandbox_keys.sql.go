@@ -173,6 +173,52 @@ func (q *Queries) ListLiveSandboxKeysByCluster(ctx context.Context, clusterID st
 	return items, nil
 }
 
+const listLiveSandboxKeysByCreator = `-- name: ListLiveSandboxKeysByCreator :many
+SELECT id, org_id, cluster_id, name, upstream_id, last4, created_by, created_at, expires_at, revoked_at FROM sandbox_keys
+WHERE created_by = ?1 AND revoked_at IS NULL
+  AND (?2 = '' OR org_id = ?2)
+ORDER BY cluster_id, id
+`
+
+type ListLiveSandboxKeysByCreatorParams struct {
+	CreatedBy sql.NullString
+	OrgID     interface{}
+}
+
+func (q *Queries) ListLiveSandboxKeysByCreator(ctx context.Context, arg ListLiveSandboxKeysByCreatorParams) ([]SandboxKey, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveSandboxKeysByCreator, arg.CreatedBy, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SandboxKey
+	for rows.Next() {
+		var i SandboxKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ClusterID,
+			&i.Name,
+			&i.UpstreamID,
+			&i.Last4,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLiveSandboxKeysByOrg = `-- name: ListLiveSandboxKeysByOrg :many
 SELECT id, org_id, cluster_id, name, upstream_id, last4, created_by, created_at, expires_at, revoked_at FROM sandbox_keys WHERE org_id = ? AND revoked_at IS NULL
 `

@@ -173,7 +173,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		if p.Kind != "key" {
-			return orgCaller{}, invalid("choose an organization: pass --org <slug> or run lewbox org use <slug> (over HTTP, send the Lewbox-Organization header)")
+			return orgCaller{}, invalid("choose a workspace")
 		}
 		ref = p.OrgID
 	}
@@ -185,7 +185,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 
 	if p.Kind == "key" {
 		if org.ID != p.OrgID {
-			return orgCaller{}, notFound("organization %q not found", ref)
+			return orgCaller{}, notFound("workspace %q not found", ref)
 		}
 		if need == accessManage {
 			return orgCaller{}, forbidden("an admin key cannot change members or keys: sign in as an owner or admin")
@@ -206,7 +206,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 		return c, nil
 	}
 	if c.role == "" {
-		return orgCaller{}, notFound("organization %q not found", ref)
+		return orgCaller{}, notFound("workspace %q not found", ref)
 	}
 	if (need == accessKeys || need == accessManage) && c.role != roleOwner && c.role != roleAdmin {
 		return orgCaller{}, forbidden("only an owner or admin of %q can do this", org.Slug)
@@ -215,7 +215,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 		return orgCaller{}, forbidden("only an owner, admin or member of %q can do this", org.Slug)
 	}
 	if need == accessManage && org.Status != orgActive {
-		return orgCaller{}, forbidden("organization %q is %s", org.Slug, org.Status)
+		return orgCaller{}, forbidden("workspace %q is %s", org.Slug, org.Status)
 	}
 	return c, nil
 }
@@ -232,7 +232,7 @@ func (s *Service) findOrganization(ctx context.Context, ref string) (db.Organiza
 		row, err = s.q.GetOrganizationBySlug(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return db.Organization{}, notFound("organization %q not found", ref)
+		return db.Organization{}, notFound("workspace %q not found", ref)
 	}
 	if err != nil {
 		return db.Organization{}, fmt.Errorf("get organization: %w", err)
@@ -424,7 +424,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 
 	if p.Kind == "key" {
 		if strings.TrimSpace(req.User) != "" {
-			return OrganizationList{}, forbidden("an admin key cannot list another account's organizations")
+			return OrganizationList{}, forbidden("an admin key cannot list another account's workspaces")
 		}
 		row, err := s.q.GetOrganizationByID(ctx, p.OrgID)
 		if err != nil {
@@ -438,7 +438,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 
 	if ref := strings.TrimSpace(req.User); ref != "" {
 		if !p.InstanceAdmin && !p.selfRef(ref) {
-			return OrganizationList{}, forbidden("only an instance admin can list another account's organizations")
+			return OrganizationList{}, forbidden("only an instance admin can list another account's workspaces")
 		}
 		user, err := s.findUser(ctx, ref)
 		if err != nil {
@@ -653,7 +653,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		}
 	}
 	if adminOnly {
-		if err := s.syncOrganizationQuotas(ctx, row); err != nil {
+		if err := s.syncOrganizationQuotas(ctx, row, nil); err != nil {
 			s.log.Warn("quota sync failed", "organization", row.Slug, "err", err)
 		}
 	}
@@ -749,6 +749,11 @@ func (s *Service) SetMemberRole(ctx context.Context, org, ref string, req SetMem
 	if m.Role == role {
 		return toMember(m, email), nil
 	}
+	if role == roleViewer {
+		if err := s.revokeCreatedSandboxKeys(ctx, c.org.ID, m.UserID); err != nil {
+			return Member{}, err
+		}
+	}
 	updated, err := s.q.SetMembershipRole(ctx, db.SetMembershipRoleParams{Role: role, ID: m.ID})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Member{}, conflict("%q needs at least one owner", c.org.Slug)
@@ -782,6 +787,9 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 		if m.Role == roleOwner && !c.owner() {
 			return Member{}, forbidden("only an owner can remove an owner")
 		}
+	}
+	if err := s.revokeCreatedSandboxKeys(ctx, c.org.ID, m.UserID); err != nil {
+		return Member{}, err
 	}
 	n, err := s.q.DeleteMembership(ctx, m.ID)
 	if err != nil {

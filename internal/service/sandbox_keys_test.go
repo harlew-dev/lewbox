@@ -138,8 +138,8 @@ func TestSandboxKeyRegionDefault(t *testing.T) {
 	// A region without a subscription is refused, and does not become the
 	// default.
 	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two", Region: "us-east"})
-	se := wantCode(t, err, CodePrecondition)
-	if !strings.Contains(se.Message, "no plan in region") {
+	se := wantCode(t, err, CodeNotFound)
+	if !strings.Contains(se.Message, "region") {
 		t.Errorf("message = %q", se.Message)
 	}
 	if out, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "again", Region: "eu-west"}); err != nil || out.Region.Slug != "eu-west" {
@@ -152,7 +152,7 @@ func TestSandboxKeyRegionDefault(t *testing.T) {
 	}
 	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two"})
 	se = wantCode(t, err, CodeInvalid)
-	if !strings.Contains(se.Message, "--region") {
+	if !strings.Contains(se.Message, "choose a region") {
 		t.Errorf("message = %q", se.Message)
 	}
 	if out, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two", Region: "us-east"}); err != nil || out.Region.Slug != "us-east" {
@@ -166,11 +166,16 @@ func TestSandboxKeyLifetimeCap(t *testing.T) {
 	before := len(f.fake.Tokens())
 	_, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "forever", ExpiresIn: "never"})
 	se := wantCode(t, err, CodeInvalid)
-	if !strings.Contains(se.Message, "SB_TOKEN_MAX_TTL") {
-		t.Errorf("message = %q", se.Message)
+	if !strings.Contains(se.Message, "choose a shorter expiry") || strings.Contains(se.Message, "SB_TOKEN_MAX_TTL") {
+		t.Errorf("customer message = %q", se.Message)
 	}
 	if len(f.fake.Tokens()) != before {
 		t.Error("a refused lifetime left a token upstream")
+	}
+	_, err = f.s.CreateSandboxKey(f.root, "acme", CreateSandboxKeyRequest{Name: "forever", ExpiresIn: "never"})
+	se = wantCode(t, err, CodeInvalid)
+	if !strings.Contains(se.Message, "SB_TOKEN_MAX_TTL") {
+		t.Errorf("admin message = %q", se.Message)
 	}
 }
 
@@ -484,5 +489,173 @@ func TestSandboxKeyCreatorIsHidden(t *testing.T) {
 		if key.CreatedBy != want {
 			t.Errorf("key %q created_by = %q, want %q", key.Name, key.CreatedBy, want)
 		}
+	}
+}
+
+func TestCreateSandboxKeyWaitsForQuota(t *testing.T) {
+	f := newSandboxFixture(t)
+	cluster, err := f.s.q.GetClusterBySlug(context.Background(), "eu-west")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.q.UpsertQuotaState(context.Background(), db.UpsertQuotaStateParams{
+		OrgID: f.org.ID, ClusterID: cluster.ID, Quota: `{"max_sandboxes":2}`,
+		PushedAt: f.s.now(), Error: "boom",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop"})
+	se := wantCode(t, err, CodePrecondition)
+	if !strings.Contains(se.Message, "still being set up") {
+		t.Errorf("message = %q", se.Message)
+	}
+	// A successful push unblocks it.
+	if _, err := f.s.SetSubscription(f.root, "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop"}); err != nil {
+		t.Fatalf("create after a successful push: %v", err)
+	}
+}
+
+func TestLeavingMemberKeysAreRevoked(t *testing.T) {
+	f := newSandboxFixture(t)
+	mine, err := f.s.CreateSandboxKey(f.member, "acme", CreateSandboxKeyRequest{Name: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "theirs"}); err != nil {
+		t.Fatal(err)
+	}
+	upstream, ok := sandboxToken(f.fake, mine.Token)
+	if !ok {
+		t.Fatal("upstream token not found")
+	}
+	if _, err := f.s.RemoveMember(f.owner, "acme", "member@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, revoked := range f.fake.Revoked() {
+		found = found || revoked == upstream.ID
+	}
+	if !found {
+		t.Errorf("revoked = %v, want the member's key", f.fake.Revoked())
+	}
+	keys, err := f.s.ListSandboxKeys(f.owner, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys.Data {
+		if (key.Name == "mine") != (key.RevokedAt != nil) {
+			t.Errorf("key %q revoked_at = %v", key.Name, key.RevokedAt)
+		}
+	}
+}
+
+func TestMemberChangeFailsClosedWhenKeysCannotBeRevoked(t *testing.T) {
+	f := newSandboxFixture(t)
+	if _, err := f.s.CreateSandboxKey(f.member, "acme", CreateSandboxKeyRequest{Name: "mine"}); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.Stop()
+	if _, err := f.s.RemoveMember(f.owner, "acme", "member@example.com"); err == nil {
+		t.Fatal("the member was removed without revoking the key")
+	} else {
+		wantCode(t, err, CodeUnavailable)
+	}
+	members, err := f.s.ListMembers(f.owner, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members.Data) != 4 {
+		t.Errorf("members after a refused change = %+v", members.Data)
+	}
+}
+
+func TestViewerChangeRevokesKeys(t *testing.T) {
+	f := newSandboxFixture(t)
+	mine, err := f.s.CreateSandboxKey(f.member, "acme", CreateSandboxKeyRequest{Name: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream, _ := sandboxToken(f.fake, mine.Token)
+	if _, err := f.s.SetMemberRole(f.owner, "acme", "member@example.com", SetMemberRoleRequest{Role: roleViewer}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, revoked := range f.fake.Revoked() {
+		found = found || revoked == upstream.ID
+	}
+	if !found {
+		t.Errorf("revoked = %v, want the member's key", f.fake.Revoked())
+	}
+}
+
+func TestAccountChangesRevokeKeysEverywhere(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(f sandboxFixture) error
+	}{
+		{"disable", func(f sandboxFixture) error {
+			_, err := f.s.SetUserDisabled(f.root, "member@example.com", true)
+			return err
+		}},
+		{"delete", func(f sandboxFixture) error {
+			_, err := f.s.RemoveUser(f.root, "member@example.com")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newSandboxFixture(t)
+			mine, err := f.s.CreateSandboxKey(f.member, "acme", CreateSandboxKeyRequest{Name: "mine"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			upstream, _ := sandboxToken(f.fake, mine.Token)
+			if err := tc.call(f); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, revoked := range f.fake.Revoked() {
+				found = found || revoked == upstream.ID
+			}
+			if !found {
+				t.Errorf("revoked = %v, want the account's key", f.fake.Revoked())
+			}
+		})
+	}
+}
+
+func TestSignupPushesDefaultQuota(t *testing.T) {
+	f := newSandboxFixture(t)
+	setSignup(t, f.s, signupOpen)
+	plan := "free"
+	regions := []string{"eu-west"}
+	if _, err := f.s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegions: &regions}); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := f.s.Signup(context.Background(), SignupRequest{Email: "new@example.com", Password: testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.s.Authenticate(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithPrincipal(context.Background(), p)
+	orgs, err := f.s.ListOrganizations(ctx, ListOrganizationsRequest{})
+	if err != nil || len(orgs.Data) != 1 {
+		t.Fatalf("signup organizations = %+v, %v", orgs.Data, err)
+	}
+	adminOrg, err := f.s.GetOrganization(localCtx(), orgs.Data[0].Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushes := f.fake.QuotaPushes(adminOrg.Team)
+	if len(pushes) != 1 || pushes[0].MaxSandboxes != 2 || pushes[0].MaxCPU != 2 || pushes[0].MaxMemoryMB != 4096 {
+		t.Fatalf("signup quota pushes = %+v", pushes)
+	}
+	if _, err := f.s.CreateSandboxKey(ctx, orgs.Data[0].Slug, CreateSandboxKeyRequest{Name: "first"}); err != nil {
+		t.Fatalf("key right after sign-up: %v", err)
 	}
 }

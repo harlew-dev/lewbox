@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ import (
 
 const (
 	snapshotTokenReuse  = 50 * time.Minute
+	snapshotTokenFresh  = 10 * time.Second
+	snapshotTokenWait   = 2 * time.Second
 	snapshotCacheTTL    = 30 * time.Second
 	snapshotNodeTimeout = 5 * time.Second
 	snapshotWorkers     = 4
@@ -42,20 +45,6 @@ type SnapshotList struct {
 	PartialNodes []string   `json:"partial_nodes"`
 }
 
-// ListSnapshotsRequest filters snapshots. Org is empty for the whole fleet of
-// an instance admin; Region is empty for every subscribed region.
-type ListSnapshotsRequest struct {
-	Region string `json:"region"`
-	Org    string `json:"org"`
-}
-
-// SnapshotActionRequest picks the region for a delete and the organization the
-// caller acts for.
-type SnapshotActionRequest struct {
-	Region string `json:"region"`
-	Org    string `json:"org"`
-}
-
 // snapshotKey identifies one workspace's snapshots on one cluster.
 type snapshotKey struct {
 	clusterID string
@@ -64,6 +53,7 @@ type snapshotKey struct {
 
 type snapshotToken struct {
 	value   string
+	minted  time.Time
 	expires time.Time
 }
 
@@ -82,8 +72,8 @@ type snapshotTarget struct {
 // ListSnapshots lists the snapshots of every workspace the caller may see, on
 // every node of each region. A node that does not answer is reported in
 // PartialNodes.
-func (s *Service) ListSnapshots(ctx context.Context, req ListSnapshotsRequest) (SnapshotList, error) {
-	_, org, _, err := s.scopeOrg(ctx, req.Org)
+func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotList, error) {
+	org, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return SnapshotList{}, err
 	}
@@ -93,17 +83,28 @@ func (s *Service) ListSnapshots(ctx context.Context, req ListSnapshotsRequest) (
 	}
 	out := SnapshotList{Data: make([]Snapshot, 0), PartialNodes: make([]string, 0)}
 	partial := make(map[string]bool)
+	addPartial := func(name string) {
+		if !partial[name] {
+			partial[name] = true
+			out.PartialNodes = append(out.PartialNodes, name)
+		}
+	}
 	for _, target := range targets {
-		data, nodes, err := s.workspaceSnapshots(ctx, target, true)
+		data, nodes, err := s.workspaceSnapshots(ctx, target)
 		if err != nil {
-			return SnapshotList{}, err
+			// An unreachable region is partial, never a failed list.
+			if regionNodes, nerr := s.snapshotNodes(ctx, target.cluster); nerr == nil {
+				for _, node := range regionNodes {
+					addPartial(node.name)
+				}
+			} else {
+				addPartial(target.cluster.Slug)
+			}
+			continue
 		}
 		out.Data = append(out.Data, data...)
 		for _, node := range nodes {
-			if !partial[node] {
-				partial[node] = true
-				out.PartialNodes = append(out.PartialNodes, node)
-			}
+			addPartial(node)
 		}
 	}
 	sort.Slice(out.Data, func(i, j int) bool {
@@ -122,7 +123,7 @@ func (s *Service) ListSnapshots(ctx context.Context, req ListSnapshotsRequest) (
 
 // DeleteSnapshot deletes one snapshot with a temporary runner token bound to
 // the workspace's team, so it can only hit the customer's own snapshot.
-func (s *Service) DeleteSnapshot(ctx context.Context, name string, req SnapshotActionRequest) (Snapshot, error) {
+func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionScope) (Snapshot, error) {
 	p, err := requirePrincipal(ctx)
 	if err != nil {
 		return Snapshot{}, err
@@ -163,7 +164,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req SnapshotA
 		return Snapshot{}, notFound("snapshot %q not found", name)
 	case 1:
 	default:
-		return Snapshot{}, invalid("snapshot %q exists in more than one region or workspace: pass region", name)
+		return Snapshot{}, invalid("snapshot %q exists in more than one region or workspace; choose a region", name)
 	}
 	found := matches[0]
 
@@ -175,20 +176,27 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req SnapshotA
 	}
 	admin := s.aerolvmClient(found.node, adminToken)
 	team := found.target.org.Team.String
-	token, err := mintSandboxToken(ctx, admin, aerolvm.CreateTokenRequest{
-		Name:      fmt.Sprintf("lbx.del.%s.%d", found.target.org.ID, s.now().UnixNano()),
+	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	token, err := mintSandboxToken(mintCtx, admin, aerolvm.CreateTokenRequest{
+		Name:      tempTokenName("del", found.target.org.ID, s.now()),
 		Role:      "runner",
 		Team:      team,
 		ExpiresIn: "1h",
 	})
+	cancel()
 	if err != nil {
 		return Snapshot{}, s.regionUnavailable(ctx, found.target.cluster.Slug, err)
 	}
 	if token.Token == "" {
 		return Snapshot{}, unavailable("region %q returned no token", found.target.cluster.Slug)
 	}
-	deleteErr := s.aerolvmClient(found.node, token.Token).DeleteSnapshot(ctx, name)
-	if revokeErr := admin.RevokeToken(context.WithoutCancel(ctx), token.ID); revokeErr != nil {
+	deleteCtx, cancelDelete := context.WithTimeout(ctx, requestCallTimeout)
+	deleteErr := s.aerolvmClient(found.node, token.Token).DeleteSnapshot(deleteCtx, name)
+	cancelDelete()
+	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
+	revokeErr := admin.RevokeToken(cleanup, token.ID)
+	cancelCleanup()
+	if revokeErr != nil {
 		s.log.Warn("revoke snapshot token failed", "region", found.target.cluster.Slug, "err", revokeErr)
 	}
 	if deleteErr != nil {
@@ -210,13 +218,9 @@ func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, reg
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
-	var filter *db.Cluster
-	if region = strings.TrimSpace(region); region != "" {
-		cluster, err := s.findCluster(ctx, region)
-		if err != nil {
-			return nil, err
-		}
-		filter = &cluster
+	filter, err := s.regionFilter(ctx, org, region)
+	if err != nil {
+		return nil, err
 	}
 	var orgs []db.Organization
 	if org != nil {
@@ -274,7 +278,8 @@ func (s *Service) snapshotNodes(ctx context.Context, cluster db.Cluster) ([]snap
 	return nodes, nil
 }
 
-// findSnapshotOnNodes returns one snapshot and the node that holds it.
+// findSnapshotOnNodes returns one snapshot and the node that holds it. A node
+// that failed to answer is reported as a region error, never as "not found".
 func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget, name string) (Snapshot, string, bool, error) {
 	token, err := s.snapshotToken(ctx, target.cluster, target.org)
 	if err != nil {
@@ -284,11 +289,13 @@ func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget
 	if err != nil {
 		return Snapshot{}, "", false, err
 	}
+	var firstErr error
 	for _, node := range nodes {
-		reqCtx, cancel := context.WithTimeout(ctx, snapshotNodeTimeout)
-		snapshots, err := s.aerolvmClient(node.url, token).ListSnapshots(reqCtx)
-		cancel()
+		snapshots, err := s.listNodeSnapshots(ctx, node.url, token)
 		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		for _, snapshot := range snapshots {
@@ -297,21 +304,47 @@ func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget
 			}
 		}
 	}
+	if firstErr != nil {
+		return Snapshot{}, "", false, s.regionUnavailable(ctx, target.cluster.Slug, firstErr)
+	}
 	return Snapshot{}, "", false, nil
+}
+
+// listNodeSnapshots reads one node's snapshots. A freshly minted token may not
+// work on the other nodes yet, so a 401 retries once after a short wait.
+func (s *Service) listNodeSnapshots(ctx context.Context, url string, token snapshotToken) ([]aerolvm.Snapshot, error) {
+	list := func() ([]aerolvm.Snapshot, error) {
+		reqCtx, cancel := context.WithTimeout(ctx, snapshotNodeTimeout)
+		defer cancel()
+		return s.aerolvmClient(url, token.value).ListSnapshots(reqCtx)
+	}
+	snapshots, err := list()
+	if err == nil || !isUnauthorized(err) || s.now().Sub(token.minted) >= snapshotTokenFresh {
+		return snapshots, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(snapshotTokenWait):
+	}
+	return list()
+}
+
+func isUnauthorized(err error) bool {
+	apiErr, ok := errors.AsType[*aerolvm.APIError](err)
+	return ok && apiErr.Status == http.StatusUnauthorized
 }
 
 // workspaceSnapshots reads one workspace's snapshots from every node of a
 // cluster. The merged result is cached for 30 s per workspace and region.
-func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget, cached bool) ([]Snapshot, []string, error) {
+func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget) ([]Snapshot, []string, error) {
 	key := snapshotKey{target.cluster.ID, target.org.Team.String}
 	now := s.now()
-	if cached {
-		s.snapshotMu.Lock()
-		entry, ok := s.snapshotCache[key]
-		s.snapshotMu.Unlock()
-		if ok && now.Before(entry.expires) {
-			return append([]Snapshot(nil), entry.data...), append([]string(nil), entry.partial...), nil
-		}
+	s.snapshotMu.Lock()
+	entry, ok := s.snapshotCache[key]
+	s.snapshotMu.Unlock()
+	if ok && now.Before(entry.expires) {
+		return append([]Snapshot(nil), entry.data...), append([]string(nil), entry.partial...), nil
 	}
 	token, err := s.snapshotToken(ctx, target.cluster, target.org)
 	if err != nil {
@@ -336,9 +369,7 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget,
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			reqCtx, cancel := context.WithTimeout(ctx, snapshotNodeTimeout)
-			defer cancel()
-			snapshots, err := s.aerolvmClient(n.url, token).ListSnapshots(reqCtx)
+			snapshots, err := s.listNodeSnapshots(ctx, n.url, token)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -355,51 +386,59 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget,
 		}(n)
 	}
 	wg.Wait()
-	if cached {
-		s.snapshotMu.Lock()
-		s.snapshotCache[key] = snapshotCacheEntry{
-			data:    append([]Snapshot(nil), data...),
-			partial: append([]string(nil), partial...),
-			expires: s.now().Add(snapshotCacheTTL),
-		}
-		s.snapshotMu.Unlock()
+	s.snapshotMu.Lock()
+	s.snapshotCache[key] = snapshotCacheEntry{
+		data:    append([]Snapshot(nil), data...),
+		partial: append([]string(nil), partial...),
+		expires: s.now().Add(snapshotCacheTTL),
 	}
+	s.snapshotMu.Unlock()
 	return data, partial, nil
 }
 
 // snapshotToken returns a cached viewer token for a workspace's team, minting
-// one for an hour when the cache has no live entry. Nothing is stored.
-func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.Organization) (string, error) {
+// one for an hour when the cache has no live entry.
+func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.Organization) (snapshotToken, error) {
 	team := org.Team.String
 	key := snapshotKey{cluster.ID, team}
 
 	s.snapshotMu.Lock()
 	if cached, ok := s.snapshotTokens[key]; ok && s.now().Before(cached.expires) {
 		s.snapshotMu.Unlock()
-		return cached.value, nil
+		return cached, nil
 	}
+	s.snapshotMu.Unlock()
+
 	client, err := s.clusterClient(cluster)
 	if err != nil {
-		s.snapshotMu.Unlock()
-		return "", err
+		return snapshotToken{}, err
 	}
-	token, err := mintSandboxToken(ctx, client, aerolvm.CreateTokenRequest{
-		Name:      fmt.Sprintf("lbx.view.%s.%d", org.ID, s.now().UnixNano()),
+	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	token, err := mintSandboxToken(mintCtx, client, aerolvm.CreateTokenRequest{
+		Name:      tempTokenName("view", org.ID, s.now()),
 		Role:      "viewer",
 		Team:      team,
 		ExpiresIn: "1h",
 	})
+	cancel()
 	if err != nil {
-		s.snapshotMu.Unlock()
-		return "", s.regionUnavailable(ctx, cluster.Slug, err)
+		return snapshotToken{}, s.regionUnavailable(ctx, cluster.Slug, err)
 	}
 	if token.Token == "" {
-		s.snapshotMu.Unlock()
-		return "", unavailable("region %q returned no snapshot token", cluster.Slug)
+		return snapshotToken{}, unavailable("region %q returned no snapshot token", cluster.Slug)
 	}
-	s.snapshotTokens[key] = snapshotToken{value: token.Token, expires: s.now().Add(snapshotTokenReuse)}
+	now := s.now()
+	minted := snapshotToken{value: token.Token, minted: now, expires: now.Add(snapshotTokenReuse)}
+	s.snapshotMu.Lock()
+	// A concurrent request may have stored one already; keep it and let this
+	// one expire unused.
+	if cached, ok := s.snapshotTokens[key]; ok && now.Before(cached.expires) {
+		minted = cached
+	} else {
+		s.snapshotTokens[key] = minted
+	}
 	s.snapshotMu.Unlock()
-	return token.Token, nil
+	return minted, nil
 }
 
 func toSnapshot(snapshot aerolvm.Snapshot, region string) Snapshot {
@@ -414,4 +453,10 @@ func toSnapshot(snapshot aerolvm.Snapshot, region string) Snapshot {
 		DiskGB:          snapshot.DiskGB,
 		PushState:       snapshot.PushState,
 	}
+}
+
+// tempTokenName names a short-lived token Lewbox mints for a workspace:
+// "lbx.view.<32 hex>.<ms base36>", well inside AerolVM's 64-character limit.
+func tempTokenName(kind, orgID string, now time.Time) string {
+	return "lbx." + kind + "." + strings.ReplaceAll(orgID, "-", "") + "." + strconv.FormatInt(now.UnixMilli(), 36)
 }

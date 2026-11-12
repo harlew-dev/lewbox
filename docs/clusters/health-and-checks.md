@@ -52,7 +52,7 @@ lewbox cluster metrics eu-west --range 24h # sandboxes, reserved vCPUs and memor
 lewbox overview                            # customers, capacity, clusters, top usage
 ```
 
-`--days` is 1–90. `--range` is `24h`, `7d` or `30d`; metrics are averaged into 15-minute, 1-hour or 6-hour buckets. The bars use `█` for a full day, `▒` for a partial one and `·` when there is no data.
+`--days` is 1–31. `--range` is `24h`, `7d` or `30d`; metrics are averaged into 15-minute, 1-hour or 6-hour buckets. The bars use `█` for a full day, `▒` for a partial one and `·` when there is no data.
 
 ## Next
 

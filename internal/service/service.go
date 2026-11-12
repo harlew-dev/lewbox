@@ -15,6 +15,9 @@ import (
 	"github.com/harlew-dev/lewbox/internal/secrets"
 )
 
+// requestCallTimeout bounds one AerolVM call made while serving a request.
+const requestCallTimeout = 10 * time.Second
+
 // Service is the shared implementation behind the HTTP API and the CLI.
 type Service struct {
 	q   *db.Queries
@@ -67,25 +70,6 @@ func WithLoginLimits(perIPPerMinute, failuresPerEmailPerMinute int) Option {
 	return func(s *Service) {
 		s.limiter.perIP = perIPPerMinute
 		s.limiter.perEmail = failuresPerEmailPerMinute
-	}
-}
-
-// WithLogger gives the service a logger for background work.
-func WithLogger(log *slog.Logger) Option {
-	return func(s *Service) {
-		if log != nil {
-			s.log = log
-		}
-	}
-}
-
-// WithSyncInterval is how often the sync loop runs. It caps the metered gap
-// at twice this value.
-func WithSyncInterval(d time.Duration) Option {
-	return func(s *Service) {
-		if d > 0 {
-			s.syncInterval = d
-		}
 	}
 }
 

@@ -108,7 +108,7 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
-| `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–90 |
+| `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
 | `GET /v0/clusters/{ref}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
 | `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
 | `POST /v0/clusters/{ref}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
@@ -154,7 +154,7 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
 | `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
 | `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
-| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready subscribed region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active, is not subscribed to the region, or the region is not ready; a cluster failure is `502` and stores nothing |
+| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the only ready subscribed region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active, the region is not ready, or the new quota has not been pushed successfully yet ("still being set up"); an unsubscribed region is `404`. A cluster failure is `502` and stores nothing |
 | `DELETE /v0/sandbox-keys/{ref}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `502` and the key stays live |
 
 "Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
@@ -236,12 +236,9 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "version": "v0.7.0",
   "alive": true,
   "last_seen_at": "2026-11-11T15:22:51.1Z",
-  "cert_expires_at": "2026-12-01T12:00:00Z",
   "created_at": "2026-11-11T15:22:51.1Z"
 }
 ```
-
-`cert_expires_at` is present in a cluster's `node_list` when the latest check read the node's cluster certificate expiry; it is omitted when unknown.
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 
@@ -262,7 +259,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`status` is `pending`, `active` or `suspended`; `status_reason` is `""`, `admin` or `credits`. `regions` lists the subscriptions' regions by slug (empty when there are none). `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `regions` lists the subscriptions' regions by slug (empty when there are none). `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
 
 **Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 

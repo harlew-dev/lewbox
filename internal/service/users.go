@@ -176,6 +176,9 @@ func (s *Service) RemoveUser(ctx context.Context, ref string) (User, error) {
 			return User{}, conflict("cannot remove the last enabled instance admin")
 		}
 	}
+	if err := s.revokeCreatedSandboxKeys(ctx, "", row.ID); err != nil {
+		return User{}, err
+	}
 	// The statement re-checks the last-admin rule itself, so a concurrent
 	// remove or disable can't slip past the count above.
 	n, err := s.q.DeleteUser(ctx, row.ID)
@@ -208,6 +211,11 @@ func (s *Service) SetUserDisabled(ctx context.Context, ref string, disabled bool
 		}
 		if n <= 1 {
 			return User{}, conflict("cannot disable the last enabled instance admin")
+		}
+	}
+	if disabled {
+		if err := s.revokeCreatedSandboxKeys(ctx, "", row.ID); err != nil {
+			return User{}, err
 		}
 	}
 	updated, err := s.q.SetUserDisabled(ctx, db.SetUserDisabledParams{

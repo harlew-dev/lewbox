@@ -296,8 +296,7 @@ func (c *Client) DeleteSandbox(ctx context.Context, id string) error {
 
 func (c *Client) goneOK(ctx context.Context, method, path string) error {
 	err := c.do(ctx, method, path, nil, nil, true)
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Status == http.StatusNotFound {
 		return nil
 	}
 	return err
@@ -380,8 +379,8 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, o
 }
 
 func retryable(err error) bool {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusServiceUnavailable {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusServiceUnavailable {
 		return false
 	}
 	// "cluster: not enabled on this node" means this is a single-node
