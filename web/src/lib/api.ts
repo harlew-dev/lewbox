@@ -36,17 +36,17 @@ export interface Settings {
   signup: SignupMode
   // A plan slug, or null for none.
   default_plan: string | null
-  // Cluster slugs new sign-ups get the default plan in.
-  default_regions: string[]
+  // The cluster slug new workspaces get the default plan in, or null.
+  default_region: string | null
 }
 
-// Fields that are set change. default_plan "none" clears it; an empty
-// default_regions clears them.
+// Fields that are set change. default_plan "none" clears it; default_region
+// "none" clears it.
 export interface SettingsUpdate {
   instance_name?: string
   signup?: SignupMode
   default_plan?: string
-  default_regions?: string[]
+  default_region?: string
 }
 
 // null is unlimited.
@@ -334,8 +334,8 @@ export interface Organization {
   status: OrgStatus
   status_reason?: string
   team?: string
-  // The subscribed regions, with the plan in each.
-  regions: { slug: string; name: string; plan: PlanRef }[]
+  // The one region the workspace runs in, with its plan, or null.
+  region: { slug: string; name: string; plan: PlanRef } | null
   // Instance admins only.
   vcpu_hours_30d?: number
   members: number
@@ -351,6 +351,42 @@ export interface OrganizationUpdate {
 export interface OrganizationList {
   data: Organization[]
 }
+
+export type SetupLinkStatus = 'unused' | 'claimed' | 'used' | 'expired'
+
+// A single-use link that lets someone register, create a workspace and get a
+// plan in a region. `token` is only present in the create response.
+export interface SetupLink {
+  id: string
+  plan: PlanRef
+  region: { slug: string; name: string }
+  note: string
+  status: SetupLinkStatus
+  claimed_by: string | null
+  workspace: { slug: string; name: string } | null
+  created_at: string
+  expires_at: string
+  used_at: string | null
+  token?: string
+}
+
+export interface SetupLinkInput {
+  plan: string
+  region: string
+  // 1..720; 168 when omitted.
+  expires_in_hours?: number
+  note?: string
+}
+
+// What the public setup page shows: names only, never slugs.
+export interface SetupLinkInfo {
+  instance_name: string
+  plan: { name: string }
+  region: { name: string }
+  expires_at: string
+}
+
+export type DocsBook = 'consumer' | 'platform'
 
 export interface Member {
   id: string
@@ -559,7 +595,7 @@ export function signIn(email: string, password: string): Promise<SessionResponse
 export function signUp(input: {
   email: string
   password: string
-  organization: string
+  setup_token?: string
 }): Promise<SessionResponse> {
   return request<SessionResponse>('/v0/auth/signup', {
     method: 'POST',
@@ -673,14 +709,32 @@ export function listOrganizations(filter: { user?: string; status?: OrgStatus } 
   return request<OrganizationList>(`/v0/organizations${query(filter)}`)
 }
 
+export function listSetupLinks(): Promise<{ data: SetupLink[] }> {
+  return request<{ data: SetupLink[] }>('/v0/setup-links')
+}
+
+export function createSetupLink(input: SetupLinkInput): Promise<SetupLink> {
+  return request<SetupLink>('/v0/setup-links', { method: 'POST', body: input })
+}
+
+export function revokeSetupLink(id: string): Promise<SetupLink> {
+  return request<SetupLink>(`/v0/setup-links/${ref(id)}`, { method: 'DELETE' })
+}
+
+// Public: the plan and region names behind a setup token.
+export function setupLinkInfo(token: string): Promise<SetupLinkInfo> {
+  return request<SetupLinkInfo>(`/v0/setup/${ref(token)}`, { authRedirect: false })
+}
+
 export function getOrganization(orgRef: string): Promise<Organization> {
   return request<Organization>(`/v0/organizations/${ref(orgRef)}`)
 }
 
 export function createOrganization(input: {
-  slug: string
   name: string
-  owner: string
+  slug?: string
+  owner?: string
+  setup_token?: string
 }): Promise<Organization> {
   return request<Organization>('/v0/organizations', { method: 'POST', body: input })
 }
@@ -793,7 +847,7 @@ export function listSandboxKeys(org: string): Promise<{ data: SandboxKey[] }> {
 
 export function createSandboxKey(
   org: string,
-  input: { name: string; region: string; expires_in: KeyLifetime },
+  input: { name: string; region?: string; expires_in: KeyLifetime },
 ): Promise<NewSandboxKey> {
   return request<NewSandboxKey>('/v0/sandbox-keys', { method: 'POST', body: input, org })
 }
@@ -847,15 +901,16 @@ export function clusterMetrics(clusterRef: string, range: MetricsRange): Promise
   return request<ClusterMetrics>(`/v0/clusters/${ref(clusterRef)}/metrics${query({ range })}`)
 }
 
-export function docsNav(): Promise<DocsNav> {
-  return request<DocsNav>('/v0/docs')
+export function docsNav(book: DocsBook = 'consumer'): Promise<DocsNav> {
+  return request<DocsNav>(book === 'platform' ? '/v0/platform' : '/v0/docs')
 }
 
-export function docsPage(path: string): Promise<DocsPage> {
+export function docsPage(book: DocsBook, path: string): Promise<DocsPage> {
+  const base = book === 'platform' ? '/v0/platform' : '/v0/docs'
   const clean = path.replace(/^\/+|\/+$/g, '')
   const suffix = clean
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/')
-  return request<DocsPage>(`/v0/docs/${suffix}`)
+  return request<DocsPage>(`${base}/${suffix}`)
 }

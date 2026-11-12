@@ -24,7 +24,7 @@ import { usePortalOrg } from './portal-route'
 export function HomePage() {
   useDocumentTitle('Home')
   const { org } = usePortalOrg()
-  if (org.regions.length === 0) {
+  if (!org.region) {
     return (
       <>
         <PageHeader title={org.name} />
@@ -84,8 +84,8 @@ function GetStarted({ onDone }: { onDone: () => void }) {
 
   const live = (keys.data?.data ?? []).filter((key) => !key.revoked_at && !key.expired)
   const key = created ?? live[0] ?? null
-  const subscribed = new Set(org.regions.map((option) => option.slug))
-  const region = key?.region ?? regions.data?.data.find((option) => subscribed.has(option.slug)) ?? null
+  const region =
+    key?.region ?? regions.data?.data.find((option) => option.slug === org.region?.slug) ?? null
   const snippets = region ? sandboxSnippets(region, created ?? undefined) : null
   const first = (sandboxes.data?.data.length ?? 0) > 0
 

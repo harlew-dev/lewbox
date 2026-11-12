@@ -4,9 +4,34 @@ import { formatDay } from '../lib/format'
 
 const most = 5
 
-// vCPU-hours per day, stacked by region and labelled with each region's
-// name. Past five regions, the smallest fold into "Other".
-export function UsageChart({ usage, regionName }: { usage: api.Usage; regionName: (slug: string) => string }) {
+// vCPU-hours per day. The console stacks by region and labels each region's
+// name; the portal shows one series, since a workspace has one region.
+export function UsageChart({
+  usage,
+  regionName,
+  byRegion = true,
+}: {
+  usage: api.Usage
+  regionName: (slug: string) => string
+  byRegion?: boolean
+}) {
+  if (!byRegion) {
+    const rows: ChartRow<string>[] = usage.data.map((bucket) => ({
+      label: formatDay(bucket.start),
+      values: { all: round(bucket.vcpu_hours) },
+    }))
+    return (
+      <BarChart
+        className="mt-12"
+        label="vCPU-hours per day"
+        summary="vCPU-hours per day."
+        rows={rows}
+        series={[{ key: 'all', label: 'vCPU-hours' }]}
+        tableToggle
+      />
+    )
+  }
+
   const totals = new Map<string, number>()
   for (const bucket of usage.data) {
     for (const [region, value] of Object.entries(bucket.regions ?? {})) {

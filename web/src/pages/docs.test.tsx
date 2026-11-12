@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DocsPage } from './docs'
+import { DocsPage, PlatformDocsPage } from './docs'
 
 beforeEach(() => {
   window.scrollTo = vi.fn()
@@ -78,5 +78,37 @@ describe('DocsPage', () => {
     )
     expect(screen.getByRole('heading', { level: 2, name: /^Same/ })).toHaveAttribute('id', 'same')
     expect(screen.getByRole('heading', { level: 3, name: /Same/ })).toHaveAttribute('id', 'same-1')
+  })
+
+  it('fetches the platform book from /v0/platform and crosses to the other book', async () => {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(String(input))
+        return new Response(
+          JSON.stringify({
+            path: 'guide',
+            title: 'Platform guide',
+            markdown: 'Read the [customer API](../consumer/reference/management-api.md).',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }),
+    )
+    render(
+      <MemoryRouter initialEntries={['/platform/guide']}>
+        <Routes>
+          <Route path="/platform/*" element={<PlatformDocsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Platform guide' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'customer API' })).toHaveAttribute(
+      'href',
+      '/docs/reference/management-api',
+    )
+    expect(calls).toContain('/v0/platform/guide')
   })
 })

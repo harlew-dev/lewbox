@@ -159,6 +159,21 @@ type Setting struct {
 	Value string
 }
 
+type SetupLink struct {
+	ID        string
+	TokenHash string
+	PlanID    string
+	ClusterID string
+	Note      string
+	CreatedBy sql.NullString
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	ClaimedBy sql.NullString
+	ClaimedAt sql.NullTime
+	UsedAt    sql.NullTime
+	OrgID     sql.NullString
+}
+
 type Subscription struct {
 	OrgID        string
 	ClusterID    string

@@ -135,28 +135,28 @@ func TestSandboxKeyRegionDefault(t *testing.T) {
 	second := newClusterFake(t)
 	setMembers(second, "node-b")
 	addTestCluster(t, f.s, second, "us-east")
-	// A region without a subscription is refused, and does not become the
-	// default.
+	// A region the workspace is not in is refused.
 	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two", Region: "us-east"})
 	se := wantCode(t, err, CodeNotFound)
 	if !strings.Contains(se.Message, "region") {
 		t.Errorf("message = %q", se.Message)
 	}
-	if out, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "again", Region: "eu-west"}); err != nil || out.Region.Slug != "eu-west" {
-		t.Errorf("default region key = %+v, %v", out, err)
-	}
 
-	// With two subscribed regions the caller must choose.
-	if _, err := f.s.SetSubscription(f.root, "acme", "us-east", SetSubscriptionRequest{Plan: "free"}); err != nil {
+	// A workspace with no region gets 412, and its region is the default once
+	// the operator assigns one.
+	if _, err := f.s.CreateOrganization(f.root, CreateOrganizationRequest{Slug: "solo", Name: "Solo", Owner: "owner@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two"})
-	se = wantCode(t, err, CodeInvalid)
-	if !strings.Contains(se.Message, "choose a region") {
+	_, err = f.s.CreateSandboxKey(f.owner, "solo", CreateSandboxKeyRequest{Name: "none"})
+	se = wantCode(t, err, CodePrecondition)
+	if !strings.Contains(se.Message, "not in a region") {
 		t.Errorf("message = %q", se.Message)
 	}
-	if out, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "two", Region: "us-east"}); err != nil || out.Region.Slug != "us-east" {
-		t.Errorf("chosen region key = %+v, %v", out, err)
+	if _, err := f.s.SetSubscription(f.root, "solo", "us-east", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := f.s.CreateSandboxKey(f.owner, "solo", CreateSandboxKeyRequest{Name: "chosen"}); err != nil || out.Region.Slug != "us-east" {
+		t.Errorf("default region key = %+v, %v", out, err)
 	}
 }
 
@@ -207,11 +207,11 @@ func TestSandboxKeyOrganizationStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	pendingCtx := WithPrincipal(context.Background(), p)
-	orgs, err := f.s.ListOrganizations(pendingCtx, ListOrganizationsRequest{})
-	if err != nil || len(orgs.Data) != 1 {
-		t.Fatalf("pending organizations = %+v, %v", orgs, err)
+	pending, err := f.s.CreateOrganization(pendingCtx, CreateOrganizationRequest{Slug: "waiting", Name: "Waiting"})
+	if err != nil || pending.Status != orgPending {
+		t.Fatalf("pending workspace = %+v, %v", pending, err)
 	}
-	_, err = f.s.CreateSandboxKey(pendingCtx, orgs.Data[0].Slug, CreateSandboxKeyRequest{Name: "waiting"})
+	_, err = f.s.CreateSandboxKey(pendingCtx, pending.Slug, CreateSandboxKeyRequest{Name: "waiting"})
 	se = wantCode(t, err, CodePrecondition)
 	if !strings.Contains(se.Message, "waiting for approval") {
 		t.Errorf("message = %q", se.Message)
@@ -626,12 +626,11 @@ func TestAccountChangesRevokeKeysEverywhere(t *testing.T) {
 	}
 }
 
-func TestSignupPushesDefaultQuota(t *testing.T) {
+func TestNewWorkspacePushesDefaultQuota(t *testing.T) {
 	f := newSandboxFixture(t)
 	setSignup(t, f.s, signupOpen)
-	plan := "free"
-	regions := []string{"eu-west"}
-	if _, err := f.s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegions: &regions}); err != nil {
+	plan, region := "free", "eu-west"
+	if _, err := f.s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegion: &region}); err != nil {
 		t.Fatal(err)
 	}
 	token, _, err := f.s.Signup(context.Background(), SignupRequest{Email: "new@example.com", Password: testPassword})
@@ -643,19 +642,19 @@ func TestSignupPushesDefaultQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := WithPrincipal(context.Background(), p)
-	orgs, err := f.s.ListOrganizations(ctx, ListOrganizationsRequest{})
-	if err != nil || len(orgs.Data) != 1 {
-		t.Fatalf("signup organizations = %+v, %v", orgs.Data, err)
+	org, err := f.s.CreateOrganization(ctx, CreateOrganizationRequest{Name: "New Co"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	adminOrg, err := f.s.GetOrganization(localCtx(), orgs.Data[0].Slug)
+	adminOrg, err := f.s.GetOrganization(localCtx(), org.Slug)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pushes := f.fake.QuotaPushes(adminOrg.Team)
 	if len(pushes) != 1 || pushes[0].MaxSandboxes != 2 || pushes[0].MaxCPU != 2 || pushes[0].MaxMemoryMB != 4096 {
-		t.Fatalf("signup quota pushes = %+v", pushes)
+		t.Fatalf("new workspace quota pushes = %+v", pushes)
 	}
-	if _, err := f.s.CreateSandboxKey(ctx, orgs.Data[0].Slug, CreateSandboxKeyRequest{Name: "first"}); err != nil {
-		t.Fatalf("key right after sign-up: %v", err)
+	if _, err := f.s.CreateSandboxKey(ctx, org.Slug, CreateSandboxKeyRequest{Name: "first"}); err != nil {
+		t.Fatalf("key right after creating the workspace: %v", err)
 	}
 }

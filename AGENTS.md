@@ -4,9 +4,9 @@ Context for coding agents working in this repo. Read it before changing anything
 
 ## What this is
 
-**Lewbox** is one Go binary, `lewbox`, that is both a server (the **orchestrator**, `lewbox serve`, HTTP API under `/v0`) and a CLI. It installs [AerolVM](https://github.com/aerol-ai/microvm) (a sandbox platform: `sandboxd`) on Linux machines, starts and joins AerolVM clusters, registers them with the orchestrator, and checks them. It is a self-hosted E2B: one operator (the instance admins) resells their clusters' compute to customer **workspaces** (code: `organization`), each exactly one AerolVM team with a plan per region pushed as that team's quota. Customers' apps talk to the clusters directly; Lewbox is never in the sandbox request path. **`plans/` is the current spec** (start with `plans/README.md` and `plans/DECISIONS.md`); `MVP.md` is the older, larger design and is partly superseded. `REVIEW.md` explains why Lewbox builds on stock AerolVM clusters.
+**Lewbox** is one Go binary, `lewbox`, that is both a server (the **orchestrator**, `lewbox serve`, HTTP API under `/v0`) and a CLI. It installs [AerolVM](https://github.com/aerol-ai/microvm) (a sandbox platform: `sandboxd`) on Linux machines, starts and joins AerolVM clusters, registers them with the orchestrator, and checks them. It is a self-hosted E2B: one operator (the instance admins) resells their clusters' compute to customer **workspaces** (code: `organization`), each exactly one AerolVM team on a plan in one region (cluster), pushed as that team's quota. Customers' apps talk to the clusters directly; Lewbox is never in the sandbox request path. **`plans/` is the current spec** (start with `plans/README.md` and `plans/DECISIONS.md`); `MVP.md` is the older, larger design and is partly superseded. `REVIEW.md` explains why Lewbox builds on stock AerolVM clusters.
 
-**Built:** accounts, sessions and sign-up; workspaces with members and API keys; plans and per-region subscriptions; per-region sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `update`, `firewall enable`; text/JSON output. **Deliberately not built** (see `plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
+**Built:** accounts, sessions, sign-up and setup links; self-serve workspaces with members and API keys; plans, one subscription (region) per workspace; sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `update`, `firewall enable`; text/JSON output. **Deliberately not built** (see `plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
 
 ## Layout
 
@@ -23,13 +23,13 @@ Context for coding agents working in this repo. Read it before changing anything
 | `internal/machine/` | Node-side work: `Runner` (sudo exec + secret masking), installer source/verification, checks, Lewbox settings, node state, releases. `machinetest/` is a fake runner |
 | `internal/secrets/` | AES-256-GCM keyring for cluster admin tokens |
 | `internal/webui/` | Top-level HTTP handler: the API, the built console, and one origin for both |
-| `internal/docs/` | Parses the embedded markdown into nav and pages for `/v0/docs` |
-| `docs/embed.go` | Embeds `docs/` into the binary |
+| `internal/docs/` | Parses the embedded markdown into nav and pages for `/v0/docs` (customer book) and `/v0/platform` (platform book) |
+| `docs/embed.go` | Embeds the two documentation books into the binary |
 | `web/` | React web console (Vite, TypeScript). `web/dist` is embedded by the Go binary; see `web/README.md` |
 | `Makefile` | One entry point: build, test, run, Docker and the UI library |
 | `deploy/dev-cluster/` | Docker test bed (systemd + Docker-in-Docker nodes) and `e2e.sh` |
 | `deploy/docker/` | Smoke test for the orchestrator image (repo-root `Dockerfile`, `compose.yaml`) |
-| `docs/` | User docs (`docs/README.md` is the index). `docs/design/` holds design notes |
+| `docs/` | Documentation books: `docs/consumer/` for customers, `docs/platform/` for operators (`docs/README.md` is the GitHub index). `docs/design/` holds design notes |
 
 ## Commands
 
@@ -96,7 +96,7 @@ These came from running against real AerolVM. Don't regress them.
 
 ## Docs
 
-- User docs live in `docs/`, one page per task, with front matter (`title`, `description`) and relative links. They will be published as a website. When behavior, flags or messages change, update the matching page and `docs/reference/cli.md` in the same change. `docs/README.md` is the index; add new pages there.
+- There are two documentation books, one page per task, with front matter (`title`, `description`) and relative links: `docs/consumer/` for customers (served at `/v0/docs`) and `docs/platform/` for operators (served at `/v0/platform`). Each book's `README.md` is its nav. When behavior, flags or messages change, update the matching page in the right book and `docs/platform/reference/cli.md` in the same change. `docs/README.md` is the GitHub index for both books; add new pages to their book's README.
 - The web console has its own contributor guide in `web/README.md`: how it is built and served, the auth and CSP rules, and how to add a page.
 - Design notes and verified findings go in `docs/design/`. Don't edit `MVP.md` or `REVIEW.md` unless asked.
 

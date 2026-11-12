@@ -49,7 +49,7 @@ export function PlansPage() {
     <>
       <PageHeader
         title="Plans"
-        description="Named sets of limits. You give a customer a plan in each region."
+        description="Named sets of limits. You give a workspace a plan in its region."
         actions={<Button onClick={() => setEditing('new')}>New plan</Button>}
       />
 
@@ -60,7 +60,7 @@ export function PlansPage() {
       ) : list.length === 0 ? (
         <EmptyState
           title="No plans"
-          description="A plan is a set of limits you give customers in a region."
+          description="A plan is a set of limits you give workspaces in a region."
           action={<Button onClick={() => setEditing('new')}>New plan</Button>}
         />
       ) : (
@@ -71,7 +71,7 @@ export function PlansPage() {
               <TableHeader className="text-right">Sandboxes</TableHeader>
               <TableHeader className="text-right">vCPUs</TableHeader>
               <TableHeader className="text-right">Memory</TableHeader>
-              <TableHeader className="text-right">Customers</TableHeader>
+              <TableHeader className="text-right">Workspaces</TableHeader>
               <TableHeader className="w-0">
                 <span className="sr-only">Actions</span>
               </TableHeader>
@@ -123,7 +123,7 @@ export function PlansPage() {
         open={deleting !== null}
         onClose={() => setDeleting(null)}
         title={deleting ? `Delete ${deleting.name}?` : 'Delete plan?'}
-        description="No customer has it in any region. This can’t be undone."
+        description="No workspace has it in any region. This can’t be undone."
         confirm="Delete plan"
         variant="danger"
         onConfirm={async () => {

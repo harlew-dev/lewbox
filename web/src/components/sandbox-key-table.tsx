@@ -34,11 +34,13 @@ export function SandboxKeyTable({
   org,
   canRevoke,
   onRevoked,
+  showRegion = true,
 }: {
   keys: api.SandboxKey[]
   org: string
   canRevoke: boolean
   onRevoked: () => void
+  showRegion?: boolean
 }) {
   const [target, setTarget] = useState<api.SandboxKey | null>(null)
   return (
@@ -47,7 +49,7 @@ export function SandboxKeyTable({
         <TableHead>
           <TableRow>
             <TableHeader>Name</TableHeader>
-            <TableHeader>Region</TableHeader>
+            {showRegion && <TableHeader>Region</TableHeader>}
             <TableHeader>Key</TableHeader>
             <TableHeader>Status</TableHeader>
             <TableHeader>Created</TableHeader>
@@ -63,7 +65,9 @@ export function SandboxKeyTable({
           {keys.map((key) => (
             <TableRow key={key.id}>
               <TableCell className="font-medium">{key.name}</TableCell>
-              <TableCell className="text-zinc-500 dark:text-zinc-400">{key.region.name}</TableCell>
+              {showRegion && (
+                <TableCell className="text-zinc-500 dark:text-zinc-400">{key.region.name}</TableCell>
+              )}
               <TableCell>
                 <Code>{key.token_hint}</Code>
               </TableCell>

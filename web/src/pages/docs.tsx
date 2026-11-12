@@ -24,18 +24,25 @@ import {
 import { useDocumentTitle } from '../lib/use-document-title'
 import { useLoad } from '../lib/use-load'
 
+const prefixes: Record<api.DocsBook, string> = {
+  consumer: '/docs',
+  platform: '/platform',
+}
+
 function PageLink({
   link,
   direction,
+  prefix,
 }: {
   link: api.PageLink
   direction: 'previous' | 'next'
+  prefix: string
 }) {
   const next = direction === 'next'
   const Arrow = next ? ArrowRightIcon : ArrowLeftIcon
   return (
     <Link
-      href={`/docs/${link.path}`}
+      href={`${prefix}/${link.path}`}
       className={`group flex flex-col gap-1 rounded-md ${next ? 'ml-auto items-end text-right' : 'items-start'}`}
     >
       <span className="flex items-center gap-1.5 text-sm/6 text-zinc-500 dark:text-zinc-400">
@@ -50,19 +57,23 @@ function PageLink({
   )
 }
 
-export function DocsPage() {
+function DocsBookPage({ book }: { book: api.DocsBook }) {
   const params = useParams()
   const location = useLocation()
   const pagePath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '')
+  const prefix = prefixes[book]
   const { data: page, error, failure, loading, reload } = useLoad(
-    () => api.docsPage(pagePath),
-    [pagePath],
+    () => api.docsPage(book, pagePath),
+    [book, pagePath],
   )
   const headings = useMemo(
     () => extractHeadings(page?.markdown ?? ''),
     [page?.markdown],
   )
-  const components = useMemo(() => markdownComponents(pagePath), [pagePath])
+  const components = useMemo(
+    () => markdownComponents(pagePath, book),
+    [book, pagePath],
+  )
   const toc = useMemo(
     () =>
       headings
@@ -75,7 +86,7 @@ export function DocsPage() {
     [headings],
   )
 
-  useDocumentTitle(page?.title ?? 'Documentation')
+  useDocumentTitle(page?.title ?? (book === 'platform' ? 'Platform docs' : 'Documentation'))
 
   useEffect(() => {
     if (!page) return
@@ -100,7 +111,7 @@ export function DocsPage() {
       <div className="max-w-3xl space-y-4">
         <Heading>Page not found</Heading>
         <Text>There is no documentation page at this address.</Text>
-        <Button href="/docs">Back to the documentation</Button>
+        <Button href={prefix}>Back to the documentation</Button>
       </div>
     )
   }
@@ -144,8 +155,8 @@ export function DocsPage() {
               aria-label="Documentation pages"
               className="mt-8 flex flex-wrap justify-between gap-6"
             >
-              {page.prev && <PageLink link={page.prev} direction="previous" />}
-              {page.next && <PageLink link={page.next} direction="next" />}
+              {page.prev && <PageLink link={page.prev} direction="previous" prefix={prefix} />}
+              {page.next && <PageLink link={page.next} direction="next" prefix={prefix} />}
             </nav>
           </div>
         )}
@@ -158,4 +169,12 @@ export function DocsPage() {
       </aside>
     </div>
   )
+}
+
+export function DocsPage() {
+  return <DocsBookPage book="consumer" />
+}
+
+export function PlatformDocsPage() {
+  return <DocsBookPage book="platform" />
 }

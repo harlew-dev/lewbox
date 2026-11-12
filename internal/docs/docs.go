@@ -52,7 +52,35 @@ type Site struct {
 	nav   Nav
 }
 
-// Load parses every .md file in fsys, which must be rooted at the docs folder.
+// LoadBooks loads the customer and platform books from a folder that holds
+// consumer/ and platform/. Both must exist.
+func LoadBooks(fsys fs.FS) (consumer, platform *Site, err error) {
+	consumer, err = loadSub(fsys, "consumer")
+	if err != nil {
+		return nil, nil, err
+	}
+	platform, err = loadSub(fsys, "platform")
+	if err != nil {
+		return nil, nil, err
+	}
+	return consumer, platform, nil
+}
+
+// loadSub loads one book from a sub-folder.
+func loadSub(fsys fs.FS, dir string) (*Site, error) {
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		return nil, fmt.Errorf("open %s book: %w", dir, err)
+	}
+	site, err := Load(sub)
+	if err != nil {
+		return nil, fmt.Errorf("load %s book: %w", dir, err)
+	}
+	return site, nil
+}
+
+// Load parses every .md file in fsys, which must be rooted at one book's
+// folder.
 func Load(fsys fs.FS) (*Site, error) {
 	s := &Site{pages: make(map[string]Page)}
 	var readme string

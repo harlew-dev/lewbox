@@ -13,9 +13,6 @@ import {
   FieldGroup,
   Input,
   Label,
-  Listbox,
-  ListboxOption,
-  ListSkeleton,
   Notice,
   SecretReveal,
   Text,
@@ -28,7 +25,7 @@ import { formatDate } from '../../lib/format'
 import { KeyExpiryField } from '../../components/key-expiry'
 import { noRegionText } from '../../components/no-region'
 import { sandboxSnippets } from '../../lib/snippets'
-import { failureMessage, useLoad } from '../../lib/use-load'
+import { failureMessage } from '../../lib/use-load'
 
 // Creates a sandbox API key and shows it once, with what to paste. Once a
 // key exists the dialog only closes from Done, so it isn't lost to a stray
@@ -73,17 +70,12 @@ function CreateKey({
   onClose: () => void
   onCreated: (key: api.NewSandboxKey) => void
 }) {
-  const regions = useLoad(() => api.listRegions(org.slug), [org.slug])
-  // Only regions the workspace has a plan in: an instance admin is sent
-  // every region, and a key elsewhere would be refused.
-  const subscribed = new Set(org.regions.map((region) => region.slug))
-  const list = (regions.data?.data ?? []).filter((region) => subscribed.has(region.slug))
   const [name, setName] = useState('')
-  const [picked, setPicked] = useState('')
   const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
   const [key, setKey] = useState<api.NewSandboxKey | null>(null)
-  const region = picked || list[0]?.slug || ''
-  const create = useAction(() => api.createSandboxKey(org.slug, { name: name.trim(), region, expires_in: expiresIn }), {
+  const region = org.region
+  // The workspace's region is the key's region; the server fills it in.
+  const create = useAction(() => api.createSandboxKey(org.slug, { name: name.trim(), expires_in: expiresIn }), {
     toError: (failure) => ({ message: failureMessage(failure) }),
   })
 
@@ -101,13 +93,9 @@ function CreateKey({
   return (
     <form onSubmit={submit}>
       <DialogTitle>Create an API key</DialogTitle>
-      <DialogDescription>A key works in one region, for this workspace’s sandboxes.</DialogDescription>
+      <DialogDescription>A key works in {region?.name ?? 'your region'}, for this workspace’s sandboxes.</DialogDescription>
       <DialogBody>
-        {regions.loading && !regions.data ? (
-          <ListSkeleton label="Loading regions" rows={2} />
-        ) : regions.error.message ? (
-          <ErrorNotice error={regions.error} onRetry={regions.reload} />
-        ) : list.length === 0 ? (
+        {!region ? (
           <Notice variant="info">{noRegionText}</Notice>
         ) : (
           <FieldGroup>
@@ -123,18 +111,6 @@ function CreateKey({
               />
               <Description>Letters, digits, dots, dashes and underscores.</Description>
             </Field>
-            {list.length > 1 && (
-              <Field disabled={create.busy}>
-                <Label>Region</Label>
-                <Listbox value={region} onChange={setPicked}>
-                  {list.map((option) => (
-                    <ListboxOption key={option.slug} value={option.slug}>
-                      {option.name}
-                    </ListboxOption>
-                  ))}
-                </Listbox>
-              </Field>
-            )}
             <KeyExpiryField value={expiresIn} onChange={setExpiresIn} disabled={create.busy} />
           </FieldGroup>
         )}
@@ -146,7 +122,7 @@ function CreateKey({
         <Button
           type="submit"
           loading={create.loading}
-          disabled={name.trim() === '' || region === ''}
+          disabled={name.trim() === '' || region === null}
           disabledReason="Fill in required fields"
         >
           Create key

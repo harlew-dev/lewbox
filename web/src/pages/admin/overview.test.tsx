@@ -5,7 +5,7 @@ import { json, renderApp, stubAPI } from '../../test/render'
 const day = (date: string, uptime: number | null) => ({ date, uptime, samples: 1440, down_minutes: 0 })
 
 describe('OverviewPage', () => {
-  it('shows the fleet in numbers, uptime per cluster and the top customers', async () => {
+  it('shows the fleet in numbers, uptime per cluster and the top workspaces', async () => {
     stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/overview': () =>
@@ -27,6 +27,6 @@ describe('OverviewPage', () => {
     expect(screen.getByText('1 / 1')).toBeInTheDocument()
     expect(screen.getByRole('list', { name: /EU West, last 2 days/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'EU West' })).toHaveAttribute('href', '/admin/servers/clusters/eu-west')
-    expect(screen.getByRole('link', { name: /Acme/ })).toHaveAttribute('href', '/admin/customers/acme')
+    expect(screen.getByRole('link', { name: /Acme/ })).toHaveAttribute('href', '/admin/workspaces/acme')
   })
 })

@@ -75,6 +75,17 @@ func (q *Queries) CountOrganizationsByStatus(ctx context.Context) ([]CountOrgani
 	return items, nil
 }
 
+const countOwnedOrganizations = `-- name: CountOwnedOrganizations :one
+SELECT COUNT(*) FROM memberships WHERE user_id = ? AND role = 'owner'
+`
+
+func (q *Queries) CountOwnedOrganizations(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countOwnedOrganizations, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (id, slug, name, status, created_at, team)
 VALUES (?, ?, ?, ?, ?, ?)

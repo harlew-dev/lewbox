@@ -51,9 +51,10 @@ function sandboxSize(sandbox: api.Sandbox): string {
 
 type Pending = { sandbox: api.Sandbox; action: 'stop' | 'delete' }
 
-// Sandboxes with stop and delete, each confirmed. `fleet` adds the customer
+// Sandboxes with stop and delete, each confirmed. `fleet` adds the workspace
 // and how long each has run, for the operator. `org` scopes the actions.
-// `regionName` turns a sandbox's region slug into its name.
+// `regionName` turns a sandbox's region slug into its name; the portal hides
+// the column because a workspace has one region.
 export function SandboxTable({
   sandboxes,
   regionName,
@@ -61,6 +62,7 @@ export function SandboxTable({
   canChange,
   org,
   onChanged,
+  showRegion = true,
 }: {
   sandboxes: api.Sandbox[]
   regionName: (slug: string) => string
@@ -68,6 +70,7 @@ export function SandboxTable({
   canChange: boolean
   org?: string
   onChanged: () => void
+  showRegion?: boolean
 }) {
   const [pending, setPending] = useState<Pending | null>(null)
   const stopping = pending?.action === 'stop'
@@ -79,7 +82,7 @@ export function SandboxTable({
           <TableRow>
             {fleet && <TableHeader>Workspace</TableHeader>}
             <TableHeader>Sandbox</TableHeader>
-            <TableHeader>Region</TableHeader>
+            {showRegion && <TableHeader>Region</TableHeader>}
             <TableHeader>Status</TableHeader>
             <TableHeader>Size</TableHeader>
             <TableHeader>{fleet ? 'Running for' : 'Started'}</TableHeader>
@@ -100,7 +103,9 @@ export function SandboxTable({
                 <CopyText value={sandbox.id} label={`Copy ${sandbox.id}`} />
                 {sandbox.image && <div className="truncate text-xs/5 text-zinc-500 dark:text-zinc-400">{sandbox.image}</div>}
               </TableCell>
-              <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(sandbox.region)}</TableCell>
+              {showRegion && (
+                <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(sandbox.region)}</TableCell>
+              )}
               <TableCell>
                 <SandboxStatus sandbox={sandbox} />
               </TableCell>

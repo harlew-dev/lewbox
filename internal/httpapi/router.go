@@ -47,8 +47,10 @@ type RouterOptions struct {
 	// TrustedProxies are the networks whose X-Forwarded-For headers are
 	// believed. Empty means the header is ignored.
 	TrustedProxies []netip.Prefix
-	// Docs serves the documentation routes. A nil site answers 404.
+	// Docs serves the customer documentation routes. A nil site answers 404.
 	Docs *docs.Site
+	// Platform serves the platform documentation routes. A nil site answers 404.
+	Platform *docs.Site
 }
 
 // RouterOption changes a router built by NewRouter.
@@ -69,9 +71,14 @@ func WithTrustedProxies(prefixes []netip.Prefix) RouterOption {
 	return func(o *RouterOptions) { o.TrustedProxies = append(o.TrustedProxies, prefixes...) }
 }
 
-// WithDocs serves the documentation site at /v0/docs.
+// WithDocs serves the customer documentation site at /v0/docs.
 func WithDocs(site *docs.Site) RouterOption {
 	return func(o *RouterOptions) { o.Docs = site }
+}
+
+// WithPlatform serves the platform documentation site at /v0/platform.
+func WithPlatform(site *docs.Site) RouterOption {
+	return func(o *RouterOptions) { o.Platform = site }
 }
 
 // NewRouter returns the HTTP handler for the Lewbox API.
@@ -137,6 +144,34 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		// browser cookie never keeps a request looking signed in.
 		clearSessionCookie(w, r, opts)
 		resp, err := svc.Logout(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// A setup link's public page is HTTP-only, like sign-up.
+	mux.HandleFunc("GET "+Prefix+"/setup/{token}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.SetupLinkInfo(r.Context(), r.PathValue("token"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// Setup links: instance admins only.
+	mux.HandleFunc("GET "+Prefix+"/setup-links", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListSetupLinks(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/setup-links", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateSetupLinkRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateSetupLink(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	// {id} is the setup link's ID.
+	mux.HandleFunc("DELETE "+Prefix+"/setup-links/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RevokeSetupLink(r.Context(), r.PathValue("id"))
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -557,31 +592,10 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	// Docs are static content and public, so they are an HTTP-only exception
-	// to the two-entry-points rule.
-	mux.HandleFunc("GET "+Prefix+"/docs", func(w http.ResponseWriter, r *http.Request) {
-		if opts.Docs == nil {
-			writeJSON(w, http.StatusNotFound, docsUnavailable())
-			return
-		}
-		writeJSON(w, http.StatusOK, opts.Docs.Nav())
-	})
-
-	mux.HandleFunc("GET "+Prefix+"/docs/{path...}", func(w http.ResponseWriter, r *http.Request) {
-		if opts.Docs == nil {
-			writeJSON(w, http.StatusNotFound, docsUnavailable())
-			return
-		}
-		requested := r.PathValue("path")
-		page, ok := opts.Docs.Page(requested)
-		if !ok {
-			writeJSON(w, http.StatusNotFound, ErrorBody{Error: ErrorDetail{
-				Code:    string(service.CodeNotFound),
-				Message: fmt.Sprintf("no docs page %q", requested),
-			}})
-			return
-		}
-		writeJSON(w, http.StatusOK, page)
-	})
+	// to the two-entry-points rule. The consumer book is at /docs and the
+	// platform book at /platform.
+	serveDocs(mux, Prefix+"/docs", opts.Docs)
+	serveDocs(mux, Prefix+"/platform", opts.Platform)
 
 	// Anything else gets the standard error shape instead of a text 404.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -911,6 +925,35 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = Encode(w, v)
+}
+
+// serveDocs registers one documentation book's nav and page routes. A nil
+// site answers 404.
+func serveDocs(mux *http.ServeMux, base string, site *docs.Site) {
+	mux.HandleFunc("GET "+base, func(w http.ResponseWriter, r *http.Request) {
+		if site == nil {
+			writeJSON(w, http.StatusNotFound, docsUnavailable())
+			return
+		}
+		writeJSON(w, http.StatusOK, site.Nav())
+	})
+
+	mux.HandleFunc("GET "+base+"/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		if site == nil {
+			writeJSON(w, http.StatusNotFound, docsUnavailable())
+			return
+		}
+		requested := r.PathValue("path")
+		page, ok := site.Page(requested)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, ErrorBody{Error: ErrorDetail{
+				Code:    string(service.CodeNotFound),
+				Message: fmt.Sprintf("no docs page %q", requested),
+			}})
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+	})
 }
 
 // docsUnavailable is the 404 body when the router has no docs site.

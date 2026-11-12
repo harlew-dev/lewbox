@@ -1,4 +1,4 @@
-import { Badge, SidebarItem, SidebarLabel, SidebarSection } from '@harlew-dev/ui'
+import { Badge, SidebarHeading, SidebarItem, SidebarLabel, SidebarSection } from '@harlew-dev/ui'
 import {
   BuildingOffice2Icon,
   Cog6ToothIcon,
@@ -17,7 +17,7 @@ import { AppShell, useIsActive } from './app-shell'
 
 const PendingContext = createContext<() => void>(() => {})
 
-// Updates the sidebar's count of customers waiting for approval.
+// Updates the sidebar's count of workspaces waiting for approval.
 export function useRefreshPending(): () => void {
   return useContext(PendingContext)
 }
@@ -27,38 +27,56 @@ export function ConsoleLayout({ children }: { children: ReactNode }) {
   const isActive = useIsActive()
   const pending = useLoad(() => api.listOrganizations({ status: 'pending' }), [])
   const pendingCount = pending.data?.data.length ?? 0
-  const items = [
-    { href: '/admin', label: 'Overview', icon: HomeIcon, exact: true },
-    { href: '/admin/customers', label: 'Customers', icon: BuildingOffice2Icon, badge: pendingCount },
-    { href: '/admin/sandboxes', label: 'Sandboxes', icon: CubeIcon },
-    { href: '/admin/plans', label: 'Plans', icon: RectangleStackIcon },
-    { href: '/admin/servers', label: 'Servers', icon: ServerStackIcon },
-    { href: '/admin/users', label: 'Users', icon: UsersIcon },
-    { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
+  type NavItem = { href: string; label: string; icon: typeof HomeIcon; exact?: boolean; badge?: number }
+  const groups: { heading?: string; items: NavItem[] }[] = [
+    {
+      items: [
+        { href: '/admin', label: 'Home', icon: HomeIcon, exact: true },
+        { href: '/admin/workspaces', label: 'Workspaces', icon: BuildingOffice2Icon, badge: pendingCount },
+        { href: '/admin/users', label: 'Users', icon: UsersIcon },
+      ],
+    },
+    {
+      heading: 'Compute',
+      items: [
+        { href: '/admin/sandboxes', label: 'Sandboxes', icon: CubeIcon },
+        { href: '/admin/servers', label: 'Servers', icon: ServerStackIcon },
+      ],
+    },
+    {
+      heading: 'Manage',
+      items: [
+        { href: '/admin/plans', label: 'Plans', icon: RectangleStackIcon },
+        { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
+      ],
+    },
   ]
   return (
     <PendingContext.Provider value={pending.refresh}>
       <AppShell
         nav={
           <>
-            <SidebarSection>
-              {items.map(({ href, label, icon: Icon, exact, badge }) => (
-                <SidebarItem key={href} href={href} current={isActive(href, exact)}>
-                  <Icon data-slot="icon" />
-                  <SidebarLabel>{label}</SidebarLabel>
-                  {badge ? (
-                    <Badge color="amber" className="ml-auto" title={`${badge} waiting for approval`}>
-                      {badge}
-                    </Badge>
-                  ) : null}
-                </SidebarItem>
-              ))}
-            </SidebarSection>
+            {groups.map(({ heading, items }) => (
+              <SidebarSection key={heading ?? 'main'} aria-label={heading ? undefined : 'Main navigation'}>
+                {heading && <SidebarHeading>{heading}</SidebarHeading>}
+                {items.map(({ href, label, icon: Icon, exact, badge }) => (
+                  <SidebarItem key={href} href={href} current={isActive(href, exact)}>
+                    <Icon data-slot="icon" />
+                    <SidebarLabel>{label}</SidebarLabel>
+                    {badge ? (
+                      <Badge color="amber" className="ml-auto" title={`${badge} waiting for approval`}>
+                        {badge}
+                      </Badge>
+                    ) : null}
+                  </SidebarItem>
+                ))}
+              </SidebarSection>
+            ))}
             {organizations.length > 0 && (
               <SidebarSection>
                 <SidebarItem href="/">
                   <UserCircleIcon data-slot="icon" />
-                  <SidebarLabel>Customer portal</SidebarLabel>
+                  <SidebarLabel>Workspace portal</SidebarLabel>
                 </SidebarItem>
               </SidebarSection>
             )}

@@ -611,6 +611,77 @@ func TestSandboxKeys(t *testing.T) {
 	}
 }
 
+// TestSetupLinkParity exercises the operator's onboarding links through both
+// entry points.
+func TestSetupLinkParity(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_setup_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+
+	out, errOut, code := e.cli("setup-link", "create", "--plan", "free", "--region", "eu-west",
+		"--expires", "7d", "--note", "acme onboarding")
+	if code != 0 {
+		t.Fatalf("setup-link create: exit %d: %s", code, errOut)
+	}
+	var created service.SetupLink
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(created.Token, "lbs_") || len(created.Token) != 36 || created.Status != "unused" ||
+		created.Note != "acme onboarding" || created.Plan.Slug != "free" || created.Region.Slug != "eu-west" {
+		t.Fatalf("created = %+v", created)
+	}
+	if created.ExpiresAt.Sub(created.CreatedAt) != 7*24*time.Hour {
+		t.Errorf("lifetime = %s", created.ExpiresAt.Sub(created.CreatedAt))
+	}
+
+	list := e.same([]string{"setup-link", "list"}, "GET", "/v0/setup-links", "", 200)
+	if strings.Contains(list, created.Token) || strings.Contains(list, `"token"`) {
+		t.Errorf("the list shows a token: %s", list)
+	}
+
+	status, body := e.http("POST", "/v0/setup-links", `{"plan":"free","region":"eu-west","expires_in_hours":48}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST setup-links: status %d body %s", status, body)
+	}
+	var remote service.SetupLink
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Token == created.Token || remote.Status != "unused" ||
+		remote.ExpiresAt.Sub(remote.CreatedAt) != 48*time.Hour {
+		t.Errorf("remote link = %+v", remote)
+	}
+
+	out, errOut, code = e.cli("setup-link", "revoke", created.ID, "--yes")
+	if code != 0 {
+		t.Fatalf("setup-link revoke: exit %d: %s", code, errOut)
+	}
+	var revoked service.SetupLink
+	if err := json.Unmarshal([]byte(out), &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if revoked.ID != created.ID || revoked.Token != "" {
+		t.Errorf("revoked = %+v", revoked)
+	}
+	e.sameError([]string{"setup-link", "revoke", created.ID, "--yes"}, "DELETE", "/v0/setup-links/"+created.ID, "", 404)
+
+	status, body = e.http("DELETE", "/v0/setup-links/"+remote.ID, "")
+	if status != http.StatusOK {
+		t.Fatalf("DELETE setup link: status %d body %s", status, body)
+	}
+	e.same([]string{"setup-link", "list"}, "GET", "/v0/setup-links", "", 200)
+}
+
 // TestSandboxesAndUsage exercises the mirror, sandboxes, usage and limits
 // commands against one HTTP server and the same database in local mode.
 func TestSandboxesAndUsage(t *testing.T) {
@@ -780,18 +851,43 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 		"PATCH", "/v0/settings", `{"signup":"approval"}`, 200)
 	e.same([]string{"settings", "set", "--name", "Acme Sandboxes", "--default-plan", "free"},
 		"PATCH", "/v0/settings", `{"instance_name":"Acme Sandboxes","default_plan":"free"}`, 200)
-	e.same([]string{"settings", "set", "--default-regions", "none"},
-		"PATCH", "/v0/settings", `{"default_regions":[]}`, 200)
+	e.same([]string{"settings", "set", "--default-region", "none"},
+		"PATCH", "/v0/settings", `{"default_region":"none"}`, 200)
 	e.same([]string{"settings", "set", "--default-plan", "none"},
 		"PATCH", "/v0/settings", `{"default_plan":"none"}`, 200)
 	e.same([]string{"settings", "set", "--default-plan", "free"},
 		"PATCH", "/v0/settings", `{"default_plan":"free"}`, 200)
 
-	// A sign-up waits for approval, then the operator approves it.
+	// Sign-up creates only the account; its workspace waits for approval.
 	status, body := e.httpWith("POST", "/v0/auth/signup",
-		`{"email":"new@example.com","password":"new-password-1","organization":"New Co"}`, "")
+		`{"email":"new@example.com","password":"new-password-1"}`, "")
 	if status != http.StatusOK {
 		t.Fatalf("signup: status %d body %s", status, body)
+	}
+	status, body = e.httpWith("POST", "/v0/auth/login",
+		`{"email":"new@example.com","password":"new-password-1"}`, "")
+	if status != http.StatusOK {
+		t.Fatalf("new account login: status %d body %s", status, body)
+	}
+	var login service.LoginResponse
+	if err := json.Unmarshal([]byte(body), &login); err != nil {
+		t.Fatal(err)
+	}
+	status, body = e.httpWith("GET", "/v0/me", "", login.Token)
+	var me service.Me
+	if err := json.Unmarshal([]byte(body), &me); err != nil || status != http.StatusOK || len(me.Organizations) != 0 || me.Organization != nil {
+		t.Fatalf("me after signup: status %d body %s (%v)", status, body, err)
+	}
+	status, body = e.httpWith("POST", "/v0/organizations", `{"name":"New Co"}`, login.Token)
+	if status != http.StatusCreated {
+		t.Fatalf("user workspace: status %d body %s", status, body)
+	}
+	var pendingOrg service.Organization
+	if err := json.Unmarshal([]byte(body), &pendingOrg); err != nil {
+		t.Fatal(err)
+	}
+	if pendingOrg.Status != "pending" || pendingOrg.Region != nil || pendingOrg.Role != "owner" {
+		t.Fatalf("pending workspace = %+v", pendingOrg)
 	}
 	pending := e.same([]string{"org", "list", "--status", "pending"},
 		"GET", "/v0/organizations?status=pending", "", 200)
@@ -799,7 +895,7 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	if err := json.Unmarshal([]byte(pending), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Data) != 1 || list.Data[0].Status != "pending" || len(list.Data[0].Regions) != 0 {
+	if len(list.Data) != 1 || list.Data[0].Status != "pending" || list.Data[0].Region != nil {
 		t.Fatalf("pending = %s", pending)
 	}
 	e.same([]string{"org", "approve", list.Data[0].Slug},
@@ -838,7 +934,7 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	if got := e.same([]string{"org", "get", "acme"}, "GET", "/v0/organizations/acme", "", 200); got != created {
 		t.Errorf("org get = %s, want the create output %s", got, created)
 	}
-	if strings.Contains(created, `"plan"`) || !strings.Contains(created, `"regions":[]`) {
+	if strings.Contains(created, `"plan"`) || !strings.Contains(created, `"region":null`) {
 		t.Errorf("new organization = %s", created)
 	}
 	e.same([]string{"org", "update", "acme", "--name", "Acme Inc"},

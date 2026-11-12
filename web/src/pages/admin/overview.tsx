@@ -32,13 +32,13 @@ export function OverviewPage() {
     <>
       <PageHeader title="Overview" />
       <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-5">
-        <Stat title="Customers" value={formatNumber(customers.total, 0)} href="/admin/customers">
+        <Stat title="Workspaces" value={formatNumber(customers.total, 0)} href="/admin/workspaces">
           {customers.suspended > 0 && <span>{customers.suspended} suspended</span>}
         </Stat>
         <Stat
           title="Pending approval"
           value={formatNumber(customers.pending, 0)}
-          href="/admin/customers?tab=pending"
+          href="/admin/workspaces?tab=pending"
           level={customers.pending > 0 ? 'warn' : undefined}
         />
         <Stat
@@ -99,18 +99,18 @@ export function OverviewPage() {
         </div>
       )}
 
-      <Subheading className="mt-14 mb-4">Top customers this month, in vCPU-hours</Subheading>
+      <Subheading className="mt-14 mb-4">Top workspaces this month, in vCPU-hours</Subheading>
       {top.length === 0 ? (
         <Text>No usage yet this month.</Text>
       ) : (
         <BarList
-          label="Top customers by vCPU-hours this month"
+          label="Top workspaces by vCPU-hours this month"
           total={top.reduce((sum, customer) => sum + customer.vcpu_hours, 0)}
           items={top.map((customer) => ({
             key: customer.slug,
             label: customer.name,
             value: Math.round(customer.vcpu_hours * 10) / 10,
-            href: `/admin/customers/${encodeURIComponent(customer.slug)}`,
+            href: `/admin/workspaces/${encodeURIComponent(customer.slug)}`,
           }))}
         />
       )}

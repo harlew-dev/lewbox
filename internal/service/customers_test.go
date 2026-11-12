@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -19,7 +17,7 @@ func setSignup(t *testing.T, s *Service, mode string) {
 	}
 }
 
-func TestSignupModes(t *testing.T) {
+func TestSignupCreatesOnlyAnAccount(t *testing.T) {
 	s := newTestService(t)
 	createUser(t, s, "root@example.com", true)
 
@@ -40,34 +38,17 @@ func TestSignupModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userCtx := WithPrincipal(context.Background(), p)
-	orgs, err := s.ListOrganizations(userCtx, ListOrganizationsRequest{})
-	if err != nil || len(orgs.Data) != 1 {
+	ada := WithPrincipal(context.Background(), p)
+	orgs, err := s.ListOrganizations(ada, ListOrganizationsRequest{})
+	if err != nil || len(orgs.Data) != 0 {
 		t.Fatalf("signup organizations = %+v, %v", orgs, err)
 	}
-	org := orgs.Data[0]
-	suffix, ok := strings.CutPrefix(org.Slug, "ada-")
-	if !ok || len(suffix) != signupSuffixLength ||
-		org.Status != orgActive || org.Role != roleOwner {
-		t.Errorf("signup organization = %+v", org)
-	}
-	// No default regions are set, so the new organization has no plan yet.
-	if len(org.Regions) != 0 {
-		t.Errorf("plan and regions = %+v", org.Regions)
-	}
-	// Members do not see the team.
-	if org.Team != "" {
-		t.Errorf("member sees admin fields: %+v", org)
-	}
-	adminOrg, err := s.GetOrganization(localCtx(), org.Slug)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(adminOrg.Team, "lbx-") {
-		t.Errorf("admin organization = %+v", adminOrg)
+	me, err := s.Me(ada)
+	if err != nil || len(me.Organizations) != 0 || me.Organization != nil {
+		t.Errorf("me after sign-up = %+v, %v", me, err)
 	}
 
-	// Approval mode creates a pending organization its owner cannot manage.
+	// Approval mode affects workspaces created later, not the account.
 	setSignup(t, s, signupApproval)
 	_, bobResp, err := s.Signup(context.Background(), SignupRequest{Email: "bob@example.com", Password: testPassword})
 	if err != nil {
@@ -77,22 +58,131 @@ func TestSignupModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bobCtx := WithPrincipal(context.Background(), bobPrincipal)
-	pending, err := s.ListOrganizations(bobCtx, ListOrganizationsRequest{})
-	if err != nil || len(pending.Data) != 1 || pending.Data[0].Status != orgPending {
-		t.Fatalf("pending organization = %+v, %v", pending, err)
-	}
-	if _, err := s.CreateAdminKey(bobCtx, pending.Data[0].Slug, CreateAdminKeyRequest{Name: "ci"}); err != nil {
-		wantCode(t, err, CodeForbidden)
-	}
-	active := orgActive
-	if approved, err := s.UpdateOrganization(localCtx(), pending.Data[0].Slug, UpdateOrganizationRequest{Status: &active}); err != nil || approved.Status != orgActive {
-		t.Fatalf("approve = %+v, %v", approved, err)
+	if orgs, err := s.ListOrganizations(WithPrincipal(context.Background(), bobPrincipal), ListOrganizationsRequest{}); err != nil || len(orgs.Data) != 0 {
+		t.Errorf("approval signup organizations = %+v, %v", orgs, err)
 	}
 
 	setSignup(t, s, signupClosed)
 	_, _, err = s.Signup(context.Background(), SignupRequest{Email: "eve@example.com", Password: testPassword})
 	wantCode(t, err, CodeForbidden)
+}
+
+func TestCreateWorkspaceModes(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	createUser(t, s, "ada@example.com", false)
+	ada := userCtx(t, s, "ada@example.com")
+
+	setSignup(t, s, signupOpen)
+	org, err := s.CreateOrganization(ada, CreateOrganizationRequest{Name: "Ada Labs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if org.Status != orgActive || org.Role != roleOwner || org.Members != 1 || org.Region != nil {
+		t.Errorf("open-mode workspace = %+v", org)
+	}
+	suffix, ok := strings.CutPrefix(org.Slug, "ada-labs-")
+	if !ok || len(suffix) != orgSlugSuffixLength {
+		t.Errorf("generated slug = %q", org.Slug)
+	}
+
+	setSignup(t, s, signupApproval)
+	pending, err := s.CreateOrganization(ada, CreateOrganizationRequest{Slug: "pending", Name: "Pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Status != orgPending || pending.Role != roleOwner {
+		t.Errorf("approval-mode workspace = %+v", pending)
+	}
+	if _, err := s.CreateAdminKey(ada, pending.Slug, CreateAdminKeyRequest{Name: "ci"}); err != nil {
+		wantCode(t, err, CodeForbidden)
+	}
+
+	setSignup(t, s, signupClosed)
+	_, err = s.CreateOrganization(ada, CreateOrganizationRequest{Slug: "closed", Name: "Closed"})
+	se := wantCode(t, err, CodeForbidden)
+	if !strings.Contains(se.Message, "setup link") {
+		t.Errorf("closed message = %q", se.Message)
+	}
+
+	// A non-admin cannot choose the owner.
+	setSignup(t, s, signupOpen)
+	_, err = s.CreateOrganization(ada, CreateOrganizationRequest{Slug: "mine", Name: "Mine", Owner: "root@example.com"})
+	wantCode(t, err, CodeForbidden)
+}
+
+func TestCreateWorkspaceOwnershipLimit(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	createUser(t, s, "ada@example.com", false)
+	ada := userCtx(t, s, "ada@example.com")
+	setSignup(t, s, signupOpen)
+
+	for i := 0; i < maxOwnedWorkspaces; i++ {
+		slug := fmt.Sprintf("workspace-%d", i)
+		if _, err := s.CreateOrganization(ada, CreateOrganizationRequest{Slug: slug, Name: slug}); err != nil {
+			t.Fatalf("workspace %d: %v", i, err)
+		}
+	}
+	_, err := s.CreateOrganization(ada, CreateOrganizationRequest{Slug: "one-too-many", Name: "One too many"})
+	se := wantCode(t, err, CodePrecondition)
+	if !strings.Contains(se.Message, "at most 10 workspaces") {
+		t.Errorf("message = %q", se.Message)
+	}
+}
+
+func TestCreateWorkspaceSlugCollisions(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	original := orgSlugSuffix
+	t.Cleanup(func() { orgSlugSuffix = original })
+	calls := 0
+	orgSlugSuffix = func() (string, error) {
+		calls++
+		if calls <= 2 {
+			return "aaaaaa", nil
+		}
+		return "bbbbbb", nil
+	}
+
+	first, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Slug != "acme-aaaaaa" || second.Slug != "acme-bbbbbb" {
+		t.Errorf("slugs = %q, %q", first.Slug, second.Slug)
+	}
+}
+
+func TestCreateOrganizationRollback(t *testing.T) {
+	s := newTestService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	original := orgSlugSuffix
+	t.Cleanup(func() { orgSlugSuffix = original })
+	orgSlugSuffix = func() (string, error) { return "zzzzzz", nil }
+
+	if _, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme"}); err == nil {
+		t.Fatal("a duplicate generated slug did not fail")
+	}
+	orgs, err := s.ListOrganizations(root, ListOrganizationsRequest{})
+	if err != nil || len(orgs.Data) != 1 {
+		t.Errorf("organizations after a failed create = %+v, %v", orgs.Data, err)
+	}
+	orgSlugSuffix = original
+	if _, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme"}); err != nil {
+		t.Errorf("the create could not be retried: %v", err)
+	}
 }
 
 // tokenOf signs an account in and returns its session token.
@@ -103,66 +193,6 @@ func tokenOf(t *testing.T, s *Service, email string) string {
 		t.Fatal(err)
 	}
 	return resp.Token
-}
-
-func TestSignupSlugCollisions(t *testing.T) {
-	s := newTestService(t)
-	createUser(t, s, "root@example.com", true)
-	setSignup(t, s, signupOpen)
-
-	original := signupSuffix
-	t.Cleanup(func() { signupSuffix = original })
-	calls := 0
-	signupSuffix = func() (string, error) {
-		calls++
-		if calls <= 2 {
-			return "aaaaaa", nil
-		}
-		return "bbbbbb", nil
-	}
-
-	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@one.test", Password: testPassword}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@two.test", Password: testPassword}); err != nil {
-		t.Fatal(err)
-	}
-	orgs, err := s.ListOrganizations(localCtx(), ListOrganizationsRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	slugs := []string{}
-	for _, org := range orgs.Data {
-		slugs = append(slugs, org.Slug)
-	}
-	if len(slugs) != 2 || slugs[0] != "ada-aaaaaa" || slugs[1] != "ada-bbbbbb" {
-		t.Errorf("slugs = %v", slugs)
-	}
-}
-
-func TestSignupRollback(t *testing.T) {
-	s := newTestService(t)
-	createUser(t, s, "root@example.com", true)
-	setSignup(t, s, signupOpen)
-
-	original := signupSuffix
-	t.Cleanup(func() { signupSuffix = original })
-	signupSuffix = func() (string, error) { return "zzzzzz", nil }
-
-	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@one.test", Password: testPassword}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@two.test", Password: testPassword}); err == nil {
-		t.Fatal("a duplicate slug did not fail")
-	}
-	// The account and organization were rolled back, so the email is free.
-	if _, err := s.q.GetUserByEmail(context.Background(), "ada@two.test"); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("rolled-back user: %v", err)
-	}
-	signupSuffix = original
-	if _, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@two.test", Password: testPassword}); err != nil {
-		t.Errorf("the email could not be retried: %v", err)
-	}
 }
 
 func TestSignupTakenEmail(t *testing.T) {
@@ -178,53 +208,77 @@ func TestSignupTakenEmail(t *testing.T) {
 	}
 }
 
-func TestSignupSubscribesDefaults(t *testing.T) {
+func TestCreateWorkspaceSubscribesDefaults(t *testing.T) {
 	s := newClusterService(t)
 	createUser(t, s, "root@example.com", true)
 	fake := newClusterFake(t)
 	setMembers(fake, "node-a")
 	addTestCluster(t, s, fake, "eu-west")
+	createUser(t, s, "ada@example.com", false)
+	createUser(t, s, "bob@example.com", false)
 	setSignup(t, s, signupOpen)
 
-	plan := "free"
-	regions := []string{"eu-west"}
-	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegions: &regions}); err != nil {
+	plan, region := "free", "eu-west"
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultPlan: &plan, DefaultRegion: &region}); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err := s.Signup(context.Background(), SignupRequest{Email: "ada@example.com", Password: testPassword})
+	org, err := s.CreateOrganization(userCtx(t, s, "ada@example.com"), CreateOrganizationRequest{Slug: "ada", Name: "Ada"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := s.Authenticate(context.Background(), token)
-	if err != nil {
-		t.Fatal(err)
+	if org.Region == nil || org.Region.Slug != "eu-west" || org.Region.Plan.Slug != "free" {
+		t.Errorf("workspace region = %+v", org.Region)
 	}
-	userCtx := WithPrincipal(context.Background(), p)
-	orgs, err := s.ListOrganizations(userCtx, ListOrganizationsRequest{})
-	if err != nil || len(orgs.Data) != 1 {
-		t.Fatalf("signup organizations = %+v, %v", orgs, err)
+	// Members do not see the team; an instance admin does.
+	if org.Team != "" {
+		t.Errorf("member sees admin fields: %+v", org)
 	}
-	org := orgs.Data[0]
-	if len(org.Regions) != 1 || org.Regions[0].Slug != "eu-west" || org.Regions[0].Plan.Slug != "free" {
-		t.Errorf("signup regions = %+v", org.Regions)
+	if adminOrg, err := s.GetOrganization(localCtx(), "ada"); err != nil || !strings.HasPrefix(adminOrg.Team, "lbx-") {
+		t.Errorf("admin organization = %+v, %v", adminOrg, err)
 	}
 
-	// With no default regions, the next customer has none.
-	none := []string{}
-	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultRegions: &none}); err != nil {
+	// With no default region, the next workspace has none.
+	none := "none"
+	if _, err := s.UpdateSettings(localCtx(), UpdateSettingsRequest{DefaultRegion: &none}); err != nil {
 		t.Fatal(err)
 	}
-	token, _, err = s.Signup(context.Background(), SignupRequest{Email: "bob@example.com", Password: testPassword})
-	if err != nil {
+	org, err = s.CreateOrganization(userCtx(t, s, "bob@example.com"), CreateOrganizationRequest{Slug: "bob", Name: "Bob"})
+	if err != nil || org.Region != nil {
+		t.Errorf("second workspace = %+v, %v", org, err)
+	}
+}
+
+func TestOneRegionPerWorkspace(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	for _, slug := range []string{"eu-west", "us-east"} {
+		fake := newClusterFake(t)
+		setMembers(fake, "node-a")
+		addTestCluster(t, s, fake, slug)
+	}
+	root := userCtx(t, s, "root@example.com")
+	if _, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme", Name: "Acme"}); err != nil {
 		t.Fatal(err)
 	}
-	p, err = s.Authenticate(context.Background(), token)
-	if err != nil {
+
+	if _, err := s.SetSubscription(root, "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
 		t.Fatal(err)
 	}
-	orgs, err = s.ListOrganizations(WithPrincipal(context.Background(), p), ListOrganizationsRequest{})
-	if err != nil || len(orgs.Data) != 1 || len(orgs.Data[0].Regions) != 0 {
-		t.Errorf("second signup = %+v, %v", orgs, err)
+	if org, err := s.GetOrganization(root, "acme"); err != nil || org.Region == nil || org.Region.Slug != "eu-west" {
+		t.Fatalf("region = %+v, %v", org.Region, err)
+	}
+
+	// A second region is refused; the same region may change plan.
+	_, err := s.SetSubscription(root, "acme", "us-east", SetSubscriptionRequest{Plan: "free"})
+	se := wantCode(t, err, CodeConflict)
+	if want := "workspace acme is already in region eu-west; remove it first"; se.Message != want {
+		t.Errorf("message = %q, want %q", se.Message, want)
+	}
+	if _, err := s.SetSubscription(root, "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Errorf("changing the plan in the same region: %v", err)
+	}
+	if subs, err := s.ListSubscriptions(root, "acme"); err != nil || len(subs.Data) != 1 || subs.Data[0].Region.Slug != "eu-west" {
+		t.Errorf("subscriptions = %+v, %v", subs.Data, err)
 	}
 }
 
@@ -324,7 +378,7 @@ func TestSubscriptionLimitsAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(org.Regions) != 0 {
+	if org.Region != nil {
 		t.Fatalf("organization = %+v", org)
 	}
 
@@ -350,8 +404,8 @@ func TestSubscriptionLimitsAndStatus(t *testing.T) {
 	if sub.Limits.Sandboxes == nil || *sub.Limits.Sandboxes != 2 || sub.Overrides.Sandboxes != nil {
 		t.Errorf("cleared override = %+v", sub)
 	}
-	if org, err := s.GetOrganization(localCtx(), "acme"); err != nil || len(org.Regions) != 1 || org.Regions[0].Plan.Slug != "free" {
-		t.Fatalf("organization regions = %+v, %v", org, err)
+	if org, err := s.GetOrganization(localCtx(), "acme"); err != nil || org.Region == nil || org.Region.Plan.Slug != "free" {
+		t.Fatalf("organization region = %+v, %v", org, err)
 	}
 
 	if _, err := s.CreatePlan(localCtx(), CreatePlanRequest{Slug: "pro", MaxSandboxes: intValue(50)}); err != nil {

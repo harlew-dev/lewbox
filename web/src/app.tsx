@@ -1,6 +1,6 @@
 import { ListSkeleton } from '@harlew-dev/ui'
 import { lazy, Suspense, type ComponentType } from 'react'
-import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router'
 import { ConsoleLayout } from './components/console-layout'
 import { DocsLayout } from './components/docs-layout'
 import { PortalLayout } from './components/portal-layout'
@@ -8,6 +8,7 @@ import { RequireAdmin, RequireAuth, useAuth } from './lib/auth'
 import { LoginPage } from './pages/login'
 import { NotFoundPage } from './pages/not-found'
 import { PortalRoute } from './pages/portal/portal-route'
+import { SettingsLayout } from './pages/portal/settings/layout'
 import { SignupPage } from './pages/signup'
 
 // Pages other than sign-in and sign-up load on demand, so the entry chunk
@@ -25,28 +26,38 @@ function lazyPage<K extends string>(load: () => Promise<Record<K, ComponentType>
 }
 
 const AccountPage = lazyPage(() => import('./pages/account'), 'AccountPage')
-const CustomerDetailPage = lazyPage(() => import('./pages/admin/customer-detail'), 'CustomerDetailPage')
-const CustomersPage = lazyPage(() => import('./pages/admin/customers'), 'CustomersPage')
+const WorkspaceDetailPage = lazyPage(() => import('./pages/admin/workspace-detail'), 'WorkspaceDetailPage')
+const WorkspacesPage = lazyPage(() => import('./pages/admin/workspaces'), 'WorkspacesPage')
 const OverviewPage = lazyPage(() => import('./pages/admin/overview'), 'OverviewPage')
 const PlansPage = lazyPage(() => import('./pages/admin/plans'), 'PlansPage')
 const FleetSandboxesPage = lazyPage(() => import('./pages/admin/sandboxes'), 'FleetSandboxesPage')
 const AdminSettingsPage = lazyPage(() => import('./pages/admin/settings'), 'AdminSettingsPage')
 const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
+const PlatformDocsPage = lazyPage(() => import('./pages/docs'), 'PlatformDocsPage')
+const OnboardingPage = lazyPage(() => import('./pages/onboarding/onboarding'), 'OnboardingPage')
+const GettingStartedPage = lazyPage(() => import('./pages/onboarding/getting-started'), 'GettingStartedPage')
+const SetupPage = lazyPage(() => import('./pages/setup'), 'SetupPage')
 const HomePage = lazyPage(() => import('./pages/portal/home'), 'HomePage')
 const KeysPage = lazyPage(() => import('./pages/portal/keys'), 'KeysPage')
 const SandboxesPage = lazyPage(() => import('./pages/portal/sandboxes'), 'SandboxesPage')
-const TeamPage = lazyPage(() => import('./pages/portal/team'), 'TeamPage')
+const PlanPage = lazyPage(() => import('./pages/portal/plan'), 'PlanPage')
 const UsagePage = lazyPage(() => import('./pages/portal/usage'), 'UsagePage')
+const SettingsGeneralPage = lazyPage(() => import('./pages/portal/settings/general'), 'SettingsGeneralPage')
+const SettingsMembersPage = lazyPage(() => import('./pages/portal/settings/members'), 'SettingsMembersPage')
+const SettingsKeysPage = lazyPage(() => import('./pages/portal/settings/api-keys'), 'SettingsKeysPage')
 const ClusterDetailPage = lazyPage(() => import('./pages/servers/cluster-detail'), 'ClusterDetailPage')
 const ServersPage = lazyPage(() => import('./pages/servers/servers'), 'ServersPage')
 const UserDetailPage = lazyPage(() => import('./pages/users/user-detail'), 'UserDetailPage')
 const UsersPage = lazyPage(() => import('./pages/users/users'), 'UsersPage')
 
 // The customer portal. An instance admin who belongs to no workspace
-// has nothing here and goes to the console.
+// has nothing here and goes to the console; everyone else without one goes
+// to onboarding to create it.
 function Portal() {
   const { user, organizations } = useAuth()
-  if (user?.instance_admin && organizations.length === 0) return <Navigate to="/admin" replace />
+  if (organizations.length === 0) {
+    return <Navigate to={user?.instance_admin ? '/admin' : '/onboarding'} replace />
+  }
   return (
     <PortalLayout>
       <PortalRoute />
@@ -84,7 +95,7 @@ export function legacyPath(pathname: string, search: string): string {
     case 'nodes':
       return '/admin/servers?tab=nodes'
     case 'organizations':
-      return tail ? `/admin/customers/${tail.split('/')[0]}` : '/admin/customers'
+      return tail ? `/admin/workspaces/${tail.split('/')[0]}` : '/admin/workspaces'
     default:
       return `/admin${pathname}${search}`
   }
@@ -97,15 +108,27 @@ function Legacy() {
   return <Navigate to={legacyPath(location.pathname, location.search)} replace />
 }
 
+// The console's old customer pages became workspaces.
+function LegacyCustomer() {
+  const { org = '' } = useParams()
+  return <Navigate to={`/admin/workspaces/${encodeURIComponent(org)}`} replace />
+}
+
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/setup/:token" element={<SetupPage />} />
 
-      <Route element={<DocsLayout />}>
+      <Route element={<DocsLayout book="consumer" />}>
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/docs/*" element={<DocsPage />} />
+      </Route>
+
+      <Route element={<DocsLayout book="platform" />}>
+        <Route path="/platform" element={<PlatformDocsPage />} />
+        <Route path="/platform/*" element={<PlatformDocsPage />} />
       </Route>
 
       <Route
@@ -115,20 +138,30 @@ export function App() {
           </RequireAuth>
         }
       >
+        <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/onboarding/getting-started" element={<GettingStartedPage />} />
+
         <Route element={<Portal />}>
           <Route index element={<HomePage />} />
           <Route path="/sandboxes" element={<SandboxesPage />} />
           <Route path="/snapshots" element={<Navigate to="/sandboxes?tab=snapshots" replace />} />
           <Route path="/keys" element={<KeysPage />} />
           <Route path="/usage" element={<UsagePage />} />
-          <Route path="/team" element={<TeamPage />} />
-          <Route path="/settings" element={<Navigate to="/team" replace />} />
+          <Route path="/plan" element={<PlanPage />} />
+          <Route path="/settings" element={<SettingsLayout />}>
+            <Route index element={<SettingsGeneralPage />} />
+            <Route path="members" element={<SettingsMembersPage />} />
+            <Route path="api-keys" element={<SettingsKeysPage />} />
+          </Route>
+          <Route path="/team" element={<Navigate to="/settings/members" replace />} />
         </Route>
 
         <Route path="/admin" element={<Console />}>
           <Route index element={<OverviewPage />} />
-          <Route path="customers" element={<CustomersPage />} />
-          <Route path="customers/:org" element={<CustomerDetailPage />} />
+          <Route path="workspaces" element={<WorkspacesPage />} />
+          <Route path="workspaces/:org" element={<WorkspaceDetailPage />} />
+          <Route path="customers" element={<Navigate to="/admin/workspaces" replace />} />
+          <Route path="customers/:org" element={<LegacyCustomer />} />
           <Route path="sandboxes" element={<FleetSandboxesPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="servers" element={<ServersPage />} />

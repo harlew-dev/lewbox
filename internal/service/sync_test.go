@@ -418,29 +418,21 @@ func TestLimitsHidesRegionErrorsFromCustomers(t *testing.T) {
 	}
 }
 
-func TestUsagePeakSumsClustersAndTimesAreMilliseconds(t *testing.T) {
+func TestUsagePeakAndTimesAreMilliseconds(t *testing.T) {
 	clock := &testClock{at: time.Date(2026, 11, 1, 10, 10, 0, 0, time.UTC)}
 	s := newClusterService(t, WithClock(func() time.Time { return clock.at }))
 	first := newClusterFake(t)
 	setMembers(first, "node-a")
 	addTestCluster(t, s, first, "eu-west")
-	second := newClusterFake(t)
-	setMembers(second, "node-b")
-	addTestCluster(t, s, second, "us-east")
 	org, err := s.CreateOrganization(localCtx(), CreateOrganizationRequest{Slug: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, region := range []string{"eu-west", "us-east"} {
-		if _, err := s.SetSubscription(localCtx(), "acme", region, SetSubscriptionRequest{Plan: "free"}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := s.SetSubscription(localCtx(), "acme", "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
 	}
-	for i := range 2 {
+	for i := range 5 {
 		first.AddSandbox(org.Team, startedSandbox("eu-"+string(rune('a'+i)), 1, 512))
-	}
-	for i := range 3 {
-		second.AddSandbox(org.Team, startedSandbox("us-"+string(rune('a'+i)), 1, 512))
 	}
 	clock.advance(15 * time.Second)
 	if err := s.Sync(localCtx()); err != nil {
@@ -460,7 +452,7 @@ func TestUsagePeakSumsClustersAndTimesAreMilliseconds(t *testing.T) {
 		}
 	}
 	if peak != 5 {
-		t.Errorf("peak = %d, want the sum of both clusters' peaks", peak)
+		t.Errorf("peak = %d, want 5", peak)
 	}
 	if report.From.Nanosecond()%int(time.Millisecond) != 0 || report.To.Nanosecond()%int(time.Millisecond) != 0 {
 		t.Errorf("from/to = %v, %v; want milliseconds", report.From, report.To)

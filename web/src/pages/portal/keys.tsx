@@ -14,7 +14,7 @@ export function KeysPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
   const list = keys.data?.data ?? []
-  const noRegion = org.regions.length === 0
+  const noRegion = org.region === null
   const create = can.use ? (
     <Button onClick={() => setCreateOpen(true)} disabled={noRegion} disabledReason={noRegionText}>
       Create API key
@@ -25,7 +25,7 @@ export function KeysPage() {
     <>
       <PageHeader
         title="API keys"
-        description="Each key works in one region, with the AerolVM or E2B SDK."
+        description="Each key works in your workspace’s region, with the AerolVM or E2B SDK."
         actions={list.length > 0 ? create : undefined}
       />
 
@@ -36,11 +36,11 @@ export function KeysPage() {
       ) : list.length === 0 ? (
         <EmptyState
           title="No API keys"
-          description={noRegion ? noRegionText : 'Create a key for a region, then run your first sandbox with it.'}
+          description={noRegion ? noRegionText : 'Create a key, then run your first sandbox with it.'}
           action={create}
         />
       ) : (
-        <SandboxKeyTable keys={list} org={org.slug} canRevoke={can.use} onRevoked={keys.refresh} />
+        <SandboxKeyTable keys={list} org={org.slug} canRevoke={can.use} onRevoked={keys.refresh} showRegion={false} />
       )}
 
       <CreateKeyDialog open={createOpen} org={org} onClose={() => setCreateOpen(false)} onCreated={keys.refresh} />

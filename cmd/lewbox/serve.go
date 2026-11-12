@@ -177,7 +177,7 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	svc.SetSyncInterval(o.syncInterval)
 	startClusterChecks(ctx, svc, o.interval, log)
 	startSync(ctx, svc, o.syncInterval, log)
-	site, err := loadDocs()
+	consumerDocs, platformDocs, err := loadDocs()
 	if err != nil {
 		return err
 	}
@@ -191,25 +191,28 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 		httpapi.WithCookieSecure(secureCookies),
 		httpapi.WithTrustedOrigins(o.trustedOrigins),
 		httpapi.WithTrustedProxies(proxies),
-		httpapi.WithDocs(site),
+		httpapi.WithDocs(consumerDocs),
+		httpapi.WithPlatform(platformDocs),
 	), dist), log)
 }
 
-// loadDocs parses the embedded documentation, or the folder named by
-// LEWBOX_DOCS_DIR when it is set (development: edits need a restart).
-func loadDocs() (*docssite.Site, error) {
+// loadDocs parses the embedded documentation books (consumer and platform),
+// or the folder named by LEWBOX_DOCS_DIR when it is set. That folder holds the
+// same consumer/ and platform/ sub-folders (development: edits need a
+// restart).
+func loadDocs() (*docssite.Site, *docssite.Site, error) {
 	if dir := strings.TrimSpace(os.Getenv("LEWBOX_DOCS_DIR")); dir != "" {
-		site, err := docssite.Load(os.DirFS(dir))
+		consumer, platform, err := docssite.LoadBooks(os.DirFS(dir))
 		if err != nil {
-			return nil, fmt.Errorf("load docs from %s: %w", dir, err)
+			return nil, nil, fmt.Errorf("load docs from %s: %w", dir, err)
 		}
-		return site, nil
+		return consumer, platform, nil
 	}
-	site, err := docssite.Load(docsfs.FS)
+	consumer, platform, err := docssite.LoadBooks(docsfs.FS)
 	if err != nil {
-		return nil, fmt.Errorf("load embedded docs: %w", err)
+		return nil, nil, fmt.Errorf("load embedded docs: %w", err)
 	}
-	return site, nil
+	return consumer, platform, nil
 }
 
 // webDist returns the built web console, or the folder named by

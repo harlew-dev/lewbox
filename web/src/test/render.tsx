@@ -31,7 +31,7 @@ export const acme = {
   name: 'Acme',
   status: 'active',
   status_reason: '',
-  regions: [{ slug: 'eu-west', name: 'EU West', plan: { slug: 'free', name: 'Free' } }],
+  region: { slug: 'eu-west', name: 'EU West', plan: { slug: 'free', name: 'Free' } },
   members: 1,
   role: 'owner',
   created_at: '2026-11-11T15:22:35.8Z',

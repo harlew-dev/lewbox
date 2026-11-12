@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { json, renderApp, stubAPI } from '../../test/render'
 
@@ -6,7 +6,7 @@ const settings = {
   instance_name: 'Lewbox',
   signup: 'closed',
   default_plan: 'free',
-  default_regions: ['eu-west'],
+  default_region: 'eu-west',
 }
 
 const plans = [
@@ -36,7 +36,7 @@ describe('AdminSettingsPage', () => {
 
     const name = await screen.findByLabelText('Instance name')
     expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
-    expect(screen.queryByText(/billing|credits|currency/i)).toBeNull()
+    expect(within(screen.getByRole('main')).queryByText(/billing|credits|currency/i)).toBeNull()
     fireEvent.change(name, { target: { value: 'Acme Cloud' } })
     fireEvent.click(screen.getByRole('radio', { name: /Approval/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }))
@@ -49,20 +49,21 @@ describe('AdminSettingsPage', () => {
     )
   })
 
-  it('sets the default regions for new sign-ups', async () => {
+  it('sets the one default region for new workspaces', async () => {
     const calls = stub()
     renderApp('/admin/settings')
 
-    const eu = await screen.findByRole('checkbox', { name: 'EU West' })
-    expect(eu).toBeChecked()
-    const us = screen.getByRole('checkbox', { name: 'US East' })
-    expect(us).not.toBeChecked()
+    const region = await screen.findByRole('combobox', { name: 'Default region' })
+    expect(region).toHaveTextContent('EU West')
+    fireEvent.click(region)
+    const us = await screen.findByRole('option', { name: 'US East' })
+    fireEvent.pointerDown(us)
     fireEvent.click(us)
-    fireEvent.click(eu)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Default region' })).toHaveTextContent('US East'))
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }))
 
     await waitFor(() =>
-      expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ default_regions: ['us-east'] }),
+      expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ default_region: 'us-east' }),
     )
   })
 })

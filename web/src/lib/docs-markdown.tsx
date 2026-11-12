@@ -8,6 +8,7 @@ import GithubSlugger from 'github-slugger'
 import { CodeBlock, Notice } from '@harlew-dev/ui'
 import { Link } from 'react-router'
 import type { Components } from 'react-markdown'
+import type { DocsBook } from './api'
 import { resolveDocsLink } from '../lib/docs-links'
 
 // Minimal hast shapes, so the plugin needs no extra type packages.
@@ -221,7 +222,7 @@ function MarkdownHeading({
   )
 }
 
-export function markdownComponents(pagePath: string): Components {
+export function markdownComponents(pagePath: string, book: DocsBook = 'consumer'): Components {
   const heading = (level: 2 | 3 | 4) =>
     function Heading({ id, children }: { id?: string; children?: ReactNode }) {
       return (
@@ -244,7 +245,7 @@ export function markdownComponents(pagePath: string): Components {
       href?: string
       children?: ReactNode
     }) {
-      const resolved = resolveDocsLink(href ?? '', pagePath)
+      const resolved = resolveDocsLink(href ?? '', pagePath, book)
       if (resolved.kind === 'internal') {
         return <Link to={resolved.to}>{children}</Link>
       }

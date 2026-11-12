@@ -102,6 +102,10 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
+	if err := s.checkOneRegion(ctx, c.org, cluster.ID); err != nil {
+		return Subscription{}, err
+	}
+
 	existing, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	switch {
 	case err == nil:
@@ -135,6 +139,9 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 			MaxMemoryMb:  memory,
 			CreatedAt:    s.now(),
 		})
+		if db.IsUniqueViolation(err) {
+			return Subscription{}, s.regionConflict(ctx, c.org, cluster.ID)
+		}
 		if err != nil {
 			return Subscription{}, fmt.Errorf("create subscription: %w", err)
 		}
@@ -145,6 +152,40 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 	out := toSubscription(existing, plan, cluster, true)
 	s.pushSubscriptionQuota(ctx, c.org, cluster, plan, existing)
 	return out, nil
+}
+
+// checkOneRegion refuses a subscription outside the workspace's current
+// region. The unique index is the real guard; this is the readable error.
+func (s *Service) checkOneRegion(ctx context.Context, org db.Organization, clusterID string) error {
+	subs, err := s.q.ListSubscriptions(ctx, org.ID)
+	if err != nil {
+		return fmt.Errorf("list subscriptions: %w", err)
+	}
+	for _, sub := range subs {
+		if sub.ClusterID != clusterID {
+			return s.regionConflict(ctx, org, clusterID)
+		}
+	}
+	return nil
+}
+
+// regionConflict names the region a workspace is already in.
+func (s *Service) regionConflict(ctx context.Context, org db.Organization, clusterID string) error {
+	subs, err := s.q.ListSubscriptions(ctx, org.ID)
+	if err != nil {
+		return fmt.Errorf("list subscriptions: %w", err)
+	}
+	for _, sub := range subs {
+		if sub.ClusterID == clusterID {
+			continue
+		}
+		other, err := s.q.GetClusterByID(ctx, sub.ClusterID)
+		if err != nil {
+			return fmt.Errorf("get cluster: %w", err)
+		}
+		return conflict("workspace %s is already in region %s; remove it first", org.Slug, other.Slug)
+	}
+	return conflict("workspace %s is already in another region; remove it first", org.Slug)
 }
 
 // DeleteSubscription removes an organization's subscription in one region.

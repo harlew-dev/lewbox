@@ -24,7 +24,7 @@ describe('PlansPage', () => {
     renderApp('/admin/plans')
 
     expect(await screen.findByText('Default')).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'Customers' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Workspaces' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: '3' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'New plan' }))
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Pro' } })

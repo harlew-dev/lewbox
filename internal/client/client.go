@@ -288,6 +288,28 @@ func (c *Client) UpdateSettings(ctx context.Context, req service.UpdateSettingsR
 	return out, err
 }
 
+// CreateSetupLink mints a single-use onboarding link; its token is only in
+// this response.
+func (c *Client) CreateSetupLink(ctx context.Context, req service.CreateSetupLinkRequest) (service.SetupLink, error) {
+	var out service.SetupLink
+	err := c.do(ctx, http.MethodPost, "/v0/setup-links", req, &out, defaultTimeout)
+	return out, err
+}
+
+// ListSetupLinks returns every setup link, newest first, without tokens.
+func (c *Client) ListSetupLinks(ctx context.Context) (service.SetupLinkList, error) {
+	var out service.SetupLinkList
+	err := c.do(ctx, http.MethodGet, "/v0/setup-links", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// RevokeSetupLink deletes an unused setup link.
+func (c *Client) RevokeSetupLink(ctx context.Context, id string) (service.SetupLink, error) {
+	var out service.SetupLink
+	err := c.do(ctx, http.MethodDelete, "/v0/setup-links/"+url.PathEscape(id), nil, &out, defaultTimeout)
+	return out, err
+}
+
 // ListPlans returns every plan.
 func (c *Client) ListPlans(ctx context.Context) (service.PlanList, error) {
 	var out service.PlanList

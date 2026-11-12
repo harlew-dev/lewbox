@@ -1,6 +1,10 @@
 package docs_test
 
 import (
+	"io/fs"
+	"os"
+	"path"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -175,13 +179,35 @@ func TestPagePathNormalisation(t *testing.T) {
 }
 
 func TestEmbeddedDocs(t *testing.T) {
-	site, err := docs.Load(docsfs.FS)
+	consumer, platform, err := docs.LoadBooks(docsfs.FS)
 	if err != nil {
-		t.Fatalf("Load embedded docs: %v", err)
+		t.Fatalf("LoadBooks: %v", err)
 	}
+
+	checkBook(t, consumer, []string{"Get started", "Sandboxes", "Usage", "Reference"})
+	checkBook(t, platform, []string{"Get started", "Set up", "Clusters", "Accounts", "Operations", "Reference"})
+
+	if _, ok := consumer.Page("reference/management-api"); !ok {
+		t.Error("consumer reference/management-api is missing")
+	}
+	if _, ok := platform.Page("reference/cli"); !ok {
+		t.Error("platform reference/cli is missing")
+	}
+	if _, ok := consumer.Page("reference/cli"); ok {
+		t.Error("consumer book has the platform CLI reference")
+	}
+	if _, ok := platform.Page("sandboxes/api-keys"); ok {
+		t.Error("platform book has a consumer page")
+	}
+}
+
+// checkBook fails when a book's nav is empty, a nav item points at no page, or
+// a required group is missing.
+func checkBook(t *testing.T, site *docs.Site, wantGroups []string) {
+	t.Helper()
 	nav := site.Nav()
 	if len(nav.Groups) == 0 {
-		t.Fatal("embedded docs have an empty nav")
+		t.Fatal("book has an empty nav")
 	}
 	groups := make(map[string]bool)
 	resolved := 0
@@ -200,15 +226,71 @@ func TestEmbeddedDocs(t *testing.T) {
 	if resolved == 0 {
 		t.Fatal("no nav item resolves to a page")
 	}
-	for _, want := range []string{"Get started", "Reference"} {
+	for _, want := range wantGroups {
 		if !groups[want] {
 			t.Errorf("nav is missing group %q", want)
 		}
 	}
-	if _, ok := site.Page("reference/cli"); !ok {
-		t.Error("reference/cli is missing")
+}
+
+func TestCrossBookLinksLoad(t *testing.T) {
+	consumer, platform, err := docs.LoadBooks(fstest.MapFS{
+		"consumer/README.md":     {Data: []byte("---\ntitle: Customer\n---\n\nSee the [platform book](../platform/README.md).\n")},
+		"consumer/quickstart.md": {Data: []byte("---\ntitle: Quickstart\n---\n\nBack to the [platform book](../platform/README.md).\n")},
+		"platform/README.md":     {Data: []byte("---\ntitle: Platform\n---\n\nSee the [customer book](../consumer/README.md).\n")},
+		"platform/install.md":    {Data: []byte("---\ntitle: Install\n---\n\nBack to the [customer book](../consumer/README.md).\n")},
+	})
+	if err != nil {
+		t.Fatalf("LoadBooks: %v", err)
 	}
-	if _, ok := site.Page("design/archive/cli-first-draft"); !ok {
-		t.Error("design/archive/cli-first-draft is missing")
+	if len(consumer.Nav().Groups) != 0 {
+		t.Fatalf("consumer nav = %+v", consumer.Nav().Groups)
+	}
+	page, ok := consumer.Page("quickstart")
+	if !ok {
+		t.Fatal("consumer quickstart missing")
+	}
+	if !strings.Contains(page.Markdown, "../platform/README.md") {
+		t.Fatalf("cross-book link changed: %q", page.Markdown)
+	}
+	if _, ok := platform.Page("install"); !ok {
+		t.Fatal("platform install missing")
+	}
+}
+
+func TestRelativeMarkdownLinksResolve(t *testing.T) {
+	root := os.DirFS("../..")
+	link := regexp.MustCompile(`\]\(([^)\s]+)\)`)
+	for _, book := range []string{"docs/consumer", "docs/platform"} {
+		err := fs.WalkDir(root, book, func(name string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".md") {
+				return err
+			}
+			raw, err := fs.ReadFile(root, name)
+			if err != nil {
+				return err
+			}
+			for _, match := range link.FindAllStringSubmatch(string(raw), -1) {
+				target := match[1]
+				if strings.Contains(target, "://") || strings.HasPrefix(target, "#") ||
+					strings.HasPrefix(target, "/") || strings.HasPrefix(target, "mailto:") {
+					continue
+				}
+				if i := strings.IndexByte(target, '#'); i >= 0 {
+					target = target[:i]
+				}
+				if target == "" {
+					continue
+				}
+				resolved := path.Join(path.Dir(name), target)
+				if _, err := fs.Stat(root, resolved); err != nil {
+					t.Errorf("%s: link %q does not resolve", name, match[1])
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", book, err)
+		}
 	}
 }

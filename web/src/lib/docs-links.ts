@@ -1,5 +1,8 @@
-// Resolve a markdown link found on a docs page. The Go server serves docs
-// from the repository's docs/ folder, and the home page is README.md.
+// Resolve a markdown link found on a docs page. The Go server serves two
+// books from the repository's docs/ folder: consumer/ at /docs and
+// platform/ at /platform. Each book's README.md is its home page.
+
+import type { DocsBook } from './api'
 
 export type DocsLink =
   | { kind: 'internal'; to: string }
@@ -9,11 +12,25 @@ export type DocsLink =
 const REPO_BLOB = 'https://github.com/harlew-dev/lewbox/blob/main/'
 const SCHEME = /^[a-z][a-z\d+.-]*:/i
 
+const books: Record<DocsBook, string> = {
+  consumer: '/docs',
+  platform: '/platform',
+}
+
+function bookFor(dir: string): DocsBook | null {
+  if (dir === 'consumer' || dir === 'platform') return dir
+  return null
+}
+
 function currentFile(pagePath: string): string {
   return pagePath === '' ? 'README.md' : `${pagePath}.md`
 }
 
-export function resolveDocsLink(href: string, pagePath: string): DocsLink {
+export function resolveDocsLink(
+  href: string,
+  pagePath: string,
+  book: DocsBook = 'consumer',
+): DocsLink {
   if (href.startsWith('#')) return { kind: 'hash', href }
 
   if (href.startsWith('//') || SCHEME.test(href)) {
@@ -29,9 +46,9 @@ export function resolveDocsLink(href: string, pagePath: string): DocsLink {
 
   if (relative === '') return { kind: 'hash', href: hash || '#' }
 
-  // Start at the docs folder's place in the repository so a link can be
-  // recognised as either a docs page or a file elsewhere in the repo.
-  const parts = ['docs', ...currentFile(pagePath).split('/').slice(0, -1)]
+  // Start at the page's place in the repository so a link can be recognised
+  // as either a page in one of the books or a file elsewhere in the repo.
+  const parts = ['docs', book, ...currentFile(pagePath).split('/').slice(0, -1)]
   for (const segment of relative.split('/')) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') {
@@ -41,15 +58,16 @@ export function resolveDocsLink(href: string, pagePath: string): DocsLink {
     parts.push(segment)
   }
 
-  if (parts[0] !== 'docs' || parts.length === 1) {
+  const target = parts[1] ? bookFor(parts[1]) : null
+  if (parts[0] !== 'docs' || target === null || parts.length === 2) {
     return { kind: 'external', href: `${REPO_BLOB}${parts.join('/')}${query}${hash}` }
   }
 
-  let docsPath = parts.slice(1).join('/')
+  let docsPath = parts.slice(2).join('/')
   if (docsPath === 'README.md') docsPath = ''
   else if (docsPath.endsWith('/README.md')) docsPath = docsPath.slice(0, -'/README.md'.length)
   else if (docsPath.endsWith('.md')) docsPath = docsPath.slice(0, -'.md'.length)
 
-  const to = `/docs${docsPath ? `/${docsPath}` : ''}${query}${hash}`
+  const to = `${books[target]}${docsPath ? `/${docsPath}` : ''}${query}${hash}`
   return { kind: 'internal', to }
 }

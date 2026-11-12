@@ -1,13 +1,10 @@
 import {
   Button,
-  CheckboxField,
   Divider,
   ErrorNotice,
   Field,
-  Fieldset,
   Input,
   Label,
-  Legend,
   Listbox,
   ListboxOption,
   ListSkeleton,
@@ -25,7 +22,7 @@ import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
 const signupOptions: { value: api.SignupMode; label: string; description: string }[] = [
-  { value: 'closed', label: 'Closed', description: 'Only you add customers, with New customer.' },
+  { value: 'closed', label: 'Closed', description: 'Only you add workspaces, with New workspace.' },
   { value: 'approval', label: 'Approval', description: 'Anyone can sign up; their workspace waits until you approve it.' },
   { value: 'open', label: 'Open', description: 'Anyone can sign up and start at once.' },
 ]
@@ -56,10 +53,6 @@ export function AdminSettingsPage() {
   )
 }
 
-function sameRegions(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((slug) => b.includes(slug))
-}
-
 function SettingsForm({
   settings,
   plans,
@@ -74,22 +67,22 @@ function SettingsForm({
   const instance = useInstance()
   const [name, setName] = useState(settings.instance_name)
   const [signup, setSignup] = useState(settings.signup)
-  // '' is no default plan.
+  // '' is no default plan or region.
   const [defaultPlan, setDefaultPlan] = useState(settings.default_plan ?? '')
-  const [defaultRegions, setDefaultRegions] = useState(settings.default_regions)
-  // Regions that aren't ready stay listed while they are defaults.
+  const [defaultRegion, setDefaultRegion] = useState(settings.default_region ?? '')
+  // A region that isn't ready stays listed while it is the default.
   const options = [
     ...regions.map((region) => ({ slug: region.slug, name: region.name })),
-    ...settings.default_regions
-      .filter((slug) => !regions.some((region) => region.slug === slug))
-      .map((slug) => ({ slug, name: slug })),
+    ...(settings.default_region && !regions.some((region) => region.slug === settings.default_region)
+      ? [{ slug: settings.default_region, name: settings.default_region }]
+      : []),
   ]
 
   const changes: api.SettingsUpdate = {}
   if (name.trim() !== settings.instance_name) changes.instance_name = name.trim()
   if (signup !== settings.signup) changes.signup = signup
   if (defaultPlan !== (settings.default_plan ?? '')) changes.default_plan = defaultPlan || 'none'
-  if (!sameRegions(defaultRegions, settings.default_regions)) changes.default_regions = defaultRegions
+  if (defaultRegion !== (settings.default_region ?? '')) changes.default_region = defaultRegion || 'none'
   const changed = Object.keys(changes).length > 0
 
   const save = useAction(() => api.updateSettings(changes), {
@@ -106,13 +99,9 @@ function SettingsForm({
     }
   }
 
-  function toggle(slug: string, on: boolean) {
-    setDefaultRegions((before) => (on ? [...before.filter((other) => other !== slug), slug] : before.filter((other) => other !== slug)))
-  }
-
   return (
     <form onSubmit={submit}>
-      <SettingsSection title="Instance name" description="Shown to customers on every page.">
+      <SettingsSection title="Instance name" description="Shown to workspace members on every page.">
         <Field disabled={save.busy}>
           <Label className="sr-only">Instance name</Label>
           <Input required value={name} onChange={(event) => setName(event.currentTarget.value)} />
@@ -125,7 +114,7 @@ function SettingsForm({
       </SettingsSection>
 
       <Divider soft className="my-10" />
-      <SettingsSection title="New sign-ups" description="The plan a new workspace gets in each default region.">
+      <SettingsSection title="New workspaces" description="The plan a new workspace gets in the default region.">
         <div className="space-y-6">
           <Field disabled={save.busy}>
             <Label>Default plan</Label>
@@ -138,26 +127,20 @@ function SettingsForm({
               ))}
             </Listbox>
           </Field>
-          <Fieldset disabled={save.busy}>
-            <Legend>Default regions</Legend>
-            {options.length === 0 ? (
-              <Text className="mt-2">No region is ready yet.</Text>
-            ) : (
-              <div className="mt-3 space-y-3">
-                {options.map((region) => (
-                  <CheckboxField
-                    key={region.slug}
-                    checked={defaultRegions.includes(region.slug)}
-                    onChange={(on) => toggle(region.slug, on)}
-                  >
-                    {region.name}
-                  </CheckboxField>
-                ))}
-              </div>
-            )}
-          </Fieldset>
-          {(defaultPlan === '' || defaultRegions.length === 0) && (
-            <Text>New sign-ups get no region; they wait until you add one.</Text>
+          <Field disabled={save.busy}>
+            <Label>Default region</Label>
+            <Listbox value={defaultRegion} onChange={setDefaultRegion}>
+              <ListboxOption value="">None</ListboxOption>
+              {options.map((region) => (
+                <ListboxOption key={region.slug} value={region.slug}>
+                  {region.name}
+                </ListboxOption>
+              ))}
+            </Listbox>
+          </Field>
+          {options.length === 0 && <Text>No region is ready yet.</Text>}
+          {(defaultPlan === '' || defaultRegion === '') && (
+            <Text>New workspaces get no region; they wait until you assign one.</Text>
           )}
         </div>
       </SettingsSection>

@@ -258,6 +258,36 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 **Caveats.** A production app using a departed member's key stops working. Create long-lived keys from an account that will stay.
 
+## D31. A workspace is in one region (your call, 2026-11-12)
+
+**Chosen.** A workspace has at most one subscription: one plan in one region. Moving it means removing the current subscription first (`409` otherwise). The database enforces it with a unique index on `subscriptions(org_id)`; the instance setting is `default_region` (one cluster slug or null). A sandbox key without a region uses the workspace's region.
+
+**Why.** You want a workspace to be a simple unit with one place its sandboxes live, not a fleet scattered across regions. It also matches the portal, which has no region pickers once a workspace has one region.
+
+**Other options.** Keep several regions and make the portal pick one per action. That is what D20 built; it makes plans, limits, usage and the UI more complicated than the product needs.
+
+**Caveats.** An existing workspace with subscriptions in several regions keeps only its oldest one; the migration deletes the rest. Leaving a region still revokes its keys and stops its sandboxes.
+
+## D32. Users create their own workspaces; sign-up creates only the account (your call, 2026-11-12)
+
+**Chosen.** `POST /v0/auth/signup` creates an account and nothing else. A signed-in account then creates a workspace with `POST /v0/organizations`, becoming its owner: active when sign-up is `open`, `pending` under `approval`, refused when `closed`. An instance admin can create a workspace for any owner and does not apply the default plan. Non-admins get the default plan in the default region when both are set, and may own at most 10 workspaces.
+
+**Why.** Sign-up creating a workspace made the web app guess a name and hid the choice from the customer. Separating the two lets onboarding ask for the workspace, and gives closed instances a way to let someone in without an operator creating the account by hand.
+
+**Other options.** Keep the workspace in the sign-up form and create it in one call. Fewer requests, but it couples account creation to workspace creation and leaves a half-created account on failure.
+
+**Caveats.** A new account has nowhere to go until it creates a workspace, so the web app sends it to onboarding. Setup links, added later, consume the link when the workspace is created.
+
 ---
 
 *Later decisions are appended below as they are made.*
+
+## D33. Setup links (your call, 2026-11-12)
+
+**Chosen.** An instance admin creates a single-use link for one plan in one region. Sign-up with its token works even when sign-up is `closed` and claims the link; creating a workspace with the same token consumes it in one conditional `UPDATE … RETURNING`, gives that workspace the link's plan in its region, and makes it active in any mode. Only a hex SHA-256 of the `lbs_` token is stored, and the token is shown once at creation.
+
+**Why.** Closed instances had no way to let a customer in without the operator creating the account and workspace by hand. A link carries the plan and region, so the customer's onboarding needs no operator step, and the two-stage claim/consume records who joined without letting one link create several workspaces.
+
+**Other options.** A reusable invite code, or a public sign-up flow with operator approval. A reusable code loses the plan/region binding and the per-customer record; approval adds a manual step the link is meant to remove.
+
+**Caveats.** The link is bound to one plan and region; moving the workspace later is still an operator action. A claimed link whose account never creates a workspace stays `claimed` until it expires, and the token cannot be handed to someone else.

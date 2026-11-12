@@ -57,7 +57,7 @@ func TestCreateOrganization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if org.Slug != "acme" || org.Name != "acme" || org.Status != "active" || org.Members != 1 || org.Role != roleOwner {
+	if org.Slug != "acme" || org.Name != "acme" || org.Status != "active" || org.Members != 1 || org.Role != roleOwner || org.Region != nil {
 		t.Errorf("org = %+v", org)
 	}
 	// Local mode has no account to make owner.
@@ -65,6 +65,13 @@ func TestCreateOrganization(t *testing.T) {
 	if err != nil || local.Members != 0 {
 		t.Errorf("local create = %+v, %v", local, err)
 	}
+	// A missing slug is generated from the name.
+	generated, err := s.CreateOrganization(root, CreateOrganizationRequest{Name: "Acme Labs"})
+	if err != nil || !strings.HasPrefix(generated.Slug, "acme-labs-") || generated.Name != "Acme Labs" {
+		t.Errorf("generated slug = %+v, %v", generated, err)
+	}
+	_, err = s.CreateOrganization(root, CreateOrganizationRequest{})
+	wantCode(t, err, CodeInvalid)
 
 	_, err = s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
 	wantCode(t, err, CodeConflict)
@@ -77,6 +84,7 @@ func TestCreateOrganization(t *testing.T) {
 	if _, err := s.GetOrganization(root, "x"); err == nil {
 		t.Error("an organization was created for an unknown owner")
 	}
+	// Sign-up is closed, so a plain account cannot create one yet.
 	_, err = s.CreateOrganization(userCtx(t, s, "user@example.com"), CreateOrganizationRequest{Slug: "mine"})
 	wantCode(t, err, CodeForbidden)
 }

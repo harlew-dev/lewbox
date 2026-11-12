@@ -48,6 +48,9 @@ type Backend interface {
 	ListRegions(ctx context.Context, org string) (service.RegionList, error)
 	GetSettings(ctx context.Context) (service.Settings, error)
 	UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error)
+	CreateSetupLink(ctx context.Context, req service.CreateSetupLinkRequest) (service.SetupLink, error)
+	ListSetupLinks(ctx context.Context) (service.SetupLinkList, error)
+	RevokeSetupLink(ctx context.Context, id string) (service.SetupLink, error)
 	ListPlans(ctx context.Context) (service.PlanList, error)
 	GetPlan(ctx context.Context, ref string) (service.Plan, error)
 	CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error)
@@ -244,6 +247,21 @@ func (l Local) GetSettings(ctx context.Context) (service.Settings, error) {
 // UpdateSettings changes the instance settings.
 func (l Local) UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error) {
 	return l.Svc.UpdateSettings(l.withPrincipal(ctx), req)
+}
+
+// CreateSetupLink mints a single-use onboarding link.
+func (l Local) CreateSetupLink(ctx context.Context, req service.CreateSetupLinkRequest) (service.SetupLink, error) {
+	return l.Svc.CreateSetupLink(l.withPrincipal(ctx), req)
+}
+
+// ListSetupLinks returns every setup link, newest first.
+func (l Local) ListSetupLinks(ctx context.Context) (service.SetupLinkList, error) {
+	return l.Svc.ListSetupLinks(l.withPrincipal(ctx))
+}
+
+// RevokeSetupLink deletes an unused setup link.
+func (l Local) RevokeSetupLink(ctx context.Context, id string) (service.SetupLink, error) {
+	return l.Svc.RevokeSetupLink(l.withPrincipal(ctx), id)
 }
 
 // ListPlans returns every plan.

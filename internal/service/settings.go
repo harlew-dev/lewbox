@@ -13,20 +13,19 @@ import (
 
 // Settings are the instance-wide options an operator controls.
 type Settings struct {
-	InstanceName   string   `json:"instance_name"`
-	Signup         string   `json:"signup"`          // open | approval | closed
-	DefaultPlan    *string  `json:"default_plan"`    // a plan slug; nil = none
-	DefaultRegions []string `json:"default_regions"` // cluster slugs; [] = none
+	InstanceName  string  `json:"instance_name"`
+	Signup        string  `json:"signup"`         // open | approval | closed
+	DefaultPlan   *string `json:"default_plan"`   // a plan slug; nil = none
+	DefaultRegion *string `json:"default_region"` // a cluster slug; nil = none
 }
 
-// UpdateSettingsRequest changes the fields that are set. DefaultPlan is a plan
-// slug, or "none" to clear it; DefaultRegions is a list of cluster slugs, and
-// an empty list clears it.
+// UpdateSettingsRequest changes the fields that are set. DefaultPlan and
+// DefaultRegion are slugs, or "none" to clear them.
 type UpdateSettingsRequest struct {
-	InstanceName   *string   `json:"instance_name,omitempty"`
-	Signup         *string   `json:"signup,omitempty"`
-	DefaultPlan    *string   `json:"default_plan,omitempty"`
-	DefaultRegions *[]string `json:"default_regions,omitempty"`
+	InstanceName  *string `json:"instance_name,omitempty"`
+	Signup        *string `json:"signup,omitempty"`
+	DefaultPlan   *string `json:"default_plan,omitempty"`
+	DefaultRegion *string `json:"default_region,omitempty"`
 }
 
 // Instance is the public description of this Lewbox instance.
@@ -55,20 +54,20 @@ func (s *Service) GetSettings(ctx context.Context) (Settings, error) {
 // and the public instance route need them too. The stored default plan is an
 // ID; the response and the rest of the service use its slug.
 func (s *Service) getSettings(ctx context.Context) (Settings, error) {
-	out := Settings{InstanceName: defaultInstanceName, Signup: signupClosed, DefaultRegions: []string{}}
+	out := Settings{InstanceName: defaultInstanceName, Signup: signupClosed}
 	rows, err := s.q.ListSettings(ctx)
 	if err != nil {
 		return Settings{}, fmt.Errorf("list settings: %w", err)
 	}
 	planID := ""
 	for _, row := range rows {
-		if row.Key == "default_regions" {
-			var regions []string
-			if err := json.Unmarshal([]byte(row.Value), &regions); err != nil {
+		if row.Key == "default_region" {
+			var region *string
+			if err := json.Unmarshal([]byte(row.Value), &region); err != nil {
 				return Settings{}, fmt.Errorf("decode setting %q: %w", row.Key, err)
 			}
-			if regions != nil {
-				out.DefaultRegions = regions
+			if region != nil && *region != "" {
+				out.DefaultRegion = region
 			}
 			continue
 		}
@@ -111,8 +110,8 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 	if _, err := requireAdmin(ctx); err != nil {
 		return Settings{}, err
 	}
-	if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegions == nil {
-		return Settings{}, invalid("nothing to change: set instance_name, signup, default_plan or default_regions")
+	if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegion == nil {
+		return Settings{}, invalid("nothing to change: set instance_name, signup, default_plan or default_region")
 	}
 	name := ""
 	if req.InstanceName != nil {
@@ -143,19 +142,15 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 			}
 		}
 	}
-	regions := []string{}
-	if req.DefaultRegions != nil {
-		seen := map[string]bool{}
-		for _, raw := range *req.DefaultRegions {
-			slug := strings.ToLower(strings.TrimSpace(raw))
-			if slug == "" || strings.EqualFold(slug, "none") || seen[slug] {
-				continue
-			}
-			if _, err := s.findCluster(ctx, slug); err != nil {
+	region := ""
+	if req.DefaultRegion != nil {
+		slug := strings.ToLower(strings.TrimSpace(*req.DefaultRegion))
+		if slug != "" && !strings.EqualFold(slug, "none") {
+			cluster, err := s.findCluster(ctx, slug)
+			if err != nil {
 				return Settings{}, err
 			}
-			seen[slug] = true
-			regions = append(regions, slug)
+			region = cluster.Slug
 		}
 	}
 	if req.InstanceName != nil {
@@ -177,8 +172,12 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 			return Settings{}, err
 		}
 	}
-	if req.DefaultRegions != nil {
-		if err := s.setSetting(ctx, "default_regions", regions); err != nil {
+	if req.DefaultRegion != nil {
+		var value any
+		if region != "" {
+			value = region
+		}
+		if err := s.setSetting(ctx, "default_region", value); err != nil {
 			return Settings{}, err
 		}
 	}

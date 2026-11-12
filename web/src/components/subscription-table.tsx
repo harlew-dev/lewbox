@@ -3,9 +3,9 @@ import type { ReactNode } from 'react'
 import type * as api from '../lib/api'
 import { formatLimit, formatMemory, formatNumber } from '../lib/format'
 
-// Region, plan and the limits there. `reports` (the limits report by region
+// Cluster, plan and the limits there. `reports` (the limits report by region
 // slug) puts what is in use now beside each limit, and says when the limits
-// couldn't be pushed to the region; `actions` adds a last cell per row.
+// couldn't be pushed to the cluster; `actions` adds a last cell per row.
 export function SubscriptionTable({
   subscriptions,
   reports,
@@ -26,7 +26,7 @@ export function SubscriptionTable({
     <Table>
       <TableHead>
         <TableRow>
-          <TableHeader>Region</TableHeader>
+          <TableHeader>Cluster</TableHeader>
           <TableHeader>Plan</TableHeader>
           <TableHeader className="text-right">Sandboxes</TableHeader>
           <TableHeader className="text-right">vCPUs</TableHeader>

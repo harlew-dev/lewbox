@@ -142,7 +142,7 @@ export function UserDetailPage() {
               {memberships.map((org) => (
                 <TableRow key={org.id}>
                   <TableCell className="font-medium">
-                    <TextLink href={`/admin/customers/${encodeURIComponent(org.slug)}`}>{org.name}</TextLink>
+                    <TextLink href={`/admin/workspaces/${encodeURIComponent(org.slug)}`}>{org.name}</TextLink>
                   </TableCell>
                   <TableCell>{org.role && <RoleBadge role={org.role} />}</TableCell>
                 </TableRow>

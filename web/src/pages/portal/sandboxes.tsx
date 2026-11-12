@@ -5,7 +5,6 @@ import * as api from '../../lib/api'
 import { SandboxFilters } from '../../components/sandbox-filters'
 import { SandboxTable } from '../../components/sandbox-table'
 import { Snapshots } from '../../components/snapshot-table'
-import { useRegions, type Regions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
@@ -21,46 +20,46 @@ export function SandboxesPage() {
   const tab = tabFrom(searchParams, tabs)
   useDocumentTitle(tab === 'snapshots' ? 'Snapshots' : 'Sandboxes')
   const { org, can } = usePortalOrg()
-  const regions = useRegions(org.slug)
+  const regionName = (slug: string) => org.region?.name ?? slug
 
   return (
     <>
       <PageHeader title="Sandboxes" />
       <PageTabs label="Sandbox views" tabs={tabs} current={tab} className="mb-8" />
       {tab === 'sandboxes' ? (
-        <SandboxList regions={regions} />
+        <SandboxList />
       ) : (
         <Snapshots
           org={org.slug}
           canDelete={can.sandboxes}
-          regionName={regions.name}
+          regionName={regionName}
           empty={<EmptyState title="No snapshots" description="Snapshots you take show up here." />}
+          showRegion={false}
         />
       )}
     </>
   )
 }
 
-function SandboxList({ regions }: { regions: Regions }) {
+function SandboxList() {
   const { org, can } = usePortalOrg()
-  const [region, setRegion] = useState('')
   const [status, setStatus] = useState('')
-  const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug, region, status }), [org.slug, region, status], {
+  const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug, status }), [org.slug, status], {
     every: 10_000,
   })
   const list = sandboxes.data?.data ?? []
-  const filtered = region !== '' || status !== ''
+  const filtered = status !== ''
 
   return (
     <>
-      <SandboxFilters regions={regions.list} region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
+      <SandboxFilters status={status} onStatus={setStatus} />
       {sandboxes.loading && !sandboxes.data ? (
         <ListSkeleton label="Loading sandboxes" rows={4} />
       ) : sandboxes.error.message ? (
         <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
       ) : list.length === 0 ? (
         filtered ? (
-          <EmptyState title="No sandboxes match" description="Try another region or status." />
+          <EmptyState title="No sandboxes match" description="Try another status." />
         ) : (
           <EmptyState
             title="No sandboxes"
@@ -71,10 +70,11 @@ function SandboxList({ regions }: { regions: Regions }) {
       ) : (
         <SandboxTable
           sandboxes={list}
-          regionName={regions.name}
+          regionName={(slug) => org.region?.name ?? slug}
           canChange={can.sandboxes}
           org={org.slug}
           onChanged={sandboxes.refresh}
+          showRegion={false}
         />
       )}
     </>

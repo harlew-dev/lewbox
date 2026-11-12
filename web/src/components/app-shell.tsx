@@ -29,9 +29,20 @@ export function useIsActive() {
     exact ? pathname === href : pathname === href || pathname.startsWith(`${href}/`)
 }
 
-// The sidebar layout both sides of the app share: the logo, `header` under
-// it, the side's `nav`, Docs, and the account menu.
-export function AppShell({ header, nav, children }: { header?: ReactNode; nav: ReactNode; children: ReactNode }) {
+// The sidebar layout both sides of the app share: the logo (or `header` in
+// its place), the side's `nav`, Docs, and the account menu. `navbar` sits
+// beside the account menu on phones.
+export function AppShell({
+  header,
+  navbar,
+  nav,
+  children,
+}: {
+  header?: ReactNode
+  navbar?: ReactNode
+  nav: ReactNode
+  children: ReactNode
+}) {
   const { user, signOut } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -63,16 +74,15 @@ export function AppShell({ header, nav, children }: { header?: ReactNode; nav: R
     <Sidebar>
       <SidebarHeader>
         <div className="flex items-center justify-between gap-2">
-          <BrandLogo href={homeFor(user)} />
+          {header ?? <BrandLogo href={homeFor(user)} />}
           <SidebarToggle />
         </div>
-        {header}
       </SidebarHeader>
       <SidebarBody>
         {nav}
         <SidebarSpacer />
         <SidebarSection>
-          <SidebarItem href="/docs">
+          <SidebarItem href={user?.instance_admin ? '/platform' : '/docs'}>
             <BookOpenIcon data-slot="icon" />
             <SidebarLabel>Docs</SidebarLabel>
           </SidebarItem>
@@ -84,15 +94,18 @@ export function AppShell({ header, nav, children }: { header?: ReactNode; nav: R
     </Sidebar>
   )
 
-  const navbar = (
+  const navbarElement = (
     <Navbar>
       <NavbarSpacer />
-      <NavbarSection>{accountMenu('navbar')}</NavbarSection>
+      <NavbarSection className="min-w-0">
+        {navbar}
+        {accountMenu('navbar')}
+      </NavbarSection>
     </Navbar>
   )
 
   return (
-    <SidebarLayout navbar={navbar} sidebar={sidebar} pathname={location.pathname} storageKey="lewbox:sidebar">
+    <SidebarLayout navbar={navbarElement} sidebar={sidebar} pathname={location.pathname} storageKey="lewbox:sidebar">
       <PageTransition key={location.pathname}>{children}</PageTransition>
       <Toaster />
     </SidebarLayout>

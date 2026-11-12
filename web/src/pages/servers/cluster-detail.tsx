@@ -135,6 +135,10 @@ export function ClusterDetailPage() {
 
       <ErrorNotice error={check.error} className="mb-8" />
 
+      <ClusterMetrics cluster={detail.slug} />
+
+      <ClusterUptime cluster={detail.slug} />
+
       <Subheading className="mt-12">Summary</Subheading>
       <Divider className="mt-4" />
       <DescriptionList>
@@ -165,8 +169,6 @@ export function ClusterDetailPage() {
           {relativeTime(detail.checked_at)}
         </DescriptionDetails>
       </DescriptionList>
-
-      <ClusterUptime cluster={detail.slug} />
 
       <div className="mt-12 flex items-center gap-3">
         <Subheading>Checks</Subheading>
@@ -254,8 +256,6 @@ export function ClusterDetailPage() {
           </Table>
         )}
       </div>
-
-      <ClusterMetrics cluster={detail.slug} />
 
       <ConfirmationDialog
         open={confirmOpen}

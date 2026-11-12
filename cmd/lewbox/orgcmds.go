@@ -57,22 +57,23 @@ func newOrgCmd(a *app) *cobra.Command {
 		Short:   "Manage organizations",
 	}
 
-	var createName, createOwner string
+	var createName, createOwner, createSetupToken string
 	create := &cobra.Command{
-		Use:   "create <slug>",
+		Use:   "create [slug]",
 		Short: "Create an organization (POST /v0/organizations)",
-		Long:  "Create an organization. Instance admins only. The owner defaults to you (none in local mode). Give it a plan in a region with `lewbox subscription set`.",
-		Args:  usageArgs(cobra.ExactArgs(1)),
+		Long:  "Create an organization. Anyone may create their own while sign-up is open or by approval, or with a setup link's token. Instance admins may create one for another owner. The slug is generated from the name when it is left out. Give it a plan in a region with `lewbox subscription set`.",
+		Args:  usageArgs(cobra.MaximumNArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-			return b.CreateOrganization(ctx, service.CreateOrganizationRequest{
-				Slug:  args[0],
-				Name:  createName,
-				Owner: createOwner,
-			})
+			req := service.CreateOrganizationRequest{Name: createName, Owner: createOwner, SetupToken: createSetupToken}
+			if len(args) == 1 {
+				req.Slug = args[0]
+			}
+			return b.CreateOrganization(ctx, req)
 		}),
 	}
-	create.Flags().StringVar(&createName, "name", "", "a display name (default: the slug)")
-	create.Flags().StringVar(&createOwner, "owner", "", "the first owner's email (default: you)")
+	create.Flags().StringVar(&createName, "name", "", "a display name (default: the slug; required without a slug)")
+	create.Flags().StringVar(&createOwner, "owner", "", "the first owner's email (default: you; instance admins only)")
+	create.Flags().StringVar(&createSetupToken, "setup-token", "", "a setup link's token, for a plan in its region even when sign-up is closed")
 
 	var listUser, listStatus string
 	list := &cobra.Command{

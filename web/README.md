@@ -50,12 +50,18 @@ A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider
 
 The app has two sides, routed in `src/app.tsx` (`src/main.tsx` only mounts it):
 
-- the **portal** at `/` for customers: Home, Sandboxes (with Snapshots as a second tab), API keys, Usage and Team (which also renames the workspace), in `src/pages/portal/`. `/snapshots` and `/settings` redirect to their new places. Plan limits show only on Home, and customers see region names, never slugs. `PortalRoute` loads the current organization, shows the pending or suspended banner, and hands `{org, can, reload}` to the pages through `usePortalOrg()`. The current organization is the one picked in the sidebar's switcher (remembered in `localStorage`), otherwise the first.
-- the **console** at `/admin` for instance admins: Overview, Customers, Sandboxes, Plans, Servers, Users and Settings, in `src/pages/admin/`, `src/pages/servers/` and `src/pages/users/`. `RequireAdmin` shows anyone else the not-found page.
+- the **portal** at `/` for customers: Home, Sandboxes (with Snapshots as a second tab), and a **Manage** group with API keys, Usage and Plan & Billing (`/plan`), in `src/pages/portal/`. The sidebar header is the workspace switcher (`src/components/workspace-switcher.tsx`): Workspace settings, every workspace the member belongs to (a check on the current one), New workspace… and, for instance admins, the operator console. Workspace settings live under `/settings` in `src/pages/portal/settings/`, with General, Members and API keys (`/settings/api-keys`, only for those who may manage keys); `/team` redirects to `/settings/members`. Customers see region names, never slugs, and a workspace has exactly one region, so portal pages have no region selectors. `PortalRoute` loads the current organization, shows the pending or suspended banner, and hands `{org, can, reload}` to the pages through `usePortalOrg()`. The current organization is the one picked in the switcher (remembered in `localStorage`), otherwise the first.
+- the **console** at `/admin` for instance admins: Home (the Overview page), Workspaces and Users, then the groups **Compute** (Sandboxes, Servers) and **Manage** (Plans, Settings), in `src/pages/admin/`, `src/pages/servers/` and `src/pages/users/`. Workspaces replaced the old Customers pages (`/admin/workspaces`, `/admin/workspaces/:org`); `/admin/customers…` redirects there. `RequireAdmin` shows anyone else the not-found page.
 
-Instance admins land on `/admin`; one who belongs to no organization is sent there from `/` too. The old console paths (`/servers…`, `/clusters…`, `/nodes`, `/users…`, `/organizations…`) redirect under `/admin` for admins. Customers never see the words cluster, node or server: clusters are **regions**. People read **workspace** wherever the API and code say organization (`/v0/organizations`, `api.Organization`, `org`). A workspace has a plan per region (a subscription the operator assigns); with none, the portal says the provider will enable one. There is no billing anywhere: usage is shown in vCPU-hours, GiB-hours and sandbox-hours only.
+Instance admins land on `/admin`; one who belongs to no organization is sent there from `/` too. Everyone else with no workspace is sent to `/onboarding`, where they create one; a user who has a workspace and opens `/onboarding` goes to `/`. The old console paths (`/servers…`, `/clusters…`, `/nodes`, `/users…`, `/organizations…`) redirect under `/admin` for admins. Customers never see the words cluster, node or server: clusters are **regions**. People read **workspace** wherever the API and code say organization (`/v0/organizations`, `api.Organization`, `org`). A workspace has one plan in one region (a subscription the operator assigns); with none, the portal says the provider will enable one. There is no billing anywhere: usage is shown in vCPU-hours, GiB-hours and sandbox-hours only, and Plan & Billing just names the plan and its limits.
 
 `InstanceProvider` (`src/lib/instance.tsx`) loads `/v0/instance` once: the name in the sidebar and whether sign-up is open (the `/signup` page and the link on `/login`).
+
+## Onboarding and setup links
+
+Sign-up creates only the account: `/signup` sends the new user to `/onboarding` with no workspace. Onboarding (`src/pages/onboarding/`) is outside the portal layout and uses the library's `CenteredLayout` with the logo and an account menu (signed in as, sign out). Its form creates the first workspace and opens the short `/onboarding/getting-started` carousel (`src/components/carousel.tsx`). When sign-up is closed and the visitor has no setup link, onboarding only says to ask the operator for one.
+
+A setup link is a public page at `/setup/<token>` (`src/pages/setup.tsx`): it asks `GET /v0/setup/<token>` for the plan and region names, then signs the visitor up with the token (or lets a signed-in visitor continue). The token is remembered in `sessionStorage` under `lewbox:setup` so a reload keeps it, and onboarding passes it as `setup_token` when creating the workspace. Instance admins create and revoke links on the Workspaces page's **Setup links** tab (`src/pages/admin/setup-links.tsx`); the full URL is shown once, in a `SecretReveal`.
 
 ## Content Security Policy
 
@@ -70,14 +76,14 @@ Adding a third-party origin means changing the policy in `internal/webui/webui.g
 
 ## Documentation rendering
 
-The Go server parses the embedded `docs/` folder at startup and exposes:
+The Go server parses the two embedded documentation books at startup and exposes:
 
-- `GET /v0/docs` — the nav, built from the `##` sections and table rows in `docs/README.md`;
-- `GET /v0/docs/<path>` — one page as title, description, markdown, previous and next.
+- the customer book: `GET /v0/docs` (nav) and `GET /v0/docs/<path>` (one page);
+- the platform book: `GET /v0/platform` (nav) and `GET /v0/platform/<path>` (one page).
 
-`src/pages/docs.tsx` fetches a page and renders it with `react-markdown` and `remark-gfm`. There is no `rehype-raw`, so raw HTML in markdown is not rendered as HTML. `src/lib/docs-markdown.tsx` supplies the heading ids (one `github-slugger` per page, the ids GitHub would produce), the headings for the `On this page` list, code blocks (the library's `CodeBlock`, with a copy button), GitHub-style alert blocks, and the link component. The typography, the page list and the `On this page` list are library components: `Prose`, `SideNav` and `TableOfContents`. `src/lib/docs-links.ts` resolves a relative markdown link: a page under `docs/` becomes an internal `/docs/...` route, a file elsewhere in the repository becomes a GitHub link, and a URL stays external.
+Each nav is built from that book's `README.md`, and each page has a title, description, markdown, previous and next. `src/pages/docs.tsx` is parametrized by book (`DocsPage` for the customer book, `PlatformDocsPage` for the platform book) and renders pages with `react-markdown` and `remark-gfm`. There is no `rehype-raw`, so raw HTML in markdown is not rendered as HTML. `src/lib/docs-markdown.tsx` supplies the heading ids (one `github-slugger` per page, the ids GitHub would produce), the headings for the `On this page` list, code blocks (the library's `CodeBlock`, with a copy button), GitHub-style alert blocks, and the link component. The typography, the page list and the `On this page` list are library components: `Prose`, `SideNav` and `TableOfContents`. `src/lib/docs-links.ts` resolves a relative markdown link against its book: a page under `docs/consumer/` becomes `/docs/...`, one under `docs/platform/` becomes `/platform/...`, a file elsewhere in the repository (such as `docs/design/`) becomes a GitHub link, and a URL stays external.
 
-The docs route is outside `RequireAuth`, so `/docs` is public. It uses the library's `DocsLayout` (a header bar, the page list on the left, no inset card), not the console's `SidebarLayout`; `src/components/docs-layout.tsx` fills it in and shows "Sign in", "Dashboard" (customers) or "Console" (instance admins) in the header depending on the current session.
+Both routes are outside `RequireAuth`, so the books are public. They use the library's `DocsLayout` (a header bar, the page list on the left, no inset card), not the console's `SidebarLayout`; `src/components/docs-layout.tsx` is parametrized by book too, shows "Docs" or "Platform docs" in the header, and gives an instance admin a link to the other book. The portal's Docs link opens `/docs`; the console's opens `/platform`.
 
 ## Add a page
 
@@ -87,7 +93,7 @@ The docs route is outside `RequireAuth`, so `/docs` is public. It uses the libra
 3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`.
 4. Use `useLoad` for reads (`every` refreshes in the background; `refresh()` reloads without the loading state) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts.
 5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/me` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
-6. If the page is documentation, add it to `docs/README.md` so it appears in the nav, and link it with a relative `.md` path.
+6. If the page is documentation, add it to the right book's `README.md` (`docs/consumer/` or `docs/platform/`) so it appears in that nav, and link it with a relative `.md` path.
 
 ## Tests
 

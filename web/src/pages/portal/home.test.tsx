@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { daysAgo } from '../../lib/format'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
@@ -54,7 +54,7 @@ const limits = {
 describe('HomePage', () => {
   it('says the provider will enable a region when the workspace has none', async () => {
     const calls = stubAPI(
-      { 'GET /v0/organizations/acme': () => json(200, { ...acme, regions: [] }) },
+      { 'GET /v0/organizations/acme': () => json(200, { ...acme, region: null }) },
       customerUser,
       [acmeMembership],
     )
@@ -80,12 +80,12 @@ describe('HomePage', () => {
     )
     renderApp('/')
 
-    const region = await screen.findByRole('region', { name: 'EU West limits' })
-    expect(within(region).getByText('Free plan')).toBeInTheDocument()
-    expect(within(region).getByText('1 of 2')).toBeInTheDocument()
-    expect(within(region).getByText('1 · Unlimited')).toBeInTheDocument()
-    expect(within(region).getByRole('meter', { name: 'vCPUs' })).not.toHaveAttribute('aria-valuemax')
-    expect(within(region).getByText('1 GB of 4 GB')).toBeInTheDocument()
+    expect(await screen.findByText('Free plan')).toBeInTheDocument()
+    expect(screen.getByText('in EU West')).toBeInTheDocument()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    expect(screen.getByText('1 · Unlimited')).toBeInTheDocument()
+    expect(screen.getByRole('meter', { name: 'vCPUs' })).not.toHaveAttribute('aria-valuemax')
+    expect(screen.getByText('1 GB of 4 GB')).toBeInTheDocument()
 
     // The tiles count the last 30 days only, the range Usage opens with.
     expect(screen.getByText('vCPU-hours (30 days)')).toBeInTheDocument()
@@ -112,7 +112,7 @@ describe('HomePage', () => {
     )
     renderApp('/')
 
-    expect(await screen.findByRole('region', { name: 'EU West limits' })).toBeInTheDocument()
+    expect(await screen.findByText('Free plan')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Get started' })).toBeNull()
   })
 

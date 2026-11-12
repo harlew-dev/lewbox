@@ -10,6 +10,7 @@ import {
   SideNav,
   SideNavItem,
   SideNavSection,
+  Text,
   Toaster,
 } from '@harlew-dev/ui'
 import { ArrowUpRightIcon, HomeIcon } from '@heroicons/react/20/solid'
@@ -19,25 +20,43 @@ import { homeFor, useAuth } from '../lib/auth'
 import * as api from '../lib/api'
 import { useLoad } from '../lib/use-load'
 
-function docsPath(pathname: string): string {
-  return pathname.replace(/^\/docs\/?/, '').replace(/\/+$/, '')
+const books: Record<api.DocsBook, { prefix: string; title: string; other: api.DocsBook }> = {
+  consumer: { prefix: '/docs', title: 'Docs', other: 'platform' },
+  platform: { prefix: '/platform', title: 'Platform docs', other: 'consumer' },
 }
 
-function navHref(path: string): string {
-  return `/docs${path ? `/${path}` : ''}`
+function docsPath(pathname: string, prefix: string): string {
+  return pathname.replace(new RegExp(`^${prefix}/?`), '').replace(/\/+$/, '')
 }
 
-export function DocsLayout() {
+function navHref(prefix: string, path: string): string {
+  return `${prefix}${path ? `/${path}` : ''}`
+}
+
+// A nav item outside both books names a file in the repository. The Go
+// server writes it relative to the book's README, so remove any "..".
+function githubHref(path: string): string {
+  const parts: string[] = []
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') parts.pop()
+    else parts.push(segment)
+  }
+  return `https://github.com/harlew-dev/lewbox/blob/main/${parts.join('/')}`
+}
+
+export function DocsLayout({ book = 'consumer' }: { book?: api.DocsBook }) {
   const { status, user } = useAuth()
   const location = useLocation()
-  const current = docsPath(location.pathname)
-  const nav = useLoad(() => api.docsNav(), [])
+  const { prefix, title, other } = books[book]
+  const current = docsPath(location.pathname, prefix)
+  const nav = useLoad(() => api.docsNav(book), [book])
   const signedIn = status === 'authenticated'
 
   const sideNav = (
-    <SideNav aria-label="Documentation">
+    <SideNav aria-label={title}>
       <SideNavSection plain>
-        <SideNavItem href="/docs" current={current === ''}>
+        <SideNavItem href={prefix} current={current === ''}>
           <HomeIcon data-slot="icon" />
           Introduction
         </SideNavItem>
@@ -59,7 +78,7 @@ export function DocsLayout() {
               item.external ? (
                 <SideNavItem
                   key={item.title}
-                  href={`https://github.com/harlew-dev/lewbox/blob/main/${item.external}`}
+                  href={githubHref(item.external)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -69,7 +88,7 @@ export function DocsLayout() {
               ) : (
                 <SideNavItem
                   key={item.title}
-                  href={navHref(item.path)}
+                  href={navHref(prefix, item.path)}
                   current={current === item.path}
                   title={item.description}
                 >
@@ -87,6 +106,9 @@ export function DocsLayout() {
     <Navbar>
       <NavbarSpacer />
       <NavbarSection>
+        {signedIn && user?.instance_admin && (
+          <NavbarItem href={books[other].prefix}>{books[other].title}</NavbarItem>
+        )}
         {signedIn ? (
           <NavbarItem href={homeFor(user)}>{user?.instance_admin ? 'Console' : 'Dashboard'}</NavbarItem>
         ) : (
@@ -98,7 +120,12 @@ export function DocsLayout() {
 
   return (
     <Layout
-      logo={<BrandLogo href="/docs" />}
+      logo={
+        <div className="flex items-center gap-3">
+          <BrandLogo href={prefix} />
+          <Text className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{title}</Text>
+        </div>
+      }
       navbar={navbar}
       nav={sideNav}
       pathname={location.pathname}

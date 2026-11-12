@@ -4,7 +4,8 @@ package docs
 
 import "embed"
 
-// FS holds every markdown page under docs/, rooted at this folder.
+// FS holds the two documentation books under docs/, each rooted at its own
+// folder: consumer/ and platform/.
 //
-//go:embed *.md */*.md */*/*.md
+//go:embed consumer/*.md consumer/*/*.md platform/*.md platform/*/*.md
 var FS embed.FS

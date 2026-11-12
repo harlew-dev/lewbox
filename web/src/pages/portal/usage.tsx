@@ -1,9 +1,9 @@
-import { Listbox, ListboxOption, PageHeader } from '@harlew-dev/ui'
+import { Listbox, ListboxOption, PageHeader, Subheading } from '@harlew-dev/ui'
 import { useState } from 'react'
 import * as api from '../../lib/api'
+import { PlanLimits } from '../../components/plan-limits'
 import { UsageSummary } from '../../components/usage-summary'
 import { daysAgo, defaultUsageDays } from '../../lib/format'
-import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
@@ -36,12 +36,14 @@ export function UsagePage() {
     () => api.getUsage({ org: org.slug, from: daysAgo(Number(days)), granularity: 'day' }),
     [org.slug, days],
   )
-  const regions = useRegions(org.slug)
+  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
 
   return (
     <>
       <PageHeader title="Usage" actions={<UsageRange value={days} onChange={setDays} />} />
-      <UsageSummary usage={usage} regionName={regions.name} onRetry={usage.reload} />
+      <UsageSummary usage={usage} regionName={(slug) => org.region?.name ?? slug} onRetry={usage.reload} byRegion={false} />
+      <Subheading className="mt-14 mb-6">Plan</Subheading>
+      <PlanLimits limits={limits} />
     </>
   )
 }

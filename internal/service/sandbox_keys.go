@@ -43,7 +43,7 @@ type SandboxKeyList struct {
 }
 
 // CreateSandboxKeyRequest is the input to CreateSandboxKey. Region defaults to
-// the only ready region. ExpiresIn defaults to 90d; "never" means no expiry.
+// the workspace's region. ExpiresIn defaults to 90d; "never" means no expiry.
 type CreateSandboxKeyRequest struct {
 	Name      string `json:"name"`
 	Region    string `json:"region"`
@@ -299,8 +299,7 @@ func upstreamLifetime(d time.Duration) string {
 }
 
 // sandboxRegion finds the cluster behind ref, which must be one the
-// organization is subscribed to. An empty ref means its only ready subscribed
-// region.
+// organization is subscribed to. An empty ref means its region.
 func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Cluster, error) {
 	rows, err := s.q.ListClusters(ctx)
 	if err != nil {
@@ -310,22 +309,21 @@ func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Clus
 	if err != nil {
 		return db.Cluster{}, err
 	}
-	ready := make([]db.Cluster, 0, len(rows))
-	for _, row := range rows {
-		if _, ok := subs[row.ID]; ok && regionReady(row.Status) {
-			ready = append(ready, row)
-		}
-	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		switch len(ready) {
-		case 0:
-			return db.Cluster{}, precondition(nil, "your account has no plan in any region yet; ask your provider")
-		case 1:
-			return ready[0], nil
-		default:
-			return db.Cluster{}, invalid("choose a region")
+		if len(subs) == 0 {
+			return db.Cluster{}, precondition(nil, "your workspace is not in a region yet; ask your provider")
 		}
+		for _, row := range rows {
+			if _, ok := subs[row.ID]; !ok {
+				continue
+			}
+			if !regionReady(row.Status) {
+				return db.Cluster{}, precondition(nil, "region %q is %s", row.Slug, row.Status)
+			}
+			return row, nil
+		}
+		return db.Cluster{}, notFound("your workspace's region not found")
 	}
 	for _, row := range rows {
 		if row.ID != ref && row.Slug != ref {

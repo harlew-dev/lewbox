@@ -43,6 +43,44 @@ func (q *Queries) CreateMembership(ctx context.Context, arg CreateMembershipPara
 	return i, err
 }
 
+const createOwnerMembership = `-- name: CreateOwnerMembership :one
+INSERT INTO memberships (id, org_id, user_id, role, created_at)
+SELECT ?1, ?2, ?3, 'owner', ?4
+WHERE (SELECT COUNT(*) FROM memberships AS owned
+       WHERE owned.user_id = ?3 AND owned.role = 'owner') < CAST(?5 AS INTEGER)
+RETURNING id, org_id, user_id, role, created_at
+`
+
+type CreateOwnerMembershipParams struct {
+	ID        string
+	OrgID     string
+	UserID    string
+	CreatedAt time.Time
+	MaxOwned  int64
+}
+
+// Creates the first owner only while the account owns fewer than max_owned
+// workspaces. No row means the cap is reached; the guard is in the statement,
+// so two concurrent creates cannot both pass it.
+func (q *Queries) CreateOwnerMembership(ctx context.Context, arg CreateOwnerMembershipParams) (Membership, error) {
+	row := q.db.QueryRowContext(ctx, createOwnerMembership,
+		arg.ID,
+		arg.OrgID,
+		arg.UserID,
+		arg.CreatedAt,
+		arg.MaxOwned,
+	)
+	var i Membership
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteMembership = `-- name: DeleteMembership :execrows
 DELETE FROM memberships
 WHERE memberships.id = ?

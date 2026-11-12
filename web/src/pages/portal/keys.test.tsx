@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
@@ -29,7 +29,6 @@ describe('KeysPage', () => {
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/sandbox-keys': () => json(200, { data: created ? [key] : [] }),
         'POST /v0/sandbox-keys': () => {
           created = true
@@ -52,6 +51,8 @@ describe('KeysPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }))
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'laptop' } })
+    // A workspace has one region, so the dialog doesn't ask for one.
+    expect(screen.queryByRole('combobox', { name: 'Region' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(await screen.findByText(token)).toBeInTheDocument()
@@ -66,48 +67,17 @@ describe('KeysPage', () => {
 
     const create = calls.find((call) => call.method === 'POST' && call.url === '/v0/sandbox-keys')
     expect(create?.org).toBe('acme')
-    expect(create?.body).toEqual({ name: 'laptop', region: 'eu-west', expires_in: '90d' })
+    expect(create?.body).toEqual({ name: 'laptop', expires_in: '90d' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByText(token)).toBeNull())
     expect(await screen.findByText('avm_…k3Xz')).toBeInTheDocument()
   })
 
-  it('offers only the regions the workspace has a plan in', async () => {
-    const usEast = { ...region, slug: 'us-east', name: 'US East' }
-    const apSouth = { ...region, slug: 'ap-south', name: 'AP South' }
-    const org = {
-      ...acme,
-      regions: [
-        { slug: 'eu-west', name: 'EU West', plan: { slug: 'free', name: 'Free' } },
-        { slug: 'us-east', name: 'US East', plan: { slug: 'pro', name: 'Pro' } },
-      ],
-    }
-    const calls = stubAPI(
-      {
-        'GET /v0/organizations/acme': () => json(200, org),
-        // An instance admin who is a member is sent every region.
-        'GET /v0/regions': () => json(200, { data: [region, usEast, apSouth] }),
-        'GET /v0/sandbox-keys': () => json(200, { data: [] }),
-      },
-      customerUser,
-      [acmeMembership],
-    )
-    renderApp('/keys')
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }))
-    const picker = await screen.findByRole('combobox', { name: 'Region' })
-    expect(calls.find((call) => call.url === '/v0/regions')?.org).toBe('acme')
-    fireEvent.click(picker)
-    const options = await screen.findAllByRole('option')
-    expect(options.map((option) => option.textContent)).toEqual(['EU West', 'US East'])
-    expect(within(document.body).queryByRole('option', { name: 'AP South' })).toBeNull()
-  })
-
   it('disables creating a key until the workspace has a region', async () => {
     stubAPI(
       {
-        'GET /v0/organizations/acme': () => json(200, { ...acme, regions: [] }),
+        'GET /v0/organizations/acme': () => json(200, { ...acme, region: null }),
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
       },
       customerUser,
@@ -125,7 +95,6 @@ describe('key expiry', () => {
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
         'POST /v0/sandbox-keys': () => json(400, { error: { code: 'invalid', message: 'stop here' } }),
       },
@@ -150,6 +119,6 @@ describe('key expiry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(await screen.findByText('stop here')).toBeInTheDocument()
-    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ name: 'ci', region: 'eu-west', expires_in: 'never' })
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ name: 'ci', expires_in: 'never' })
   })
 })

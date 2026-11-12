@@ -6,6 +6,7 @@ describe('safeNext', () => {
     expect(safeNext('/clusters')).toBe('/clusters')
     expect(safeNext('/nodes?cluster=eu-west')).toBe('/nodes?cluster=eu-west')
     expect(safeNext('/clusters/eu-west#checks')).toBe('/clusters/eu-west#checks')
+    expect(safeNext('/setup/lbs_test')).toBe('/setup/lbs_test')
   })
 
   it('falls back to the dashboard for anything else', () => {

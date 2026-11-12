@@ -122,7 +122,7 @@ func newSettingsCmd(a *app) *cobra.Command {
 		}),
 	}
 
-	var name, signup, defaultPlan, defaultRegions string
+	var name, signup, defaultPlan, defaultRegion string
 	set := &cobra.Command{
 		Use:   "set",
 		Short: "Change the instance settings (PATCH /v0/settings)",
@@ -138,18 +138,11 @@ func newSettingsCmd(a *app) *cobra.Command {
 			if cmd.Flags().Changed("default-plan") {
 				req.DefaultPlan = &defaultPlan
 			}
-			if cmd.Flags().Changed("default-regions") {
-				regions := []string{}
-				raw := strings.TrimSpace(defaultRegions)
-				if raw != "" && !strings.EqualFold(raw, "none") {
-					for _, slug := range strings.Split(raw, ",") {
-						regions = append(regions, strings.TrimSpace(slug))
-					}
-				}
-				req.DefaultRegions = &regions
+			if cmd.Flags().Changed("default-region") {
+				req.DefaultRegion = &defaultRegion
 			}
-			if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegions == nil {
-				return usagef("nothing to change: pass --name, --signup, --default-plan or --default-regions")
+			if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegion == nil {
+				return usagef("nothing to change: pass --name, --signup, --default-plan or --default-region")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
 				return b.UpdateSettings(ctx, req)
@@ -158,8 +151,8 @@ func newSettingsCmd(a *app) *cobra.Command {
 	}
 	set.Flags().StringVar(&name, "name", "", "the instance's display name")
 	set.Flags().StringVar(&signup, "signup", "", "open, approval or closed")
-	set.Flags().StringVar(&defaultPlan, "default-plan", "", "the plan new sign-ups get, by slug, or none")
-	set.Flags().StringVar(&defaultRegions, "default-regions", "", "comma-separated region slugs new sign-ups get, or none")
+	set.Flags().StringVar(&defaultPlan, "default-plan", "", "the plan new workspaces get, by slug, or none")
+	set.Flags().StringVar(&defaultRegion, "default-region", "", "the region slug new workspaces get, or none")
 
 	settings.AddCommand(set)
 	return settings

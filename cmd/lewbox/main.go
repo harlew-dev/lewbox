@@ -354,6 +354,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newPlanCmd(a),
 		newSubscriptionCmd(a),
 		newSettingsCmd(a),
+		newSetupLinkCmd(a),
 		newUpdateCmd(a),
 		newVersionCmd(),
 	)

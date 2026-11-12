@@ -479,7 +479,7 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	if err != nil || me.Via != "admin_key" || me.Organization == nil || me.Organization.Slug != "acme" {
 		t.Fatalf("me with key = %+v, %v", me, err)
 	}
-	if me.Organization.Team != "" || len(me.Organization.Regions) != 0 {
+	if me.Organization.Team != "" || me.Organization.Region != nil {
 		t.Errorf("a key sees admin fields: %+v", me.Organization)
 	}
 	if org, err := keyed.GetOrganization(ctx, ""); err != nil || org.Slug != "acme" {
@@ -855,6 +855,66 @@ func TestCustomerBackendsAgree(t *testing.T) {
 }
 
 func intPtr(n int64) *int64 { return &n }
+
+func TestSetupLinkBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var first service.SetupLink
+	listLinks := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListSetupLinks(ctx)
+	}
+	runSteps(t, h, []step{
+		{
+			name: "create an onboarding link",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				v, err := b.CreateSetupLink(ctx, service.CreateSetupLinkRequest{
+					Plan: "free", Region: "eu-west", ExpiresInHours: 24, Note: "local",
+				})
+				first = v
+				return v, err
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateSetupLink(ctx, service.CreateSetupLinkRequest{
+					Plan: "free", Region: "eu-west", Note: "remote",
+				})
+			},
+			check: func(t *testing.T, v any) {
+				link, ok := v.(service.SetupLink)
+				if !ok || !strings.HasPrefix(link.Token, "lbs_") || link.Status != "unused" ||
+					link.Plan.Slug != "free" || link.Region.Slug != "eu-west" || link.ExpiresAt.IsZero() {
+					t.Errorf("setup link = %+v", v)
+				}
+			},
+		},
+		both("list onboarding links", listLinks),
+		{
+			name:  "revoke the local link",
+			local: listLinks,
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RevokeSetupLink(ctx, first.ID)
+			},
+			check: func(t *testing.T, v any) {
+				if link, ok := v.(service.SetupLink); ok && link.ID != first.ID {
+					t.Errorf("revoked = %+v, want %s", link, first.ID)
+				}
+			},
+		},
+		both("list onboarding links after revoke", listLinks),
+		both("revoke a missing link", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.RevokeSetupLink(ctx, "missing")
+		}),
+	})
+}
 
 func TestLocalAuthHasNoSession(t *testing.T) {
 	h := newHarness(t)

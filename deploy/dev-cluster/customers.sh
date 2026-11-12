@@ -4,7 +4,7 @@
 #   ./dev.sh up && ./dev.sh cluster && ./customers.sh
 #
 # Or against a real instance (see plans/RELEASING.md). It changes settings
-# while it runs and puts them back on exit; it leaves three test customers and
+# while it runs and puts them back on exit; it leaves four test customers and
 # an e2e-<time> plan behind:
 #
 #   LEWBOX_URL=https://lewbox.example.com LEWBOX_REGION=eu-west \
@@ -40,7 +40,7 @@ tok=$(curl -fsS -X POST "$API/v0/auth/login" -H 'Content-Type: application/json'
 admin() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' "$API$p" "$@"; }
 
 # Put the operator's settings back however the run ends.
-ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan, default_regions}')
+ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan, default_region}')
 trap 'admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not restore settings: $ORIGINAL" >&2; rm -rf "$JAR"' EXIT
 
 # A customer: a browser session cookie, and their organization in the header.
@@ -73,8 +73,8 @@ step "the operator opens sign-up on a plan of 2 sandboxes"
 plan="e2e-$RUN"
 p=$(admin POST /v0/plans -d "{\"slug\":\"$plan\",\"name\":\"E2E\",\"max_sandboxes\":2,\"max_vcpus\":4,\"max_memory_mb\":4096}")
 expect "plan created" ".slug == \"$plan\" and .max_sandboxes == 2" "$p"
-s=$(admin PATCH /v0/settings -d "{\"signup\":\"open\",\"default_plan\":\"$plan\",\"default_regions\":[\"$CLUSTER\"]}")
-expect "sign-up open, plan and region are the defaults" ".signup == \"open\" and .default_plan == \"$plan\" and .default_regions == [\"$CLUSTER\"]" "$s"
+s=$(admin PATCH /v0/settings -d "{\"signup\":\"open\",\"default_plan\":\"$plan\",\"default_region\":\"$CLUSTER\"}")
+expect "sign-up open, plan and region are the defaults" ".signup == \"open\" and .default_plan == \"$plan\" and .default_region == \"$CLUSTER\"" "$s"
 expect "the public instance info says so" '.signup == "open"' "$(curl -fsS "$API/v0/instance")"
 
 # The operator creates a customer the way the console's New customer form does:
@@ -87,16 +87,20 @@ new_customer() {
 	cust "$who" POST /v0/auth/session -d "{\"email\":\"$email\",\"password\":\"customer-password-123\"}" >/dev/null
 }
 
-step "a signs up; the operator creates b; both get workspaces on that plan"
+step "a signs up and creates a workspace; the operator creates b; both are on that plan"
 r=$(cust a POST /v0/auth/signup -d "{\"email\":\"a-$RUN@e2e.dev\",\"password\":\"customer-password-123\"}")
 expect "a signed up" ".user.email == \"a-$RUN@e2e.dev\" and (.user.instance_admin | not)" "$r"
+expect "sign-up made no workspace" '.organizations == []' "$(cust a GET /v0/me)"
+aorg=$(cust a POST /v0/organizations -d "{\"name\":\"a workspace\"}")
+expect "a created its own workspace on the default plan and region" '.slug | startswith("a-workspace-")' "$aorg"
+expect "a's workspace got the defaults" ".region.slug == \"$CLUSTER\" and .region.plan.slug == \"$plan\" and .status == \"active\" and .role == \"owner\"" "$aorg"
 new_customer b "$CLUSTER" && pass "the operator created b with a plan in $CLUSTER"
 for who in a b; do
 	me=$(cust "$who" GET /v0/me)
 	ORG[$who]=$(jq -r '.organizations[0].slug' <<<"$me")
 	expect "$who owns an active workspace" '(.organizations | length == 1) and .organizations[0].role == "owner" and .organizations[0].status == "active"' "$me"
 	o=$(cust "$who" GET "/v0/organizations/${ORG[$who]}")
-	expect "$who is subscribed to $plan in $CLUSTER, and can't see its team" "(.regions | length == 1) and .regions[0].slug == \"$CLUSTER\" and .regions[0].plan.slug == \"$plan\" and (.team == null)" "$o"
+	expect "$who is subscribed to $plan in $CLUSTER, and can't see its team" ".region.slug == \"$CLUSTER\" and .region.plan.slug == \"$plan\" and (.team == null)" "$o"
 done
 [[ $(code -b "$JAR/a" "$API/v0/clusters") == 403 ]] && pass "a customer can't list clusters" || fail "clusters visible to a customer"
 expect "a customer sees its subscribed region with the plan" "[.data[] | select(.slug == \"$CLUSTER\" and .plan.slug == \"$plan\")] | length == 1" "$(cust a GET /v0/regions)"
@@ -122,9 +126,27 @@ c_code=$(code -X POST -b "$JAR/c" -H "Lewbox-Organization: ${ORG[c]}" -H 'Conten
 sub=$(admin PUT "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: ${ORG[c]}" -d "{\"plan\":\"$plan\"}")
 expect "the operator subscribed c in $CLUSTER" ".region.slug == \"$CLUSTER\" and .plan.slug == \"$plan\" and .limits.sandboxes == 2" "$sub"
 expect "c sees the region now" "[.data[] | select(.slug == \"$CLUSTER\" and .plan.slug == \"$plan\")] | length == 1" "$(cust c GET /v0/regions)"
-k=$(cust c POST /v0/sandbox-keys -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
+k=$(cust c POST /v0/sandbox-keys -d "{\"name\":\"e2e\"}")
 KEY[c]=$(jq -r .token <<<"$k")
 eventually 30 "c's key works after the subscription" whoami_is c 200
+
+step "a setup link lets someone in while sign-up is closed"
+admin PATCH /v0/settings -d '{"signup":"closed"}' >/dev/null
+sl=$(admin POST /v0/setup-links -d "{\"plan\":\"$plan\",\"region\":\"$CLUSTER\",\"expires_in_hours\":24,\"note\":\"e2e\"}")
+expect "the operator created a setup link" ".status == \"unused\" and .plan.slug == \"$plan\" and .region.slug == \"$CLUSTER\" and (.token | startswith(\"lbs_\"))" "$sl"
+stoken=$(jq -r .token <<<"$sl")
+page=$(curl -fsS "$API/v0/setup/$stoken")
+expect "the public page names the plan and region" ".plan.name == \"E2E\" and (.region.name | length > 0) and (.instance_name | length > 0)" "$page"
+expect "the public page has no slugs" '[.. | objects | has("slug")] | any | not' "$page"
+r=$(cust d POST /v0/auth/signup -d "{\"email\":\"d-$RUN@e2e.dev\",\"password\":\"customer-password-123\",\"setup_token\":\"$stoken\"}")
+expect "d signed up while sign-up is closed" ".user.email == \"d-$RUN@e2e.dev\"" "$r"
+dorg=$(cust d POST /v0/organizations -d "{\"name\":\"d workspace\",\"setup_token\":\"$stoken\"}")
+expect "d's workspace is active on the link's plan and region" ".status == \"active\" and .role == \"owner\" and .region.slug == \"$CLUSTER\" and .region.plan.slug == \"$plan\"" "$dorg"
+ORG[d]=$(jq -r .slug <<<"$dorg")
+e_code=$(code -X POST -H 'Content-Type: application/json' "$API/v0/auth/signup" \
+	-d "{\"email\":\"e-$RUN@e2e.dev\",\"password\":\"customer-password-123\",\"setup_token\":\"$stoken\"}")
+[[ $e_code == 400 ]] && pass "the used token cannot register anyone else" || fail "reused token got $e_code, want 400"
+[[ $(code "$API/v0/setup/$stoken") == 404 ]] && pass "the public page is gone after use" || fail "the used link still has a page"
 
 step "a runs a sandbox with its key, straight on the cluster (no Lewbox in the path)"
 create_ok a && pass "sandbox started" || { cat "$JAR/created" >&2; fail "create"; }

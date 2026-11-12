@@ -56,6 +56,8 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderSandboxKeys(w, data.Data, now)
 	case service.NewSandboxKey:
 		return renderNewSandboxKey(w, data, now)
+	case service.SetupLinkList:
+		return renderSetupLinks(w, data.Data, now)
 	case service.SandboxList:
 		return renderSandboxes(w, data.Data, now)
 	case service.SnapshotList:
@@ -149,13 +151,13 @@ func renderJoinToken(w io.Writer, j service.JoinToken, now time.Time) error {
 // account's role, when it is a member.
 func renderOrganizations(w io.Writer, orgs []service.Organization) error {
 	tw := newTable(w)
-	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tREGIONS\tMEMBERS\tROLE")
+	fmt.Fprintln(tw, "SLUG\tNAME\tSTATUS\tREGION\tMEMBERS\tROLE")
 	for _, o := range orgs {
-		regions := make([]string, 0, len(o.Regions))
-		for _, region := range o.Regions {
-			regions = append(regions, region.Slug)
+		region := ""
+		if o.Region != nil {
+			region = o.Region.Slug
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, dash(strings.Join(regions, ",")), o.Members, dash(o.Role))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", o.Slug, o.Name, o.Status, dash(region), o.Members, dash(o.Role))
 	}
 	return tw.Flush()
 }
@@ -285,6 +287,44 @@ func renderNewSandboxKey(w io.Writer, k service.NewSandboxKey, now time.Time) er
 			k.E2BEnv["E2B_API_URL"], k.E2BEnv["E2B_SANDBOX_URL"], k.E2BEnv["E2B_API_KEY"])
 	}
 	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its last four characters and cannot show it again.")
+	return nil
+}
+
+// renderSetupLinks prints a setup link table; a token is never in it.
+func renderSetupLinks(w io.Writer, links []service.SetupLink, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "ID\tPLAN\tREGION\tNOTE\tSTATUS\tCLAIMED_BY\tWORKSPACE\tEXPIRES")
+	for _, l := range links {
+		claimed, workspace := "-", "-"
+		if l.ClaimedBy != nil {
+			claimed = *l.ClaimedBy
+		}
+		if l.Workspace != nil {
+			workspace = l.Workspace.Slug
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			l.ID, l.Plan.Slug, l.Region.Slug, dash(l.Note), l.Status, claimed, workspace,
+			relativeTime(l.ExpiresAt, now))
+	}
+	return tw.Flush()
+}
+
+// renderSetupLinkCreated prints a new link with its token and the path the
+// customer opens. The token can't be shown again.
+func renderSetupLinkCreated(w io.Writer, l service.SetupLink, serverURL string, now time.Time) error {
+	link := l
+	link.Token = ""
+	if err := renderObject(w, link, now); err != nil {
+		return err
+	}
+	path := "/setup/" + l.Token
+	fmt.Fprintf(w, "\ntoken: %s\n", l.Token)
+	if serverURL != "" {
+		fmt.Fprintf(w, "link: %s%s\n", strings.TrimRight(serverURL, "/"), path)
+	} else {
+		fmt.Fprintf(w, "link: %s\n", path)
+	}
+	fmt.Fprintln(w, "This link works once: Lewbox keeps only its hash and cannot show it again.")
 	return nil
 }
 

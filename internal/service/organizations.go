@@ -2,10 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -20,20 +20,20 @@ import (
 // User) when it is a member. Team and VcpuHours30d are only shown to instance
 // admins.
 type Organization struct {
-	ID           string               `json:"id"`
-	Slug         string               `json:"slug"`
-	Name         string               `json:"name"`
-	Status       string               `json:"status"` // pending | active | suspended
-	StatusReason string               `json:"status_reason"`
-	Team         string               `json:"team,omitempty"`
-	Regions      []OrganizationRegion `json:"regions"`
-	Members      int                  `json:"members"`
-	Role         string               `json:"role,omitempty"`
-	VcpuHours30d *float64             `json:"vcpu_hours_30d,omitempty"`
-	CreatedAt    time.Time            `json:"created_at"`
+	ID           string              `json:"id"`
+	Slug         string              `json:"slug"`
+	Name         string              `json:"name"`
+	Status       string              `json:"status"` // pending | active | suspended
+	StatusReason string              `json:"status_reason"`
+	Team         string              `json:"team,omitempty"`
+	Region       *OrganizationRegion `json:"region"`
+	Members      int                 `json:"members"`
+	Role         string              `json:"role,omitempty"`
+	VcpuHours30d *float64            `json:"vcpu_hours_30d,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
 }
 
-// OrganizationRegion is one region an organization is subscribed to.
+// OrganizationRegion is the region an organization is subscribed to.
 type OrganizationRegion struct {
 	Slug string  `json:"slug"`
 	Name string  `json:"name"`
@@ -66,12 +66,16 @@ type ListOrganizationsRequest struct {
 	Status string `json:"status"`
 }
 
-// CreateOrganizationRequest is the input to CreateOrganization. Owner is an
-// account's email or ID; it defaults to the caller's account.
+// CreateOrganizationRequest is the input to CreateOrganization. Slug is
+// generated from the name when it is empty. Owner is an account's email or ID;
+// it defaults to the caller's account and only instance admins may set it.
+// SetupToken consumes a setup link, which gives the workspace that link's plan
+// in its region and is required when sign-up is closed.
 type CreateOrganizationRequest struct {
-	Slug  string `json:"slug"`
-	Name  string `json:"name"`
-	Owner string `json:"owner"`
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	Owner      string `json:"owner"`
+	SetupToken string `json:"setup_token"`
 }
 
 // UpdateOrganizationRequest is the input to UpdateOrganization. Only the
@@ -120,6 +124,9 @@ const (
 
 	// statusReasonAdmin is why an instance admin suspended an organization.
 	statusReasonAdmin = "admin"
+
+	// maxOwnedWorkspaces caps the workspaces one account may own.
+	maxOwnedWorkspaces = 10
 )
 
 func validRole(role string) bool {
@@ -316,27 +323,26 @@ func (s *Service) subscriptionIndex(ctx context.Context) (subscriptionIndex, err
 	return x, nil
 }
 
-// regions lists an organization's subscribed regions, by slug.
-func (x subscriptionIndex) regions(orgID string) []OrganizationRegion {
+// region is an organization's subscribed region, or nil when it has none.
+func (x subscriptionIndex) region(orgID string) *OrganizationRegion {
 	subs := x.byOrg[orgID]
-	out := make([]OrganizationRegion, 0, len(subs))
-	for _, sub := range subs {
-		cluster, ok := x.clusters[sub.ClusterID]
-		if !ok {
-			continue
-		}
-		plan, ok := x.plans[sub.PlanID]
-		if !ok {
-			continue
-		}
-		out = append(out, OrganizationRegion{
-			Slug: cluster.Slug,
-			Name: cluster.Name,
-			Plan: PlanRef{Slug: plan.Slug, Name: plan.Name},
-		})
+	if len(subs) == 0 {
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Slug < out[j].Slug })
-	return out
+	sub := subs[0]
+	cluster, ok := x.clusters[sub.ClusterID]
+	if !ok {
+		return nil
+	}
+	plan, ok := x.plans[sub.PlanID]
+	if !ok {
+		return nil
+	}
+	return &OrganizationRegion{
+		Slug: cluster.Slug,
+		Name: cluster.Name,
+		Plan: PlanRef{Slug: plan.Slug, Name: plan.Name},
+	}
 }
 
 // effectiveLimits is one subscription's limits: an override if it is set,
@@ -371,7 +377,7 @@ func toOrganization(row db.Organization, role string, counts map[string]int, sub
 		Name:         row.Name,
 		Status:       row.Status,
 		StatusReason: row.StatusReason,
-		Regions:      subs.regions(row.ID),
+		Region:       subs.region(row.ID),
 		Members:      counts[row.ID],
 		Role:         role,
 		CreatedAt:    row.CreatedAt.UTC(),
@@ -486,77 +492,360 @@ func (s *Service) organizationsOf(ctx context.Context, userID string, counts map
 	return out, nil
 }
 
-// CreateOrganization creates an organization with its first owner. Only
-// instance admins can do this.
+// CreateOrganization creates an organization with its first owner. Instance
+// admins may choose the owner and get no default subscription. Anyone else
+// becomes the owner, subject to the instance's sign-up mode.
 func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganizationRequest) (Organization, error) {
-	p, err := requireAdmin(ctx)
+	p, err := requireUser(ctx)
 	if err != nil {
 		return Organization{}, err
 	}
-	slug := strings.ToLower(strings.TrimSpace(req.Slug))
-	if !nodeName.MatchString(slug) {
-		return Organization{}, invalid("slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
-	}
-	if _, err := uuid.Parse(slug); err == nil {
-		return Organization{}, invalid("slug must not be a UUID")
-	}
-	name, err := orgName(req.Name, slug)
+	settings, err := s.getSettings(ctx)
 	if err != nil {
+		return Organization{}, err
+	}
+
+	slug := strings.ToLower(strings.TrimSpace(req.Slug))
+	name := strings.TrimSpace(req.Name)
+	if slug != "" {
+		if !nodeName.MatchString(slug) {
+			return Organization{}, invalid("slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
+		}
+		if _, err := uuid.Parse(slug); err == nil {
+			return Organization{}, invalid("slug must not be a UUID")
+		}
+		if name, err = orgName(req.Name, slug); err != nil {
+			return Organization{}, err
+		}
+	} else if name == "" {
+		return Organization{}, invalid("name is required when slug is empty")
+	} else if _, err := orgName(name, ""); err != nil {
 		return Organization{}, err
 	}
 
 	// The owner is checked before anything is written.
+	setupToken := strings.TrimSpace(req.SetupToken)
+	status := orgActive
 	ownerID := ""
-	if ref := strings.TrimSpace(req.Owner); ref != "" {
-		owner, err := s.findUser(ctx, ref)
+	if p.InstanceAdmin {
+		if ref := strings.TrimSpace(req.Owner); ref != "" {
+			owner, err := s.findUser(ctx, ref)
+			if err != nil {
+				return Organization{}, err
+			}
+			ownerID = owner.ID
+		} else if p.Kind == "user" {
+			ownerID = p.UserID
+		}
+	} else {
+		if strings.TrimSpace(req.Owner) != "" {
+			return Organization{}, forbidden("only an instance admin can choose a workspace's owner")
+		}
+		// A valid setup token will allow this in any mode and force an
+		// active workspace.
+		if setupToken == "" {
+			if status, err = organizationStatus(settings.Signup); err != nil {
+				return Organization{}, err
+			}
+		}
+		ownerID = p.UserID
+		owned, err := s.q.CountOwnedOrganizations(ctx, ownerID)
+		if err != nil {
+			return Organization{}, fmt.Errorf("count owned organizations: %w", err)
+		}
+		if owned >= maxOwnedWorkspaces {
+			return Organization{}, precondition(nil, "you can own at most %d workspaces", maxOwnedWorkspaces)
+		}
+	}
+
+	// A setup link allows a workspace in any mode and forces it active.
+	var (
+		link        db.SetupLink
+		linkClaimed bool
+	)
+	if setupToken != "" {
+		existing, err := s.findSetupLink(ctx, setupToken)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return Organization{}, setupLinkInvalid()
+		case err != nil:
+			return Organization{}, err
+		case existing.UsedAt.Valid, !existing.ExpiresAt.After(s.now()):
+			return Organization{}, setupLinkInvalid()
+		case existing.ClaimedBy.Valid && ownerID != "" && existing.ClaimedBy.String != ownerID:
+			return Organization{}, setupLinkInvalid()
+		}
+		// Consume before writing anything: the statement lets only one
+		// caller win.
+		now := s.now()
+		link, err = s.q.ConsumeSetupLink(ctx, db.ConsumeSetupLinkParams{
+			UsedAt:    sql.NullTime{Time: now, Valid: true},
+			UserID:    sql.NullString{String: ownerID, Valid: ownerID != ""},
+			ClaimedAt: sql.NullTime{Time: now, Valid: true},
+			TokenHash: hashSetupToken(setupToken),
+			Now:       now,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return Organization{}, setupLinkInvalid()
+		}
+		if err != nil {
+			return Organization{}, fmt.Errorf("consume setup link: %w", err)
+		}
+		linkClaimed = !existing.ClaimedBy.Valid
+		status = orgActive
+	}
+
+	var row db.Organization
+	// Undo every write if anything after the link or organization row fails.
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		cleanup := context.WithoutCancel(ctx)
+		if row.ID != "" {
+			_ = s.q.DeleteOrganization(cleanup, row.ID)
+		}
+		if link.ID != "" {
+			if linkClaimed {
+				_ = s.q.UnclaimSetupLink(cleanup, link.ID)
+			} else {
+				_ = s.q.ReleaseSetupLink(cleanup, link.ID)
+			}
+		}
+	}()
+
+	if slug == "" {
+		row, err = s.createGeneratedOrganization(ctx, name, name, status)
 		if err != nil {
 			return Organization{}, err
 		}
-		ownerID = owner.ID
-	} else if p.Kind == "user" {
-		ownerID = p.UserID
-	}
-
-	id := uuid.NewV7().String()
-	row, err := s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
-		ID:        id,
-		Slug:      slug,
-		Name:      name,
-		Status:    orgActive,
-		CreatedAt: s.now(),
-		Team:      sql.NullString{String: teamForID(id), Valid: true},
-	})
-	if db.IsUniqueViolation(err) {
-		return Organization{}, conflict("an organization with slug %q already exists", slug)
-	}
-	if err != nil {
-		return Organization{}, fmt.Errorf("create organization: %w", err)
+	} else {
+		id := uuid.NewV7().String()
+		row, err = s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
+			ID:        id,
+			Slug:      slug,
+			Name:      name,
+			Status:    status,
+			CreatedAt: s.now(),
+			Team:      sql.NullString{String: teamForID(id), Valid: true},
+		})
+		if db.IsUniqueViolation(err) {
+			return Organization{}, conflict("an organization with slug %q already exists", slug)
+		}
+		if err != nil {
+			return Organization{}, fmt.Errorf("create organization: %w", err)
+		}
 	}
 	role := ""
 	if ownerID != "" {
-		if _, err := s.q.CreateMembership(ctx, db.CreateMembershipParams{
-			ID:        uuid.NewV7().String(),
-			OrgID:     row.ID,
-			UserID:    ownerID,
-			Role:      roleOwner,
-			CreatedAt: s.now(),
-		}); err != nil {
-			// Don't leave an organization nobody owns because of a race
-			// with the owner's removal.
-			_ = s.q.DeleteOrganization(ctx, row.ID)
+		membershipID := uuid.NewV7().String()
+		if p.InstanceAdmin {
+			_, err = s.q.CreateMembership(ctx, db.CreateMembershipParams{
+				ID:        membershipID,
+				OrgID:     row.ID,
+				UserID:    ownerID,
+				Role:      roleOwner,
+				CreatedAt: s.now(),
+			})
+		} else {
+			// The cap is in the statement, so two concurrent creates cannot
+			// both pass it.
+			_, err = s.q.CreateOwnerMembership(ctx, db.CreateOwnerMembershipParams{
+				ID:        membershipID,
+				OrgID:     row.ID,
+				UserID:    ownerID,
+				CreatedAt: s.now(),
+				MaxOwned:  maxOwnedWorkspaces,
+			})
+			if errors.Is(err, sql.ErrNoRows) {
+				return Organization{}, precondition(nil, "you can own at most %d workspaces", maxOwnedWorkspaces)
+			}
+		}
+		if err != nil {
 			return Organization{}, fmt.Errorf("add owner: %w", err)
 		}
 		if p.Kind == "user" && ownerID == p.UserID {
 			role = roleOwner
 		}
 	}
-	return s.toOrganization(ctx, row, role, p.InstanceAdmin)
+	switch {
+	case link.ID != "":
+		if err := s.subscribeSetupLink(ctx, row, link); err != nil {
+			return Organization{}, err
+		}
+	case !p.InstanceAdmin:
+		if err := s.subscribeDefaults(ctx, row, settings); err != nil {
+			return Organization{}, err
+		}
+	}
+	if link.ID != "" {
+		if err := s.q.SetSetupLinkOrg(ctx, db.SetSetupLinkOrgParams{
+			OrgID: sql.NullString{String: row.ID, Valid: true},
+			ID:    link.ID,
+		}); err != nil {
+			return Organization{}, fmt.Errorf("set setup link workspace: %w", err)
+		}
+	}
+	out, err := s.toOrganization(ctx, row, role, p.InstanceAdmin)
+	if err != nil {
+		return Organization{}, err
+	}
+	committed = true
+	return out, nil
+}
+
+// organizationStatus is the status a workspace created by its owner gets. A
+// valid setup token will allow it in any mode.
+func organizationStatus(mode string) (string, error) {
+	switch mode {
+	case signupOpen:
+		return orgActive, nil
+	case signupApproval:
+		return orgPending, nil
+	default:
+		return "", forbidden("creating workspaces is closed on this instance; ask your provider for a setup link")
+	}
 }
 
 // teamForID is an organization's AerolVM team: unique, valid, and never
 // reused because IDs never are.
 func teamForID(id string) string {
 	return "lbx-" + strings.ReplaceAll(id, "-", "")
+}
+
+const (
+	orgSlugSuffixLength = 6
+	orgSlugBaseMax      = 40
+	orgSlugAttempts     = 5
+	orgSlugBase32       = "abcdefghijklmnopqrstuvwxyz234567"
+)
+
+// orgSlugSuffix returns the random tail of a generated slug. It is a variable
+// so tests can force a collision.
+var orgSlugSuffix = func() (string, error) {
+	b := make([]byte, orgSlugSuffixLength)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("read slug suffix: %w", err)
+	}
+	for i := range b {
+		b[i] = orgSlugBase32[int(b[i])%len(orgSlugBase32)]
+	}
+	return string(b), nil
+}
+
+// createGeneratedOrganization picks an unused slug from base and creates the
+// organization.
+func (s *Service) createGeneratedOrganization(ctx context.Context, base, name, status string) (db.Organization, error) {
+	var err error
+	for range orgSlugAttempts {
+		suffix, serr := orgSlugSuffix()
+		if serr != nil {
+			return db.Organization{}, serr
+		}
+		slug := generatedOrgSlug(base, suffix)
+		if !nodeName.MatchString(slug) {
+			return db.Organization{}, fmt.Errorf("generated slug %q is not valid", slug)
+		}
+		id := uuid.NewV7().String()
+		row, cerr := s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
+			ID:        id,
+			Slug:      slug,
+			Name:      name,
+			Status:    status,
+			CreatedAt: s.now(),
+			Team:      sql.NullString{String: teamForID(id), Valid: true},
+		})
+		if db.IsUniqueViolation(cerr) {
+			err = cerr
+			continue
+		}
+		if cerr != nil {
+			return db.Organization{}, fmt.Errorf("create organization: %w", cerr)
+		}
+		return row, nil
+	}
+	return db.Organization{}, fmt.Errorf("no unique organization slug after %d attempts: %w", orgSlugAttempts, err)
+}
+
+// generatedOrgSlug is base reduced to a DNS label, trimmed to 40 characters,
+// plus "-" and the random suffix.
+func generatedOrgSlug(base, suffix string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(base) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
+			b.WriteByte('-')
+		}
+	}
+	label := strings.Trim(b.String(), "-")
+	if len(label) > orgSlugBaseMax {
+		label = strings.Trim(label[:orgSlugBaseMax], "-")
+	}
+	if label == "" {
+		label = "org"
+	}
+	return label + "-" + suffix
+}
+
+// subscribeSetupLink gives a workspace the plan and region its setup link
+// names, pushing the quota before it returns.
+func (s *Service) subscribeSetupLink(ctx context.Context, org db.Organization, link db.SetupLink) error {
+	plan, err := s.q.GetPlanByID(ctx, link.PlanID)
+	if err != nil {
+		return fmt.Errorf("get setup link plan: %w", err)
+	}
+	cluster, err := s.q.GetClusterByID(ctx, link.ClusterID)
+	if err != nil {
+		return fmt.Errorf("get setup link region: %w", err)
+	}
+	sub, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+		OrgID:     org.ID,
+		ClusterID: cluster.ID,
+		PlanID:    plan.ID,
+		CreatedAt: s.now(),
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
+	}
+	s.pushSubscriptionQuota(ctx, org, cluster, plan, sub)
+	return nil
+}
+
+// subscribeDefaults gives a new workspace the default plan in the default
+// region when both still exist, pushing the quota before it returns. With no
+// default plan or region, it gets none.
+func (s *Service) subscribeDefaults(ctx context.Context, org db.Organization, settings Settings) error {
+	if settings.DefaultPlan == nil || settings.DefaultRegion == nil {
+		return nil
+	}
+	plan, err := s.findPlan(ctx, *settings.DefaultPlan)
+	if err != nil {
+		if se, ok := errors.AsType[*Error](err); ok && se.Code == CodeNotFound {
+			return nil
+		}
+		return err
+	}
+	cluster, err := s.q.GetClusterBySlug(ctx, *settings.DefaultRegion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get cluster %q: %w", *settings.DefaultRegion, err)
+	}
+	sub, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+		OrgID:     org.ID,
+		ClusterID: cluster.ID,
+		PlanID:    plan.ID,
+		CreatedAt: s.now(),
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
+	}
+	s.pushSubscriptionQuota(ctx, org, cluster, plan, sub)
+	return nil
 }
 
 // orgName trims and checks a display name; empty means the slug.

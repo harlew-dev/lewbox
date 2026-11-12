@@ -26,7 +26,7 @@ interface AuthContextValue {
   status: Status
   error: string
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (input: { email: string; password: string; organization: string }) => Promise<void>
+  signUp: (input: { email: string; password: string; setup_token?: string }) => Promise<void>
   signOut: () => Promise<void>
   refresh: () => Promise<void>
   // Reloads /v0/me without the loading state, after joining or leaving.
@@ -107,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signUp = useCallback(
-    async (input: { email: string; password: string; organization: string }) => {
+    async (input: { email: string; password: string; setup_token?: string }) => {
       const result = await api.signUp(input)
       await signedIn(result.user)
     },

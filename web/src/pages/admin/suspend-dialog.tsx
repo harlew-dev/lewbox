@@ -14,15 +14,15 @@ export function SuspendDialog({
     <ConfirmationDialog
       open={org !== null}
       onClose={onClose}
-      title={org ? `Suspend ${org.name}?` : 'Suspend customer?'}
+      title={org ? `Suspend ${org.name}?` : 'Suspend workspace?'}
       description="Its sandboxes are stopped and its API keys stop working until you restore it. Nothing is deleted."
-      confirm="Suspend customer"
+      confirm="Suspend workspace"
       variant="danger"
       onConfirm={async () => {
         if (org) await api.updateOrganization(org.slug, { status: 'suspended' })
       }}
       onConfirmed={() => {
-        toast.success('Customer suspended.')
+        toast.success('Workspace suspended.')
         onSuspended()
       }}
     />

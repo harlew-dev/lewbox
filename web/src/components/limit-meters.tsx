@@ -1,10 +1,10 @@
-import { ErrorNotice, ListSkeleton, Subheading, Text } from '@harlew-dev/ui'
+import { Subheading } from '@harlew-dev/ui'
 import { Meter } from '@harlew-dev/ui/chart'
 import type { Level } from '@harlew-dev/ui'
 import type * as api from '../lib/api'
 import { formatMemory, formatNumber } from '../lib/format'
 import type { LoadState } from '../lib/use-load'
-import { noRegionText } from './no-region'
+import { PlanLimits } from './plan-limits'
 
 function level(used: number, limit: number | null): Level {
   if (limit === null) return 'ok'
@@ -40,32 +40,12 @@ export function LimitMeters({ limits, used }: { limits: api.Limits; used: api.Li
   )
 }
 
-// Each subscribed region: its name, its plan, and a meter per limit.
+// The workspace's limits; a workspace has exactly one region.
 export function RegionLimits({ limits }: { limits: LoadState<api.LimitsReport> }) {
   return (
     <>
       <Subheading className="mt-14 mb-6">Limits</Subheading>
-      {limits.data ? (
-        limits.data.regions.length === 0 ? (
-          <Text>{noRegionText}</Text>
-        ) : (
-          <div className="space-y-10">
-            {limits.data.regions.map((region) => (
-              <section key={region.slug} aria-label={`${region.name} limits`}>
-                <div className="mb-4 flex items-baseline gap-2 text-sm/6">
-                  <span className="font-semibold text-zinc-950 dark:text-white">{region.name}</span>
-                  <span className="text-zinc-500 dark:text-zinc-400">{region.plan.name} plan</span>
-                </div>
-                <LimitMeters limits={region.limits} used={region.used} />
-              </section>
-            ))}
-          </div>
-        )
-      ) : limits.error.message ? (
-        <ErrorNotice error={limits.error} onRetry={limits.reload} />
-      ) : (
-        <ListSkeleton label="Loading limits" rows={1} />
-      )}
+      <PlanLimits limits={limits} />
     </>
   )
 }

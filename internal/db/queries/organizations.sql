@@ -33,3 +33,6 @@ UPDATE organizations SET status = ?, status_reason = ? WHERE id = ? RETURNING *;
 
 -- name: DeleteOrganization :exec
 DELETE FROM organizations WHERE id = ?;
+
+-- name: CountOwnedOrganizations :one
+SELECT COUNT(*) FROM memberships WHERE user_id = ? AND role = 'owner';

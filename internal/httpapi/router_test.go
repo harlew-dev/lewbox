@@ -2,6 +2,7 @@ package httpapi_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,9 +27,10 @@ const (
 
 // testServer is one router over a real SQLite database with an admin account.
 type testServer struct {
-	t   *testing.T
-	srv *httptest.Server
-	svc *service.Service
+	t    *testing.T
+	srv  *httptest.Server
+	svc  *service.Service
+	conn *sql.DB
 }
 
 func newTestServer(t *testing.T, opts ...service.Option) *testServer {
@@ -49,7 +51,7 @@ func newTestServer(t *testing.T, opts ...service.Option) *testServer {
 	}
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
-	return &testServer{t: t, srv: srv, svc: svc}
+	return &testServer{t: t, srv: srv, svc: svc, conn: conn}
 }
 
 func newTestServerWithOptions(t *testing.T, routerOpts []httpapi.RouterOption, opts ...service.Option) *testServer {
@@ -70,7 +72,7 @@ func newTestServerWithOptions(t *testing.T, routerOpts []httpapi.RouterOption, o
 	}
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler), routerOpts...))
 	t.Cleanup(srv.Close)
-	return &testServer{t: t, srv: srv, svc: svc}
+	return &testServer{t: t, srv: srv, svc: svc, conn: conn}
 }
 
 // do sends a request. A non-empty body defaults to application/json unless
@@ -339,8 +341,12 @@ func TestSignupSetsSessionCookie(t *testing.T) {
 	}
 
 	me, meBody := ts.do("GET", "/v0/me", "", nil, c)
-	if me.StatusCode != http.StatusOK || !strings.Contains(meBody, `"slug":"ada-`) || !strings.Contains(meBody, `"role":"owner"`) {
+	if me.StatusCode != http.StatusOK {
 		t.Fatalf("GET /v0/me: status %d body %s", me.StatusCode, meBody)
+	}
+	var mine service.Me
+	if err := json.Unmarshal([]byte(meBody), &mine); err != nil || len(mine.Organizations) != 0 || mine.Organization != nil {
+		t.Fatalf("GET /v0/me: body %s (%v)", meBody, err)
 	}
 }
 
@@ -349,6 +355,49 @@ func TestSignupClosed(t *testing.T) {
 	res, body := ts.do("POST", "/v0/auth/signup", `{"email":"ada@example.com","password":"ada-password-1"}`, nil)
 	if res.StatusCode != http.StatusForbidden || !strings.Contains(body, `"code":"forbidden"`) {
 		t.Errorf("status %d body %s", res.StatusCode, body)
+	}
+}
+
+func TestSetupLinkPublicPage(t *testing.T) {
+	ts := newTestServer(t)
+	ctx := service.WithPrincipal(context.Background(), service.LocalPrincipal())
+	if _, err := ts.conn.ExecContext(ctx, `INSERT INTO clusters
+		(id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, created_at)
+		VALUES ('01970000-0000-7000-8000-0000000000c1', 'eu-west', 'EU West', 'http://127.0.0.1:1', 'http://127.0.0.1:1',
+		        'docker', x'00', 'tok', '0000', 'ready', '2026-11-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	link, err := ts.svc.CreateSetupLink(ctx, service.CreateSetupLinkRequest{Plan: "free", Region: "eu-west"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, body := ts.do("GET", "/v0/setup/"+link.Token, "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body %s", res.StatusCode, body)
+	}
+	var info service.SetupLinkInfo
+	if err := json.Unmarshal([]byte(body), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.InstanceName != "Lewbox" || info.Plan.Name != "Free" || info.Region.Name != "EU West" {
+		t.Errorf("info = %+v", info)
+	}
+	if strings.Contains(body, "eu-west") || strings.Contains(body, `"slug"`) || strings.Contains(body, link.Token) {
+		t.Errorf("the page leaks internals: %s", body)
+	}
+
+	// The page is public: no token, no cookie, and it works with the link's.
+	if _, err := ts.svc.CreateOrganization(ctx, service.CreateOrganizationRequest{Name: "From link", SetupToken: link.Token}); err != nil {
+		t.Fatal(err)
+	}
+	res, body = ts.do("GET", "/v0/setup/"+link.Token, "", nil)
+	if res.StatusCode != http.StatusNotFound || !strings.Contains(body, "this setup link is invalid or has expired") {
+		t.Errorf("used link: status %d body %s", res.StatusCode, body)
+	}
+	res, body = ts.do("GET", "/v0/setup/not-a-token", "", nil)
+	if res.StatusCode != http.StatusNotFound || !strings.Contains(body, "this setup link is invalid or has expired") {
+		t.Errorf("unknown link: status %d body %s", res.StatusCode, body)
 	}
 }
 

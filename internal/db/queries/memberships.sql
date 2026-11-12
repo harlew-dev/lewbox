@@ -3,6 +3,16 @@ INSERT INTO memberships (id, org_id, user_id, role, created_at)
 VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
+-- name: CreateOwnerMembership :one
+-- Creates the first owner only while the account owns fewer than max_owned
+-- workspaces. No row means the cap is reached; the guard is in the statement,
+-- so two concurrent creates cannot both pass it.
+INSERT INTO memberships (id, org_id, user_id, role, created_at)
+SELECT sqlc.arg(id), sqlc.arg(org_id), sqlc.arg(user_id), 'owner', sqlc.arg(created_at)
+WHERE (SELECT COUNT(*) FROM memberships AS owned
+       WHERE owned.user_id = sqlc.arg(user_id) AND owned.role = 'owner') < CAST(sqlc.arg(max_owned) AS INTEGER)
+RETURNING *;
+
 -- name: GetMembership :one
 SELECT * FROM memberships WHERE org_id = ? AND user_id = ?;
 

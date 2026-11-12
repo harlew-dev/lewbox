@@ -2,8 +2,6 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
-const region = { slug: 'eu-west', name: 'EU West', endpoint_url: 'https://eu.example', runtime: 'docker', status: 'ready' }
-
 const snapshot = {
   name: 'ckpt-1',
   region: 'eu-west',
@@ -22,7 +20,6 @@ describe('Snapshots tab', () => {
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/snapshots': () => json(200, { data: deleted ? [] : [snapshot], partial_nodes: [] }),
         'DELETE /v0/snapshots/ckpt-1': () => {
           deleted = true
@@ -37,8 +34,7 @@ describe('Snapshots tab', () => {
     const tabs = await screen.findByRole('navigation', { name: 'Sandbox views' })
     expect(within(tabs).getByRole('link', { name: 'Snapshots' })).toHaveAttribute('aria-current', 'page')
     const row = (await screen.findByText('ckpt-1')).closest('tr')!
-    expect(await within(row).findByText('EU West')).toBeInTheDocument()
-    expect(within(row).queryByText('eu-west')).toBeNull()
+    expect(screen.queryByRole('columnheader', { name: 'Region' })).toBeNull()
     expect(within(row).getByText('sb-0001')).toBeInTheDocument()
     expect(within(row).getByText('1 vCPU · 1 GB · 10 GB disk')).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: 'Push state' })).toBeNull()
@@ -62,7 +58,6 @@ describe('Snapshots tab', () => {
     stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/snapshots': () => json(200, { data: [{ ...snapshot, push_state: 'failed' }], partial_nodes: [] }),
       },
       customerUser,
@@ -77,7 +72,6 @@ describe('Snapshots tab', () => {
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         // The region still lists it: the delete hasn't reached every node.
         'GET /v0/snapshots': () => json(200, { data: [snapshot], partial_nodes: [] }),
         'DELETE /v0/snapshots/ckpt-1': () => json(200, snapshot),
@@ -97,7 +91,6 @@ describe('Snapshots tab', () => {
     stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/snapshots': () => json(200, { data: [], partial_nodes: [] }),
       },
       customerUser,

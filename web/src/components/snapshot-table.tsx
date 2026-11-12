@@ -26,18 +26,20 @@ function snapshotSize(snapshot: api.Snapshot): string {
 
 const key = (snapshot: api.Snapshot) => `${snapshot.region}/${snapshot.name}`
 
-// A workspace's snapshots in every region it has a plan in, with delete
-// (confirmed) for those who may. `empty` is shown when there are none.
+// A workspace's snapshots, with delete (confirmed) for those who may.
+// `empty` is shown when there are none; the portal hides the region column.
 export function Snapshots({
   org,
   canDelete,
   regionName,
   empty,
+  showRegion = true,
 }: {
   org: string
   canDelete: boolean
   regionName: (slug: string) => string
   empty: ReactNode
+  showRegion?: boolean
 }) {
   const snapshots = useLoad(() => api.listSnapshots(org), [org])
   const [target, setTarget] = useState<api.Snapshot | null>(null)
@@ -65,7 +67,7 @@ export function Snapshots({
           <TableHead>
             <TableRow>
               <TableHeader>Name</TableHeader>
-              <TableHeader>Region</TableHeader>
+              {showRegion && <TableHeader>Region</TableHeader>}
               <TableHeader>Source sandbox</TableHeader>
               <TableHeader>Created</TableHeader>
               <TableHeader>Size</TableHeader>
@@ -87,7 +89,9 @@ export function Snapshots({
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(snapshot.region)}</TableCell>
+                {showRegion && (
+                  <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(snapshot.region)}</TableCell>
+                )}
                 <TableCell className="max-w-56">
                   {snapshot.source_sandbox_id ? (
                     <CopyText value={snapshot.source_sandbox_id} label={`Copy ${snapshot.source_sandbox_id}`} />

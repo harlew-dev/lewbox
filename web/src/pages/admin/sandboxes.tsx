@@ -24,14 +24,14 @@ export function FleetSandboxesPage() {
 
   return (
     <>
-      <PageHeader title="Sandboxes" description="Every customer’s sandboxes, longest running first." />
+      <PageHeader title="Sandboxes" description="Every workspace’s sandboxes, longest running first." />
       <SandboxFilters regions={regions.list} region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
       {sandboxes.loading && !sandboxes.data ? (
         <ListSkeleton label="Loading sandboxes" rows={4} />
       ) : sandboxes.error.message ? (
         <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
       ) : list.length === 0 ? (
-        <EmptyState title="No sandboxes" description="Sandboxes customers start show up here within seconds." />
+        <EmptyState title="No sandboxes" description="Sandboxes workspaces start show up here within seconds." />
       ) : (
         <SandboxTable sandboxes={list} regionName={regions.name} fleet canChange onChanged={sandboxes.refresh} />
       )}
