@@ -3,6 +3,7 @@ import { useState } from 'react'
 import * as api from '../../lib/api'
 import { SandboxFilters } from '../../components/sandbox-filters'
 import { SandboxTable } from '../../components/sandbox-table'
+import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 
@@ -19,11 +20,12 @@ export function FleetSandboxesPage() {
   const [status, setStatus] = useState('')
   const sandboxes = useLoad(() => api.listSandboxes({ region, status }), [region, status], { every: 10_000 })
   const list = [...(sandboxes.data?.data ?? [])].sort(byLongestRunning)
+  const regions = useRegions()
 
   return (
     <>
       <PageHeader title="Sandboxes" description="Every customer’s sandboxes, longest running first." />
-      <SandboxFilters region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
+      <SandboxFilters regions={regions.list} region={region} status={status} onRegion={setRegion} onStatus={setStatus} />
       {sandboxes.loading && !sandboxes.data ? (
         <ListSkeleton label="Loading sandboxes" rows={4} />
       ) : sandboxes.error.message ? (
@@ -31,7 +33,7 @@ export function FleetSandboxesPage() {
       ) : list.length === 0 ? (
         <EmptyState title="No sandboxes" description="Sandboxes customers start show up here within seconds." />
       ) : (
-        <SandboxTable sandboxes={list} fleet canChange onChanged={sandboxes.refresh} />
+        <SandboxTable sandboxes={list} regionName={regions.name} fleet canChange onChanged={sandboxes.refresh} />
       )}
     </>
   )

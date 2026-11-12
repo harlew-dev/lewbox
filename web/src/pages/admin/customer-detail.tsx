@@ -33,20 +33,20 @@ import { EllipsisHorizontalIcon, PencilIcon, TrashIcon } from '@heroicons/react/
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useRefreshPending } from '../../components/console-layout'
+import { SandboxKeyTable } from '../../components/sandbox-key-table'
 import { SandboxTable } from '../../components/sandbox-table'
-import { Snapshots } from '../../components/snapshot-table'
 import { SubscriptionTable } from '../../components/subscription-table'
 import { UsageSummary } from '../../components/usage-summary'
 import * as api from '../../lib/api'
 import { daysAgo, formatLimit, formatMemory, formatNumber } from '../../lib/format'
 import { invalidLimitReason, limitText, parseLimit, validLimits } from '../../lib/limits'
 import { orgPermissions } from '../../lib/organizations'
+import { useRegions, type Regions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { MembersSection } from '../organizations/members'
 import { OrgStatusBadge } from '../organizations/roles'
-import { SandboxKeyTable } from '../portal/keys'
-import { SuspendDialog } from './customers'
+import { SuspendDialog } from './suspend-dialog'
 
 const back = { href: '/admin/customers', label: 'Customers' }
 
@@ -54,7 +54,6 @@ const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'sandboxes', label: 'Sandboxes' },
   { id: 'keys', label: 'API keys' },
-  { id: 'snapshots', label: 'Snapshots' },
   { id: 'members', label: 'Members' },
 ] as const
 
@@ -133,13 +132,6 @@ export function CustomerDetailPage() {
       {tab === 'overview' && <CustomerOverview org={org} onChanged={changed} />}
       {tab === 'sandboxes' && <CustomerSandboxes org={org} />}
       {tab === 'keys' && <CustomerKeys org={org} />}
-      {tab === 'snapshots' && (
-        <Snapshots
-          org={org.slug}
-          canDelete
-          empty={<EmptyState title="No snapshots" description={`${org.name} hasn’t taken a snapshot.`} />}
-        />
-      )}
       {tab === 'members' && (
         <>
           <div className="mb-4 flex justify-end">
@@ -164,11 +156,12 @@ export function CustomerDetailPage() {
 
 function CustomerOverview({ org, onChanged }: { org: api.Organization; onChanged: () => void }) {
   const usage = useLoad(() => api.getUsage({ org: org.slug, from: daysAgo(30), granularity: 'day' }), [org.slug])
+  const regions = useRegions()
   return (
     <>
-      <Regions org={org} onChanged={onChanged} />
+      <RegionPlans org={org} regions={regions} onChanged={onChanged} />
       <Subheading className="mt-14 mb-6">Usage, last 30 days</Subheading>
-      <UsageSummary usage={usage} onRetry={usage.reload} />
+      <UsageSummary usage={usage} regionName={regions.name} onRetry={usage.reload} />
     </>
   )
 }
@@ -176,16 +169,15 @@ function CustomerOverview({ org, onChanged }: { org: api.Organization; onChanged
 type Editing = { subscription: api.Subscription | null } | null
 
 // The workspace's plan in each region, with what it uses there now.
-function Regions({ org, onChanged }: { org: api.Organization; onChanged: () => void }) {
+function RegionPlans({ org, regions, onChanged }: { org: api.Organization; regions: Regions; onChanged: () => void }) {
   const subscriptions = useLoad(() => api.listSubscriptions(org.slug), [org.slug])
   const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
-  const regions = useLoad(() => api.listRegions(), [])
   const [editing, setEditing] = useState<Editing>(null)
   const [removing, setRemoving] = useState<api.Subscription | null>(null)
   const list = subscriptions.data?.data ?? []
-  const used = new Map((limits.data?.regions ?? []).map((region) => [region.slug, region.used]))
+  const reports = new Map((limits.data?.regions ?? []).map((region) => [region.slug, region]))
   const subscribed = new Set(list.map((subscription) => subscription.region.slug))
-  const free = (regions.data?.data ?? []).filter((region) => !subscribed.has(region.slug))
+  const free = regions.list.filter((region) => !subscribed.has(region.slug))
 
   function saved() {
     subscriptions.refresh()
@@ -200,8 +192,8 @@ function Regions({ org, onChanged }: { org: api.Organization; onChanged: () => v
         <Button
           outline
           onClick={() => setEditing({ subscription: null })}
-          disabled={!regions.data || free.length === 0}
-          disabledReason={regions.data ? 'It has a plan in every region' : 'Loading regions'}
+          disabled={!regions.loaded || free.length === 0}
+          disabledReason={regions.loaded ? 'It has a plan in every region' : 'Loading regions'}
         >
           Add region
         </Button>
@@ -215,7 +207,7 @@ function Regions({ org, onChanged }: { org: api.Organization; onChanged: () => v
       ) : (
         <SubscriptionTable
           subscriptions={list}
-          used={used}
+          reports={reports}
           actions={(subscription) => (
             <Dropdown>
               <DropdownButton as={Button} plain aria-label={`Actions for ${subscription.region.name}`}>
@@ -243,7 +235,7 @@ function Regions({ org, onChanged }: { org: api.Organization; onChanged: () => v
 }
 
 // Removing a region revokes the workspace's keys there. When a key can't be
-// revoked the API answers 502; the operator can then remove it anyway.
+// revoked (the error says so), the operator can remove it anyway.
 function RemoveRegionDialog({
   org,
   subscription,
@@ -276,7 +268,7 @@ function RemoveRegionDialog({
         if (subscription) await api.deleteSubscription(org.slug, subscription.region.slug, force)
       }}
       onError={(failure) => {
-        if (failure instanceof api.ApiError && failure.status === 502) setForce(true)
+        if (failure instanceof api.ApiError && /revoke/i.test(failure.message)) setForce(true)
       }}
       onConfirmed={() => {
         setForce(false)
@@ -435,11 +427,12 @@ function SubscriptionForm({
 
 function CustomerSandboxes({ org }: { org: api.Organization }) {
   const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug], { every: 10_000 })
+  const regions = useRegions()
   const list = sandboxes.data?.data ?? []
   if (sandboxes.loading && !sandboxes.data) return <ListSkeleton label="Loading sandboxes" rows={3} />
   if (sandboxes.error.message) return <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
   if (list.length === 0) return <EmptyState title="No sandboxes" description={`${org.name} has no sandboxes right now.`} />
-  return <SandboxTable sandboxes={list} canChange org={org.slug} onChanged={sandboxes.refresh} />
+  return <SandboxTable sandboxes={list} regionName={regions.name} canChange org={org.slug} onChanged={sandboxes.refresh} />
 }
 
 function CustomerKeys({ org }: { org: api.Organization }) {

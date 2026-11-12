@@ -1,7 +1,6 @@
 import {
   Avatar,
   Button,
-  ConfirmationDialog,
   EmptyState,
   ErrorNotice,
   ListSkeleton,
@@ -15,7 +14,6 @@ import {
   TableRow,
   Text,
   tabFrom,
-  toast,
 } from '@harlew-dev/ui'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
@@ -91,7 +89,7 @@ export function CustomersPage() {
                 <TableCell className="text-zinc-500 dark:text-zinc-400">
                   {org.regions.length === 0
                     ? 'None'
-                    : org.regions.map((region) => `${region.slug} · ${region.plan.name}`).join(', ')}
+                    : org.regions.map((region) => `${region.name} · ${region.plan.name}`).join(', ')}
                 </TableCell>
                 <TableCell>
                   <OrgStatusBadge status={org.status} />
@@ -106,35 +104,7 @@ export function CustomersPage() {
         </Table>
       )}
 
-      <NewCustomerDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <NewCustomerDialog open={createOpen} onClose={() => setCreateOpen(false)} onChanged={customers.refresh} />
     </>
-  )
-}
-
-export function SuspendDialog({
-  org,
-  onClose,
-  onSuspended,
-}: {
-  org: api.Organization | null
-  onClose: () => void
-  onSuspended: () => void
-}) {
-  return (
-    <ConfirmationDialog
-      open={org !== null}
-      onClose={onClose}
-      title={org ? `Suspend ${org.name}?` : 'Suspend customer?'}
-      description="Its sandboxes are stopped and its API keys stop working until you restore it. Nothing is deleted."
-      confirm="Suspend customer"
-      variant="danger"
-      onConfirm={async () => {
-        if (org) await api.updateOrganization(org.slug, { status: 'suspended' })
-      }}
-      onConfirmed={() => {
-        toast.success('Customer suspended.')
-        onSuspended()
-      }}
-    />
   )
 }

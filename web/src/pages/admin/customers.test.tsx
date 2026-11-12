@@ -34,9 +34,6 @@ const limits = {
       plan: { slug: 'free', name: 'Free' },
       limits: euSubscription.limits,
       used: { sandboxes: 1, vcpus: 1, memory_mb: 1024 },
-      quota: null,
-      blocked: false,
-      pushed_at: null,
       error: '',
     },
   ],
@@ -64,7 +61,8 @@ describe('customers', () => {
     const row = (await screen.findAllByRole('link', { name: /Acme/ }))[0]!
     expect(row).toHaveAttribute('href', '/admin/customers/acme')
     expect(screen.getByRole('columnheader', { name: 'Workspace' })).toBeInTheDocument()
-    expect(screen.getByText('eu-west · Free')).toBeInTheDocument()
+    expect(screen.getByText('EU West · Free')).toBeInTheDocument()
+    expect(screen.queryByText(/eu-west/)).toBeNull()
     expect(screen.getByText('12.5')).toBeInTheDocument()
     const tabs = screen.getByRole('navigation', { name: 'Customer views' })
     expect(within(tabs).getByRole('link', { name: 'Pending' })).toHaveAttribute('aria-current', 'page')
@@ -96,6 +94,8 @@ describe('customers', () => {
 
 describe('new customer', () => {
   const settings = { instance_name: 'Lewbox', signup: 'closed', default_plan: 'pro', default_regions: ['eu-west'] }
+  const user = { id: 'u1', email: 'dev@acme.test', instance_admin: false, disabled: false, created_at: '' }
+  const noAccount = () => json(404, { error: { code: 'not_found', message: 'no user "dev@acme.test"' } })
 
   function stub(routes: Record<string, (call: Call) => Response>) {
     return stubAPI({
@@ -122,9 +122,12 @@ describe('new customer', () => {
     expect(screen.queryByRole('combobox', { name: 'Region 2' })).toBeNull()
   }
 
+  const writes = (calls: Call[]) => calls.filter((call) => call.method !== 'GET').map((call) => `${call.method} ${call.url}`)
+
   it('generates a password, then creates the account, the workspace and its region plan in order', async () => {
     const calls = stub({
-      'POST /v0/users': (call) => json(201, { id: 'u1', email: (call.body as { email: string }).email, instance_admin: false, disabled: false, created_at: '' }),
+      'GET /v0/users/dev%40acme.test': noAccount,
+      'POST /v0/users': () => json(201, user),
       'PUT /v0/subscriptions/eu-west': () => json(200, { ...euSubscription, plan: { slug: 'pro', name: 'Pro' } }),
     })
     renderApp('/admin/customers')
@@ -141,27 +144,23 @@ describe('new customer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create customer' }))
     await waitFor(() => expect(calls.some((call) => call.method === 'PUT')).toBe(true))
 
-    const writes = calls.filter((call) => call.method !== 'GET')
-    expect(writes.map((call) => `${call.method} ${call.url}`)).toEqual([
-      'POST /v0/users',
-      'POST /v0/organizations',
-      'PUT /v0/subscriptions/eu-west',
-    ])
-    expect(writes[0]!.body).toEqual({ email: 'dev@acme.test', password: password.value, instance_admin: false })
-    const org = writes[1]!.body as { slug: string; name: string; owner: string }
+    expect(writes(calls)).toEqual(['POST /v0/users', 'POST /v0/organizations', 'PUT /v0/subscriptions/eu-west'])
+    const sent = calls.filter((call) => call.method !== 'GET')
+    expect(sent[0]!.body).toEqual({ email: 'dev@acme.test', password: password.value, instance_admin: false })
+    const org = sent[1]!.body as { slug: string; name: string; owner: string }
     expect(org.slug).toMatch(/^acme-corp-[a-z0-9]{4}$/)
     expect(org).toMatchObject({ name: 'Acme Corp', owner: 'dev@acme.test' })
-    expect(writes[2]).toMatchObject({ org: org.slug, body: { plan: 'pro' } })
+    expect(sent[2]).toMatchObject({ org: org.slug, body: { plan: 'pro' } })
   })
 
-  it('uses an existing account and says which step failed', async () => {
+  it('uses an existing account without a password, and says which step failed', async () => {
     const calls = stub({
-      'POST /v0/users': () => json(409, { error: { code: 'conflict', message: 'a user with email "dev@acme.test" already exists' } }),
+      'GET /v0/users/dev%40acme.test': () => json(200, user),
       'PUT /v0/subscriptions/eu-west': () => json(502, { error: { code: 'unavailable', message: 'region eu-west did not answer' } }),
     })
     renderApp('/admin/customers')
     await fill()
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
+    // No password: the account exists, so none is needed.
     fireEvent.click(screen.getByRole('button', { name: 'Create customer' }))
 
     expect(await screen.findByText('Adding EU West failed:')).toBeInTheDocument()
@@ -169,11 +168,94 @@ describe('new customer', () => {
     expect(screen.getByText('Used the existing account dev@acme.test.')).toBeInTheDocument()
     expect(screen.getByText('Created the workspace Acme Corp.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open Acme Corp' })).toBeInTheDocument()
+    expect(calls.some((call) => call.method === 'POST' && call.url === '/v0/users')).toBe(false)
 
     // Trying again only retries the region: the workspace isn't made twice.
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(2))
     expect(calls.filter((call) => call.method === 'POST' && call.url === '/v0/organizations')).toHaveLength(1)
+  })
+
+  it('asks for a password when the email has no account', async () => {
+    const calls = stub({ 'GET /v0/users/dev%40acme.test': noAccount })
+    renderApp('/admin/customers')
+    await fill()
+    fireEvent.click(screen.getByRole('button', { name: 'Create customer' }))
+
+    expect(await screen.findByText('Creating the account failed:')).toBeInTheDocument()
+    expect(screen.getByText('dev@acme.test has no account yet. Enter a password for it.')).toBeInTheDocument()
+    expect(writes(calls)).toEqual([])
+    expect(screen.getByLabelText('Password')).toBeEnabled()
+  })
+
+  it('remembers the account it made, and locks what was made so a retry can’t ignore an edit', async () => {
+    let orgFails = true
+    let usEastFails = true
+    const calls = stub({
+      'GET /v0/users/dev%40acme.test': noAccount,
+      'POST /v0/users': () => json(201, user),
+      'POST /v0/organizations': (call) => {
+        if (orgFails) {
+          orgFails = false
+          return json(500, { error: { code: 'internal', message: 'try later' } })
+        }
+        const body = call.body as { slug: string; name: string }
+        return json(201, { ...acme, slug: body.slug, name: body.name, role: undefined, regions: [] })
+      },
+      'PUT /v0/subscriptions/eu-west': () => json(200, euSubscription),
+      'PUT /v0/subscriptions/us-east': () => {
+        if (!usEastFails) return json(200, { ...euSubscription, region: usEast })
+        usEastFails = false
+        return json(502, { error: { code: 'unavailable', message: 'region us-east did not answer' } })
+      },
+    })
+    renderApp('/admin/customers')
+    await fill()
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add region' }))
+    expect(await screen.findByRole('combobox', { name: 'Region 2' })).toHaveTextContent('US East')
+
+    // The account is made, the workspace isn't.
+    fireEvent.click(screen.getByRole('button', { name: 'Create customer' }))
+    expect(await screen.findByText('Creating the workspace failed:')).toBeInTheDocument()
+    expect(screen.getByText('Created the account dev@acme.test.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Owner email')).toBeDisabled()
+    expect(screen.getByLabelText('Password')).toBeDisabled()
+    expect(screen.getByLabelText('Workspace name')).toBeEnabled()
+
+    // The retry doesn't make the account again, nor call it "existing".
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Adding US East failed:')).toBeInTheDocument()
+    expect(screen.getByText('Created the account dev@acme.test.')).toBeInTheDocument()
+    expect(screen.queryByText(/Used the existing account/)).toBeNull()
+    expect(calls.filter((call) => call.method === 'POST' && call.url === '/v0/users')).toHaveLength(1)
+
+    // EU West is made, so its row is locked; US East can still change.
+    expect(screen.getByLabelText('Workspace name')).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: 'Region 1' })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('button', { name: 'Remove region 1' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: 'Region 2' })).not.toHaveAttribute('data-disabled')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(calls.filter((call) => call.url === '/v0/subscriptions/us-east')).toHaveLength(2))
+    expect(calls.filter((call) => call.url === '/v0/subscriptions/eu-west')).toHaveLength(1)
+  })
+
+  it('refreshes the customers when the dialog closes after making a workspace', async () => {
+    const calls = stub({
+      'GET /v0/users/dev%40acme.test': () => json(200, user),
+      'PUT /v0/subscriptions/eu-west': () => json(502, { error: { code: 'unavailable', message: 'region eu-west did not answer' } }),
+    })
+    renderApp('/admin/customers')
+    await fill()
+    fireEvent.click(screen.getByRole('button', { name: 'Create customer' }))
+    expect(await screen.findByText('Adding EU West failed:')).toBeInTheDocument()
+
+    const lists = () => calls.filter((call) => call.method === 'GET' && call.url === '/v0/organizations').length
+    const before = lists()
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(lists()).toBe(before + 1))
   })
 })
 
@@ -231,5 +313,49 @@ describe('customer regions', () => {
       ]),
     )
     expect(calls.filter((call) => call.method === 'DELETE').every((call) => call.org === 'acme')).toBe(true)
+  })
+
+  it('offers no forced removal when the failure isn’t about revoking keys', async () => {
+    const calls = stubAPI({
+      ...detailRoutes(acme),
+      'GET /v0/organizations?status=pending': () => json(200, { data: [] }),
+      'DELETE /v0/subscriptions/eu-west': () =>
+        json(502, { error: { code: 'unavailable', message: 'region eu-west did not answer' } }),
+    })
+    renderApp('/admin/customers/acme')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for EU West' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove region' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove region' }))
+
+    expect(await screen.findByText(/region eu-west did not answer/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove anyway' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove region' })).toBeInTheDocument()
+    expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1)
+  })
+
+  it('says when a region’s quota couldn’t be pushed', async () => {
+    stubAPI({
+      ...detailRoutes(acme),
+      'GET /v0/organizations?status=pending': () => json(200, { data: [] }),
+      'GET /v0/limits': () =>
+        json(200, { regions: [{ ...limits.regions[0], error: 'eu-west: connection refused' }] }),
+    })
+    renderApp('/admin/customers/acme')
+
+    const row = (await screen.findByText('EU West')).closest('tr')!
+    expect(await within(row).findByText('Quota push failed: eu-west: connection refused')).toBeInTheDocument()
+  })
+
+  it('has no Snapshots tab', async () => {
+    stubAPI({ ...detailRoutes(acme), 'GET /v0/organizations?status=pending': () => json(200, { data: [] }) })
+    renderApp('/admin/customers/acme')
+    const tabs = await screen.findByRole('navigation', { name: 'Customer views' })
+    expect(within(tabs).getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Overview',
+      'Sandboxes',
+      'API keys',
+      'Members',
+    ])
   })
 })

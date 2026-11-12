@@ -35,8 +35,6 @@ const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
 const HomePage = lazyPage(() => import('./pages/portal/home'), 'HomePage')
 const KeysPage = lazyPage(() => import('./pages/portal/keys'), 'KeysPage')
 const SandboxesPage = lazyPage(() => import('./pages/portal/sandboxes'), 'SandboxesPage')
-const SettingsPage = lazyPage(() => import('./pages/portal/settings'), 'SettingsPage')
-const SnapshotsPage = lazyPage(() => import('./pages/portal/snapshots'), 'SnapshotsPage')
 const TeamPage = lazyPage(() => import('./pages/portal/team'), 'TeamPage')
 const UsagePage = lazyPage(() => import('./pages/portal/usage'), 'UsagePage')
 const ClusterDetailPage = lazyPage(() => import('./pages/servers/cluster-detail'), 'ClusterDetailPage')
@@ -120,11 +118,11 @@ export function App() {
         <Route element={<Portal />}>
           <Route index element={<HomePage />} />
           <Route path="/sandboxes" element={<SandboxesPage />} />
-          <Route path="/snapshots" element={<SnapshotsPage />} />
+          <Route path="/snapshots" element={<Navigate to="/sandboxes?tab=snapshots" replace />} />
           <Route path="/keys" element={<KeysPage />} />
           <Route path="/usage" element={<UsagePage />} />
           <Route path="/team" element={<TeamPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<Navigate to="/team" replace />} />
         </Route>
 
         <Route path="/admin" element={<Console />}>

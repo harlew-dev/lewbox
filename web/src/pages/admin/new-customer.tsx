@@ -22,7 +22,7 @@ import {
 } from '@harlew-dev/ui'
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { PlusIcon, XMarkIcon } from '@heroicons/react/16/solid'
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useRefreshPending } from '../../components/console-layout'
 import * as api from '../../lib/api'
@@ -68,8 +68,28 @@ interface Row {
   plan: string
 }
 
+// The owner's account: 'existing' when the email already has one (the
+// password is then unused), otherwise created with `password`.
+async function ownerAccount(email: string, password: string): Promise<'created' | 'existing'> {
+  try {
+    await api.getUser(email)
+    return 'existing'
+  } catch (failure) {
+    if (!(failure instanceof api.ApiError && failure.status === 404)) throw failure
+  }
+  if (password === '') throw new Error(`${email} has no account yet. Enter a password for it.`)
+  try {
+    await api.createUser({ email, password, instance_admin: false })
+    return 'created'
+  } catch (failure) {
+    if (failure instanceof api.ApiError && failure.status === 409) return 'existing'
+    throw failure
+  }
+}
+
 // What has been made so far, so a failure says which step failed and a
-// second try picks up from there rather than making the workspace twice.
+// second try picks up from there rather than making anything twice. What
+// was made is locked in the form, so a second try can't ignore an edit.
 interface Progress {
   account: 'created' | 'existing' | null
   workspace: api.Organization | null
@@ -80,16 +100,32 @@ interface Progress {
 
 const started: Progress = { account: null, workspace: null, regions: [], failed: null }
 
-export function NewCustomerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+// `onChanged` runs when the dialog closes, however it closes, once it has
+// made a workspace.
+export function NewCustomerDialog({
+  open,
+  onClose,
+  onChanged,
+}: {
+  open: boolean
+  onClose: () => void
+  onChanged: () => void
+}) {
   const count = useOpenCount(open)
+  const made = useRef(false)
+  function close() {
+    if (made.current) onChanged()
+    made.current = false
+    onClose()
+  }
   return (
-    <Dialog open={open} onClose={onClose} size="2xl">
-      <NewCustomer key={count} onClose={onClose} />
+    <Dialog open={open} onClose={close} size="2xl">
+      <NewCustomer key={count} onClose={close} onMade={() => (made.current = true)} />
     </Dialog>
   )
 }
 
-function NewCustomer({ onClose }: { onClose: () => void }) {
+function NewCustomer({ onClose, onMade }: { onClose: () => void; onMade: () => void }) {
   const settings = useLoad(() => api.getSettings(), [])
   const regions = useLoad(() => api.listRegions(), [])
   const plans = useLoad(() => api.listPlans(), [])
@@ -123,7 +159,15 @@ function NewCustomer({ onClose }: { onClose: () => void }) {
       </>
     )
   }
-  return <NewCustomerForm settings={settings.data} regions={regions.data.data} plans={plans.data.data} onClose={onClose} />
+  return (
+    <NewCustomerForm
+      settings={settings.data}
+      regions={regions.data.data}
+      plans={plans.data.data}
+      onClose={onClose}
+      onMade={onMade}
+    />
+  )
 }
 
 function NewCustomerForm({
@@ -131,11 +175,13 @@ function NewCustomerForm({
   regions,
   plans,
   onClose,
+  onMade,
 }: {
   settings: api.Settings
   regions: api.Region[]
   plans: api.Plan[]
   onClose: () => void
+  onMade: () => void
 }) {
   const navigate = useNavigate()
   const refreshPending = useRefreshPending()
@@ -155,7 +201,7 @@ function NewCustomerForm({
 
   const regionName = (slug: string) => regions.find((region) => region.slug === slug)?.name ?? slug
   const complete = rows.every((row) => row.region !== '' && row.plan !== '')
-  const ready = email.trim() !== '' && password !== '' && name.trim() !== '' && complete
+  const ready = email.trim() !== '' && name.trim() !== '' && complete
 
   function change(id: number, field: 'region' | 'plan', value: string) {
     setRows((before) => before.map((row) => (row.id === id ? { ...row, [field]: value } : row)))
@@ -173,9 +219,9 @@ function NewCustomerForm({
     navigate(`/admin/customers/${encodeURIComponent(slug)}`)
   }
 
-  // Creates the account (or uses the existing one), the workspace with it
-  // as owner, then the plan in each region, in that order. A failure stops
-  // there and keeps what was made: nothing is rolled back.
+  // Finds or creates the account, then the workspace with it as owner,
+  // then the plan in each region, in that order. A failure stops there and
+  // keeps what was made: nothing is rolled back.
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (busy || !ready) return
@@ -183,17 +229,14 @@ function NewCustomerForm({
     const next: Progress = { ...progress, regions: [...progress.regions], failed: null }
     let step = ''
     try {
-      if (!next.workspace) {
+      if (!next.account) {
         step = 'Creating the account'
-        try {
-          await api.createUser({ email: email.trim(), password, instance_admin: false })
-          next.account = 'created'
-        } catch (failure) {
-          if (!(failure instanceof api.ApiError && failure.status === 409)) throw failure
-          next.account = 'existing'
-        }
+        next.account = await ownerAccount(email.trim(), password)
+      }
+      if (!next.workspace) {
         step = 'Creating the workspace'
         next.workspace = await api.createOrganization({ slug: workspaceSlug(name), name: name.trim(), owner: email.trim() })
+        onMade()
       }
       for (const row of rows) {
         if (next.regions.includes(row.region)) continue
@@ -220,13 +263,15 @@ function NewCustomerForm({
     ...progress.regions.map((slug) => `Added ${regionName(slug)}.`),
   ].filter((line): line is string => typeof line === 'string')
 
-  const locked = busy || progress.workspace !== null
+  const accountLocked = busy || progress.account !== null
+  const nameLocked = busy || progress.workspace !== null
+  const added = new Set(progress.regions)
   const regionsFree = regions.length > rows.length
 
   return (
     <form onSubmit={submit}>
       <DialogTitle>New customer</DialogTitle>
-      <DialogDescription>An account, its workspace, and a plan in each region it may use.</DialogDescription>
+      <DialogDescription>An owner account, a workspace and its regions.</DialogDescription>
       <DialogBody>
         <FieldGroup>
           {progress.failed && (
@@ -245,7 +290,7 @@ function NewCustomerForm({
             </Notice>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field disabled={locked}>
+            <Field disabled={accountLocked}>
               <Label>Owner email</Label>
               <Input
                 type="email"
@@ -256,18 +301,16 @@ function NewCustomerForm({
                 onChange={(event) => setEmail(event.currentTarget.value)}
               />
             </Field>
-            <Field disabled={locked}>
+            <Field disabled={nameLocked}>
               <Label>Workspace name</Label>
               <Input required value={name} placeholder="Acme" onChange={(event) => setName(event.currentTarget.value)} />
             </Field>
           </div>
-          <Field disabled={locked}>
+          <Field disabled={accountLocked}>
             <Label>Password</Label>
             <div className="flex gap-2">
               <div className="flex-1">
                 <Input
-                  required
-                  minLength={12}
                   autoComplete="off"
                   spellCheck={false}
                   value={password}
@@ -275,11 +318,11 @@ function NewCustomerForm({
                   className="font-mono"
                 />
               </div>
-              <Button outline onClick={() => setPassword(generatePassword())} disabled={locked}>
+              <Button outline onClick={() => setPassword(generatePassword())} disabled={accountLocked}>
                 Generate
               </Button>
             </div>
-            <Description>At least 12 characters. Copy it for the customer; it isn’t shown again. Ignored if the account exists.</Description>
+            <Description>Only for a new account. Copy it for the customer.</Description>
           </Field>
 
           <Fieldset disabled={busy}>
@@ -288,12 +331,14 @@ function NewCustomerForm({
               <Text className="mt-2">No region is ready yet. Add one on the Servers page first.</Text>
             ) : (
               <div className="mt-3 space-y-3">
-                {rows.length === 0 && <Text>No regions: the customer can’t run sandboxes until you add one.</Text>}
+                {rows.length === 0 && <Text>No regions: it can’t run sandboxes yet.</Text>}
                 {rows.map((row, index) => {
                   const taken = new Set(rows.filter((other) => other.id !== row.id).map((other) => other.region))
+                  const done = added.has(row.region)
                   return (
                     <div key={row.id} className="flex items-center gap-2">
                       <Listbox
+                        disabled={done}
                         aria-label={`Region ${index + 1}`}
                         value={row.region}
                         onChange={(value) => change(row.id, 'region', value)}
@@ -309,6 +354,7 @@ function NewCustomerForm({
                           ))}
                       </Listbox>
                       <Listbox
+                        disabled={done}
                         aria-label={`Plan in region ${index + 1}`}
                         value={row.plan}
                         onChange={(value) => change(row.id, 'plan', value)}
@@ -323,6 +369,8 @@ function NewCustomerForm({
                       </Listbox>
                       <Button
                         plain
+                        disabled={done}
+                        disabledReason="Already added"
                         aria-label={`Remove region ${index + 1}`}
                         onClick={() => setRows((before) => before.filter((other) => other.id !== row.id))}
                       >

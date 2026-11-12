@@ -17,6 +17,7 @@ import {
   ListboxOption,
   ListSkeleton,
   Notice,
+  SecretReveal,
   Text,
   useAction,
 } from '@harlew-dev/ui'
@@ -24,6 +25,7 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
 import { formatDate } from '../../lib/format'
+import { KeyExpiryField } from '../../components/key-expiry'
 import { noRegionText } from '../../components/no-region'
 import { sandboxSnippets } from '../../lib/snippets'
 import { failureMessage, useLoad } from '../../lib/use-load'
@@ -78,7 +80,7 @@ function CreateKey({
   const list = (regions.data?.data ?? []).filter((region) => subscribed.has(region.slug))
   const [name, setName] = useState('')
   const [picked, setPicked] = useState('')
-  const [expiresIn, setExpiresIn] = useState('90d')
+  const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
   const [key, setKey] = useState<api.NewSandboxKey | null>(null)
   const region = picked || list[0]?.slug || ''
   const create = useAction(() => api.createSandboxKey(org.slug, { name: name.trim(), region, expires_in: expiresIn }), {
@@ -133,15 +135,7 @@ function CreateKey({
                 </Listbox>
               </Field>
             )}
-            <Field disabled={create.busy}>
-              <Label>Expires</Label>
-              <Listbox value={expiresIn} onChange={setExpiresIn}>
-                <ListboxOption value="30d">In 30 days</ListboxOption>
-                <ListboxOption value="90d">In 90 days</ListboxOption>
-                <ListboxOption value="365d">In a year</ListboxOption>
-                <ListboxOption value="never">Never</ListboxOption>
-              </Listbox>
-            </Field>
+            <KeyExpiryField value={expiresIn} onChange={setExpiresIn} disabled={create.busy} />
           </FieldGroup>
         )}
       </DialogBody>
@@ -163,8 +157,7 @@ function CreateKey({
 }
 
 function NewKey({ apiKey, onDone }: { apiKey: api.NewSandboxKey; onDone: () => void }) {
-  const { tabs } = sandboxSnippets(apiKey.region, apiKey.token)
-  const env = `export SB_API_URL=${apiKey.env.SB_API_URL}\nexport SB_API_TOKEN=${apiKey.env.SB_API_TOKEN}`
+  const { env, tabs } = sandboxSnippets(apiKey.region, apiKey)
   return (
     <>
       <DialogTitle>Copy your API key</DialogTitle>
@@ -172,15 +165,15 @@ function NewKey({ apiKey, onDone }: { apiKey: api.NewSandboxKey; onDone: () => v
         {apiKey.name} works in {apiKey.region.name}
         {apiKey.expires_at ? ` until ${formatDate(apiKey.expires_at)}` : ' until you revoke it'}.
       </DialogDescription>
-      <DialogBody className="space-y-6">
-        <Notice variant="warning">Copy it now. It can’t be shown again.</Notice>
-        <CodeBlock code={apiKey.token} label="Copy API key" />
-        <div>
-          <Text className="mb-2">Set these, then run an example.</Text>
-          <CodeBlock code={env} label="Copy environment variables" />
-        </div>
-        <CodeTabs tabs={tabs} label="Examples" />
-        <Text size="sm">Creating a sandbox at a limit returns 429; the SDKs retry.</Text>
+      <DialogBody>
+        <SecretReveal secret={apiKey.token} label="Copy API key">
+          <div>
+            <Text className="mb-2">Set these, then run an example.</Text>
+            <CodeBlock code={env} label="Copy environment variables" />
+          </div>
+          <CodeTabs tabs={tabs} label="Examples" />
+          <Text size="sm">At a limit, creating a sandbox returns 429.</Text>
+        </SecretReveal>
       </DialogBody>
       <DialogActions>
         <Button onClick={onDone}>Done</Button>

@@ -7,7 +7,6 @@ export function relativeTime(value?: string): string {
   const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
 
   if (absolute < 45) return 'Just now'
-  if (absolute < 90) return formatter.format(Math.round(seconds / 60), 'minute')
   if (absolute < 3600) return formatter.format(Math.round(seconds / 60), 'minute')
   if (absolute < 86400) return formatter.format(Math.round(seconds / 3600), 'hour')
   if (absolute < 86400 * 30) return formatter.format(Math.round(seconds / 86400), 'day')
@@ -55,12 +54,11 @@ export function formatDay(value: string): string {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
+// The days Usage shows at first, which Home's usage tiles cover too.
+export const defaultUsageDays = 30
+
 // The start of the UTC day `days - 1` days ago, so a range of 7 days ends today.
 export function daysAgo(days: number, now = new Date()): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (days - 1))).toISOString()
 }
 
-// The start of this calendar month, UTC.
-export function monthStart(now = new Date()): string {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
-}

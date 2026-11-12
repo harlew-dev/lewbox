@@ -4,7 +4,6 @@ import {
   Code,
   CodeBlock,
   ConfirmationDialog,
-  Description,
   Dialog,
   DialogActions,
   DialogBody,
@@ -20,10 +19,8 @@ import {
   FieldGroup,
   Input,
   Label,
-  Listbox,
-  ListboxOption,
   ListSkeleton,
-  Notice,
+  SecretReveal,
   Step,
   Steps,
   Table,
@@ -40,6 +37,7 @@ import {
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { EllipsisHorizontalIcon, NoSymbolIcon } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
+import { KeyExpiryField } from '../../components/key-expiry'
 import * as api from '../../lib/api'
 import { serverURL } from '../../lib/commands'
 import { formatDate, relativeTime } from '../../lib/format'
@@ -57,7 +55,8 @@ function KeyStatus({ status }: { status: api.AdminKey['status'] }) {
 }
 
 // An organization's management API keys (lba_…) for the Lewbox API. The
-// page around it owns the "Create API key" button and opens the dialog.
+// page around it owns the "Create management key" button and opens the
+// dialog.
 export function AdminKeysSection({
   org,
   can,
@@ -82,7 +81,7 @@ export function AdminKeysSection({
       ) : list.length === 0 ? (
         <EmptyState
           title="No management API keys"
-          description="A key lets your own backend call the Lewbox API as this workspace."
+          description="Lets your backend call the Lewbox API as this workspace."
         />
       ) : (
         <Table>
@@ -216,7 +215,7 @@ function CreateKey({
   onCreated: () => void
 }) {
   const [name, setName] = useState('')
-  const [expiresIn, setExpiresIn] = useState('90d')
+  const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
   const [key, setKey] = useState<api.NewAdminKey | null>(null)
   const create = useAction(() => api.createAdminKey(org.slug, { name, expires_in: expiresIn }), {
     toError: (failure) => ({ message: failureMessage(failure) }),
@@ -234,26 +233,22 @@ function CreateKey({
   if (key) {
     return (
       <>
-        <DialogTitle>Copy your new key</DialogTitle>
+        <DialogTitle>Copy your management key</DialogTitle>
         <DialogDescription>
           {key.name} acts for {org.name}
           {key.expires_at ? ` until ${formatDate(key.expires_at)}` : ' until you revoke it'}.
         </DialogDescription>
-        <DialogBody className="space-y-6">
-          <Notice variant="warning">
-            Copy it now. Lewbox keeps only a hash of the key and can't show it again.
-          </Notice>
-          <CodeBlock code={key.token} label="Copy API key" />
-          <Steps aria-label="Using the key">
-            <Step title="Call the API with it">
-              <CodeBlock
-                code={`curl -H "Authorization: Bearer $LEWBOX_KEY" ${serverURL()}/v0/organization`}
-              />
-            </Step>
-            <Step title="Or sign in the CLI with it" description="Paste the key when it waits on stdin.">
-              <CodeBlock code={`lewbox login ${serverURL()} --key-stdin`} />
-            </Step>
-          </Steps>
+        <DialogBody>
+          <SecretReveal secret={key.token} label="Copy management key">
+            <Steps aria-label="Using the key">
+              <Step title="Call the API with it">
+                <CodeBlock code={`curl -H "Authorization: Bearer $LEWBOX_KEY" ${serverURL()}/v0/organization`} />
+              </Step>
+              <Step title="Or sign in the CLI with it">
+                <CodeBlock code={`lewbox login ${serverURL()} --key-stdin`} />
+              </Step>
+            </Steps>
+          </SecretReveal>
         </DialogBody>
         <DialogActions>
           <Button onClick={onClose}>Done</Button>
@@ -264,11 +259,8 @@ function CreateKey({
 
   return (
     <form onSubmit={submit}>
-      <DialogTitle>Create a management API key</DialogTitle>
-      <DialogDescription>
-        For your backend: it reads {org.name}, its members and keys through the Lewbox API. It can’t
-        change members or keys.
-      </DialogDescription>
+      <DialogTitle>Create management key</DialogTitle>
+      <DialogDescription>Lets your backend call the Lewbox API as {org.name}.</DialogDescription>
       <DialogBody>
         <FieldGroup>
           <ErrorNotice error={create.error} />
@@ -281,17 +273,8 @@ function CreateKey({
               placeholder="Production backend"
               onChange={(event) => setName(event.currentTarget.value)}
             />
-            <Description>So you can tell keys apart later.</Description>
           </Field>
-          <Field disabled={create.busy}>
-            <Label>Expires</Label>
-            <Listbox value={expiresIn} onChange={setExpiresIn}>
-              <ListboxOption value="30d">In 30 days</ListboxOption>
-              <ListboxOption value="90d">In 90 days</ListboxOption>
-              <ListboxOption value="365d">In a year</ListboxOption>
-              <ListboxOption value="">Never</ListboxOption>
-            </Listbox>
-          </Field>
+          <KeyExpiryField value={expiresIn} onChange={setExpiresIn} disabled={create.busy} />
         </FieldGroup>
       </DialogBody>
       <DialogActions>

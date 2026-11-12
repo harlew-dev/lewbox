@@ -71,7 +71,7 @@ export function PlansPage() {
               <TableHeader className="text-right">Sandboxes</TableHeader>
               <TableHeader className="text-right">vCPUs</TableHeader>
               <TableHeader className="text-right">Memory</TableHeader>
-              <TableHeader className="text-right">Subscriptions</TableHeader>
+              <TableHeader className="text-right">Customers</TableHeader>
               <TableHeader className="w-0">
                 <span className="sr-only">Actions</span>
               </TableHeader>
@@ -190,7 +190,7 @@ function PlanForm({ plan, onClose, onSaved }: { plan: api.Plan | null; onClose: 
   return (
     <form onSubmit={submit}>
       <DialogTitle>{plan ? `Edit ${plan.name}` : 'New plan'}</DialogTitle>
-      <DialogDescription>Leave a limit empty for no limit.</DialogDescription>
+      <DialogDescription>An empty limit is Unlimited.</DialogDescription>
       <DialogBody>
         <FieldGroup>
           <ErrorNotice error={save.error} />

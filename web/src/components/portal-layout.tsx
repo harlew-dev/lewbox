@@ -12,9 +12,7 @@ import {
 } from '@harlew-dev/ui'
 import { ChevronDownIcon, WrenchScrewdriverIcon } from '@heroicons/react/16/solid'
 import {
-  CameraIcon,
   ChartBarIcon,
-  Cog6ToothIcon,
   CubeIcon,
   HomeIcon,
   KeyIcon,
@@ -67,11 +65,9 @@ export function PortalLayout({ children }: { children: ReactNode }) {
   const items = [
     { href: '/', label: 'Home', icon: HomeIcon, exact: true },
     { href: '/sandboxes', label: 'Sandboxes', icon: CubeIcon },
-    { href: '/snapshots', label: 'Snapshots', icon: CameraIcon },
     { href: '/keys', label: 'API keys', icon: KeyIcon },
     { href: '/usage', label: 'Usage', icon: ChartBarIcon },
     { href: '/team', label: 'Team', icon: UserGroupIcon },
-    { href: '/settings', label: 'Settings', icon: Cog6ToothIcon },
   ]
   return (
     <AppShell

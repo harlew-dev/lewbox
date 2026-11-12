@@ -3,21 +3,22 @@ import type { ReactNode } from 'react'
 import type * as api from '../lib/api'
 import { formatLimit, formatMemory, formatNumber } from '../lib/format'
 
-// Region, plan and the limits there. `used` puts what is in use now beside
-// each limit; `actions` adds a last cell per row.
+// Region, plan and the limits there. `reports` (the limits report by region
+// slug) puts what is in use now beside each limit, and says when the limits
+// couldn't be pushed to the region; `actions` adds a last cell per row.
 export function SubscriptionTable({
   subscriptions,
-  used,
+  reports,
   actions,
 }: {
   subscriptions: api.Subscription[]
-  used?: Map<string, api.LimitsUsed>
+  reports?: Map<string, api.RegionLimits>
   actions?: (subscription: api.Subscription) => ReactNode
 }) {
   const overridden = (subscription: api.Subscription, key: keyof api.Limits) =>
     subscription.overrides?.[key] != null ? ' (override)' : ''
   const cell = (subscription: api.Subscription, key: keyof api.Limits, format: (value: number) => string) => {
-    const now = used?.get(subscription.region.slug)
+    const now = reports?.get(subscription.region.slug)?.used
     const limit = formatLimit(subscription.limits[key], format)
     return now ? `${format(now[key])} of ${limit}` : limit
   }
@@ -40,7 +41,14 @@ export function SubscriptionTable({
       <TableBody>
         {subscriptions.map((subscription) => (
           <TableRow key={subscription.region.slug}>
-            <TableCell className="font-medium">{subscription.region.name}</TableCell>
+            <TableCell>
+              <div className="font-medium">{subscription.region.name}</div>
+              {reports?.get(subscription.region.slug)?.error && (
+                <div className="text-xs/5 text-red-600 dark:text-red-500">
+                  Quota push failed: {reports.get(subscription.region.slug)!.error}
+                </div>
+              )}
+            </TableCell>
             <TableCell>{subscription.plan.name}</TableCell>
             <TableCell className="text-right tabular-nums">
               {cell(subscription, 'sandboxes', (v) => formatNumber(v, 0))}

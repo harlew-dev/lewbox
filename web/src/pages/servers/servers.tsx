@@ -30,7 +30,6 @@ import { useSearchParams } from 'react-router'
 import { NoClusters } from '../../components/no-clusters'
 import { AliveBadge, StatusBadge } from '../../components/status'
 import * as api from '../../lib/api'
-import { useAuth } from '../../lib/auth'
 import { formatDate, relativeTime } from '../../lib/format'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
@@ -47,8 +46,6 @@ const tabs = [
 export function ServersPage() {
   const [searchParams] = useSearchParams()
   const tab = tabFrom(searchParams, tabs)
-  const { user } = useAuth()
-  const isAdmin = user?.instance_admin === true
   useDocumentTitle(tab === 'nodes' ? 'Nodes' : 'Servers')
 
   const clusters = useLoad(() => api.listClusters(), [])
@@ -61,14 +58,7 @@ export function ServersPage() {
       <PageHeader
         title="Servers"
         description="The AerolVM clusters this orchestrator manages, and their nodes."
-        actions={
-          isAdmin ? (
-            <AddServerMenu
-              clusters={clusterList}
-              onChanged={() => setNodesVersion((value) => value + 1)}
-            />
-          ) : undefined
-        }
+        actions={<AddServerMenu clusters={clusterList} onChanged={() => setNodesVersion((value) => value + 1)} />}
         className="mb-4"
       />
       <PageTabs label="Server views" tabs={tabs} current={tab} className="mb-8" />
@@ -76,7 +66,7 @@ export function ServersPage() {
         {tab === 'clusters' ? (
           <ClustersTab load={clusters} />
         ) : (
-          <NodesTab key={nodesVersion} clusters={clusterList} isAdmin={isAdmin} />
+          <NodesTab key={nodesVersion} clusters={clusterList} />
         )}
       </PageTransition>
     </>
@@ -136,7 +126,7 @@ function ClustersTab({ load }: { load: ReturnType<typeof useLoad<api.ClusterList
   )
 }
 
-function NodesTab({ clusters, isAdmin }: { clusters: api.Cluster[]; isAdmin: boolean }) {
+function NodesTab({ clusters }: { clusters: api.Cluster[] }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const cluster = searchParams.get('cluster') ?? ''
   const [target, setTarget] = useState<api.Node | null>(null)
@@ -203,11 +193,9 @@ function NodesTab({ clusters, isAdmin }: { clusters: api.Cluster[]; isAdmin: boo
               <TableHeader>Version</TableHeader>
               <TableHeader>Last seen</TableHeader>
               <TableHeader>URL</TableHeader>
-              {isAdmin && (
-                <TableHeader className="w-0">
-                  <span className="sr-only">Actions</span>
-                </TableHeader>
-              )}
+              <TableHeader className="w-0">
+                <span className="sr-only">Actions</span>
+              </TableHeader>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -237,11 +225,9 @@ function NodesTab({ clusters, isAdmin }: { clusters: api.Cluster[]; isAdmin: boo
                 <TableCell>
                   <Code>{node.url}</Code>
                 </TableCell>
-                {isAdmin && (
-                  <TableCell className="w-0 text-right">
-                    <NodeActions node={node} onRemove={setTarget} />
-                  </TableCell>
-                )}
+                <TableCell className="w-0 text-right">
+                  <NodeActions node={node} onRemove={setTarget} />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

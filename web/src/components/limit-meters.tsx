@@ -6,7 +6,8 @@ import { formatMemory, formatNumber } from '../lib/format'
 import type { LoadState } from '../lib/use-load'
 import { noRegionText } from './no-region'
 
-function level(used: number, limit: number): Level {
+function level(used: number, limit: number | null): Level {
+  if (limit === null) return 'ok'
   if (used >= limit) return 'critical'
   if (used >= limit * 0.8) return 'warn'
   return 'ok'
@@ -22,7 +23,7 @@ export function LimitMeters({ limits, used }: { limits: api.Limits; used: api.Li
   return (
     <dl className="grid gap-6 sm:grid-cols-3">
       {rows.map(({ label, used, limit, format }) => {
-        const text = limit === null ? `${format(used)} · no limit` : `${format(used)} of ${format(limit)}`
+        const text = limit === null ? `${format(used)} · Unlimited` : `${format(used)} of ${format(limit)}`
         return (
           <div key={label}>
             <dt className="flex justify-between gap-2 text-sm/6">
@@ -30,11 +31,7 @@ export function LimitMeters({ limits, used }: { limits: api.Limits; used: api.Li
               <span className="text-zinc-500 tabular-nums dark:text-zinc-400">{text}</span>
             </dt>
             <dd className="mt-2">
-              {limit === null ? (
-                <div className="h-2 rounded-full bg-zinc-950/5 dark:bg-white/10" />
-              ) : (
-                <Meter label={label} value={used} max={limit} level={level(used, limit)} valueText={text} />
-              )}
+              <Meter label={label} value={used} max={limit} level={level(used, limit)} valueText={text} />
             </dd>
           </div>
         )
@@ -44,10 +41,10 @@ export function LimitMeters({ limits, used }: { limits: api.Limits; used: api.Li
 }
 
 // Each subscribed region: its name, its plan, and a meter per limit.
-export function RegionLimits({ limits, title = 'Limits' }: { limits: LoadState<api.LimitsReport>; title?: string }) {
+export function RegionLimits({ limits }: { limits: LoadState<api.LimitsReport> }) {
   return (
     <>
-      <Subheading className="mt-14 mb-6">{title}</Subheading>
+      <Subheading className="mt-14 mb-6">Limits</Subheading>
       {limits.data ? (
         limits.data.regions.length === 0 ? (
           <Text>{noRegionText}</Text>

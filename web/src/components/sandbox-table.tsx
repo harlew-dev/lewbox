@@ -53,14 +53,17 @@ type Pending = { sandbox: api.Sandbox; action: 'stop' | 'delete' }
 
 // Sandboxes with stop and delete, each confirmed. `fleet` adds the customer
 // and how long each has run, for the operator. `org` scopes the actions.
+// `regionName` turns a sandbox's region slug into its name.
 export function SandboxTable({
   sandboxes,
+  regionName,
   fleet = false,
   canChange,
   org,
   onChanged,
 }: {
   sandboxes: api.Sandbox[]
+  regionName: (slug: string) => string
   fleet?: boolean
   canChange: boolean
   org?: string
@@ -97,7 +100,7 @@ export function SandboxTable({
                 <CopyText value={sandbox.id} label={`Copy ${sandbox.id}`} />
                 {sandbox.image && <div className="truncate text-xs/5 text-zinc-500 dark:text-zinc-400">{sandbox.image}</div>}
               </TableCell>
-              <TableCell className="text-zinc-500 dark:text-zinc-400">{sandbox.region}</TableCell>
+              <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(sandbox.region)}</TableCell>
               <TableCell>
                 <SandboxStatus sandbox={sandbox} />
               </TableCell>
@@ -137,7 +140,7 @@ export function SandboxTable({
         title={`${stopping ? 'Stop' : 'Delete'} ${pending?.sandbox.id ?? 'sandbox'}?`}
         description={
           stopping
-            ? 'It stops running and stops using compute. It still counts toward the limits until it is deleted.'
+            ? 'It still counts toward your limits until you delete it.'
             : 'It is destroyed with everything in it. This can’t be undone.'
         }
         confirm={stopping ? 'Stop sandbox' : 'Delete sandbox'}

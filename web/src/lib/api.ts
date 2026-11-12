@@ -122,7 +122,6 @@ export interface Snapshot {
   memory_mb: number
   disk_gb: number
   push_state: string
-  push_error?: string
 }
 
 export interface SnapshotList {
@@ -146,8 +145,12 @@ export interface SandboxKey {
 export interface NewSandboxKey extends SandboxKey {
   token: string
   env: { SB_API_URL: string; SB_API_TOKEN: string }
+  // Only in a region that runs the E2B API (the docker runtime).
   e2b_env?: { E2B_API_URL: string; E2B_SANDBOX_URL: string; E2B_API_KEY: string }
 }
+
+// How long a new key lasts. Both kinds of key take the same choices.
+export type KeyLifetime = '30d' | '90d' | '365d' | 'never'
 
 export type SandboxStatus = 'creating' | 'started' | 'stopped' | 'destroyed' | 'error'
 
@@ -207,9 +210,7 @@ export interface RegionLimits {
   plan: PlanRef
   limits: Limits
   used: LimitsUsed
-  quota: { max_sandboxes: number; max_cpu: number; max_memory_mb: number } | null
-  blocked: boolean
-  pushed_at: string | null
+  // Why the limits couldn't be pushed to the region, or "".
   error: string
 }
 
@@ -220,7 +221,6 @@ export interface LimitsReport {
 export interface UptimeDay {
   date: string
   uptime: number | null
-  samples?: number
   down_minutes?: number
 }
 
@@ -302,7 +302,6 @@ export interface Node {
   name: string
   url: string
   created_at: string
-  cluster_id?: string
   cluster?: string
   role?: string
   version?: string
@@ -717,11 +716,13 @@ export function listAdminKeys(org: string): Promise<AdminKeyList> {
   return request<AdminKeyList>('/v0/admin-keys', { org })
 }
 
+// A management key that never expires is sent with an empty expires_in.
 export function createAdminKey(
   org: string,
-  input: { name: string; expires_in: string },
+  input: { name: string; expires_in: KeyLifetime },
 ): Promise<NewAdminKey> {
-  return request<NewAdminKey>('/v0/admin-keys', { method: 'POST', body: input, org })
+  const body = { ...input, expires_in: input.expires_in === 'never' ? '' : input.expires_in }
+  return request<NewAdminKey>('/v0/admin-keys', { method: 'POST', body, org })
 }
 
 export function revokeAdminKey(org: string, keyRef: string): Promise<AdminKey> {
@@ -766,7 +767,7 @@ export function setSubscription(org: string, region: string, input: Subscription
   return request<Subscription>(`/v0/subscriptions/${ref(region)}`, { method: 'PUT', body: input, org })
 }
 
-// force removes it even when the region's keys can't be revoked (a 502).
+// force removes it even when the region's keys can't be revoked.
 export function deleteSubscription(org: string, region: string, force = false): Promise<Subscription> {
   return request<Subscription>(`/v0/subscriptions/${ref(region)}${query({ force: force ? 'true' : undefined })}`, {
     method: 'DELETE',
@@ -792,7 +793,7 @@ export function listSandboxKeys(org: string): Promise<{ data: SandboxKey[] }> {
 
 export function createSandboxKey(
   org: string,
-  input: { name: string; region: string; expires_in: string },
+  input: { name: string; region: string; expires_in: KeyLifetime },
 ): Promise<NewSandboxKey> {
   return request<NewSandboxKey>('/v0/sandbox-keys', { method: 'POST', body: input, org })
 }

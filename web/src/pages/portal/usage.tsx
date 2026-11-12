@@ -1,13 +1,15 @@
 import { Listbox, ListboxOption, PageHeader } from '@harlew-dev/ui'
 import { useState } from 'react'
 import * as api from '../../lib/api'
-import { RegionLimits } from '../../components/limit-meters'
 import { UsageSummary } from '../../components/usage-summary'
-import { daysAgo } from '../../lib/format'
+import { daysAgo, defaultUsageDays } from '../../lib/format'
+import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
 
+// Not the library's TimeRange: that always offers a custom range, which
+// usage has no use for.
 const usageRanges = [
   { days: '7', label: 'Last 7 days' },
   { days: '30', label: 'Last 30 days' },
@@ -29,18 +31,17 @@ function UsageRange({ value, onChange }: { value: string; onChange: (days: strin
 export function UsagePage() {
   useDocumentTitle('Usage')
   const { org } = usePortalOrg()
-  const [days, setDays] = useState('30')
+  const [days, setDays] = useState(String(defaultUsageDays))
   const usage = useLoad(
     () => api.getUsage({ org: org.slug, from: daysAgo(Number(days)), granularity: 'day' }),
     [org.slug, days],
   )
-  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+  const regions = useRegions(org.slug)
 
   return (
     <>
       <PageHeader title="Usage" actions={<UsageRange value={days} onChange={setDays} />} />
-      <UsageSummary usage={usage} onRetry={usage.reload} />
-      <RegionLimits limits={limits} title="Limits by region" />
+      <UsageSummary usage={usage} regionName={regions.name} onRetry={usage.reload} />
     </>
   )
 }

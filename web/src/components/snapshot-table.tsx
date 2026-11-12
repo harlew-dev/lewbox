@@ -13,7 +13,6 @@ import {
   TableHeader,
   TableRow,
   toast,
-  type BadgeColor,
 } from '@harlew-dev/ui'
 import { TrashIcon } from '@heroicons/react/16/solid'
 import { useState, type ReactNode } from 'react'
@@ -21,37 +20,31 @@ import * as api from '../lib/api'
 import { formatDate, formatMemory, formatNumber, relativeTime } from '../lib/format'
 import { useLoad } from '../lib/use-load'
 
-const pushStates: Record<string, { label: string; color: BadgeColor }> = {
-  active: { label: 'Active', color: 'lime' },
-  pushed: { label: 'Pushed', color: 'lime' },
-  pending: { label: 'Pending', color: 'amber' },
-  pushing: { label: 'Pushing', color: 'amber' },
-  failed: { label: 'Failed', color: 'red' },
-  error: { label: 'Failed', color: 'red' },
-}
-
-function PushState({ snapshot }: { snapshot: api.Snapshot }) {
-  if (!snapshot.push_state) return <span className="text-zinc-500 dark:text-zinc-400">—</span>
-  const state = pushStates[snapshot.push_state] ?? { label: snapshot.push_state, color: 'zinc' as const }
-  return (
-    <Badge color={state.color} title={snapshot.push_error || undefined}>
-      {state.label}
-    </Badge>
-  )
-}
-
 function snapshotSize(snapshot: api.Snapshot): string {
   return `${formatNumber(snapshot.cpu)} vCPU · ${formatMemory(snapshot.memory_mb)} · ${formatNumber(snapshot.disk_gb, 0)} GB disk`
 }
 
+const key = (snapshot: api.Snapshot) => `${snapshot.region}/${snapshot.name}`
+
 // A workspace's snapshots in every region it has a plan in, with delete
 // (confirmed) for those who may. `empty` is shown when there are none.
-export function Snapshots({ org, canDelete, empty }: { org: string; canDelete: boolean; empty: ReactNode }) {
+export function Snapshots({
+  org,
+  canDelete,
+  regionName,
+  empty,
+}: {
+  org: string
+  canDelete: boolean
+  regionName: (slug: string) => string
+  empty: ReactNode
+}) {
   const snapshots = useLoad(() => api.listSnapshots(org), [org])
   const [target, setTarget] = useState<api.Snapshot | null>(null)
-  // Deleted here, hidden even if a cached list still has them.
-  const [deleted, setDeleted] = useState<Set<string>>(() => new Set())
-  const key = (snapshot: api.Snapshot) => `${snapshot.region}/${snapshot.name}`
+  // Deleted here, hidden until the list loads again: the answer it was
+  // deleted from may still have them.
+  const [hidden, setHidden] = useState<{ from: api.SnapshotList | null; keys: Set<string> }>({ from: null, keys: new Set() })
+  const deleted = hidden.from === snapshots.data ? hidden.keys : new Set<string>()
   const list = (snapshots.data?.data ?? []).filter((snapshot) => !deleted.has(key(snapshot)))
   const partial = snapshots.data?.partial_nodes ?? []
 
@@ -71,12 +64,11 @@ export function Snapshots({ org, canDelete, empty }: { org: string; canDelete: b
         <Table>
           <TableHead>
             <TableRow>
-              <TableHeader>Region</TableHeader>
               <TableHeader>Name</TableHeader>
+              <TableHeader>Region</TableHeader>
               <TableHeader>Source sandbox</TableHeader>
               <TableHeader>Created</TableHeader>
               <TableHeader>Size</TableHeader>
-              <TableHeader>Push state</TableHeader>
               {canDelete && (
                 <TableHeader className="w-0">
                   <span className="sr-only">Actions</span>
@@ -87,8 +79,15 @@ export function Snapshots({ org, canDelete, empty }: { org: string; canDelete: b
           <TableBody>
             {list.map((snapshot) => (
               <TableRow key={key(snapshot)}>
-                <TableCell className="text-zinc-500 dark:text-zinc-400">{snapshot.region}</TableCell>
-                <TableCell className="font-medium">{snapshot.name}</TableCell>
+                <TableCell className="font-medium">
+                  {snapshot.name}
+                  {snapshot.push_state === 'failed' && (
+                    <Badge color="red" className="ml-2">
+                      Upload failed
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(snapshot.region)}</TableCell>
                 <TableCell className="max-w-56">
                   {snapshot.source_sandbox_id ? (
                     <CopyText value={snapshot.source_sandbox_id} label={`Copy ${snapshot.source_sandbox_id}`} />
@@ -100,9 +99,6 @@ export function Snapshots({ org, canDelete, empty }: { org: string; canDelete: b
                   {relativeTime(snapshot.created_at)}
                 </TableCell>
                 <TableCell className="whitespace-nowrap tabular-nums">{snapshotSize(snapshot)}</TableCell>
-                <TableCell>
-                  <PushState snapshot={snapshot} />
-                </TableCell>
                 {canDelete && (
                   <TableCell className="w-0 text-right">
                     <Button plain aria-label={`Delete ${snapshot.name}`} onClick={() => setTarget(snapshot)}>
@@ -127,7 +123,7 @@ export function Snapshots({ org, canDelete, empty }: { org: string; canDelete: b
           if (target) await api.deleteSnapshot(org, target)
         }}
         onConfirmed={() => {
-          if (target) setDeleted((before) => new Set(before).add(key(target)))
+          if (target) setHidden({ from: snapshots.data, keys: new Set(deleted).add(key(target)) })
           toast.success('Snapshot deleted.')
           snapshots.refresh()
         }}

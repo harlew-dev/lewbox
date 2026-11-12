@@ -32,7 +32,6 @@ import { useNavigate, useParams } from 'react-router'
 import { AliveBadge, StatusBadge } from '../../components/status'
 import { ApiError } from '../../lib/api'
 import * as api from '../../lib/api'
-import { useAuth } from '../../lib/auth'
 import { formatDate, relativeTime } from '../../lib/format'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
@@ -46,7 +45,6 @@ const back = { href: '/admin/servers', label: 'Servers' }
 export function ClusterDetailPage() {
   const { ref = '' } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
   const [updated, setUpdated] = useState<api.ClusterDetail | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -71,8 +69,6 @@ export function ClusterDetailPage() {
     },
     { toError: (failure) => ({ message: errorMessage(failure) }) },
   )
-
-  const isAdmin = user?.instance_admin === true
 
   if (loading && !detail) {
     return (
@@ -102,7 +98,7 @@ export function ClusterDetailPage() {
     )
   }
 
-  const actions = isAdmin ? (
+  const actions = (
     <>
       <Button outline onClick={() => void check.run()} loading={check.loading}>
         Run checks
@@ -120,7 +116,7 @@ export function ClusterDetailPage() {
         </DropdownMenu>
       </Dropdown>
     </>
-  ) : undefined
+  )
 
   const failed = detail.checks.filter((item) => !item.ok).length
 
@@ -226,11 +222,9 @@ export function ClusterDetailPage() {
                 <TableHeader>Version</TableHeader>
                 <TableHeader>Last seen</TableHeader>
                 <TableHeader>URL</TableHeader>
-                {isAdmin && (
-                  <TableHeader className="w-0">
-                    <span className="sr-only">Actions</span>
-                  </TableHeader>
-                )}
+                <TableHeader className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -251,11 +245,9 @@ export function ClusterDetailPage() {
                     {relativeTime(node.last_seen_at)}
                   </TableCell>
                   <TableCell className="text-zinc-500 dark:text-zinc-400">{node.url}</TableCell>
-                  {isAdmin && (
-                    <TableCell className="w-0 text-right">
-                      <NodeActions node={node} onRemove={setRemoveNode} />
-                    </TableCell>
-                  )}
+                  <TableCell className="w-0 text-right">
+                    <NodeActions node={node} onRemove={setRemoveNode} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

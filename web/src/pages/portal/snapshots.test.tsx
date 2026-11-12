@@ -2,6 +2,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
+const region = { slug: 'eu-west', name: 'EU West', endpoint_url: 'https://eu.example', runtime: 'docker', status: 'ready' }
+
 const snapshot = {
   name: 'ckpt-1',
   region: 'eu-west',
@@ -14,12 +16,13 @@ const snapshot = {
   push_state: 'active',
 }
 
-describe('SnapshotsPage', () => {
-  it('lists snapshots and deletes one after confirmation', async () => {
+describe('Snapshots tab', () => {
+  it('lists snapshots with region names and deletes one after confirmation', async () => {
     let deleted = false
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/snapshots': () => json(200, { data: deleted ? [] : [snapshot], partial_nodes: [] }),
         'DELETE /v0/snapshots/ckpt-1': () => {
           deleted = true
@@ -29,13 +32,17 @@ describe('SnapshotsPage', () => {
       customerUser,
       [acmeMembership],
     )
-    renderApp('/snapshots')
+    renderApp('/sandboxes?tab=snapshots')
 
+    const tabs = await screen.findByRole('navigation', { name: 'Sandbox views' })
+    expect(within(tabs).getByRole('link', { name: 'Snapshots' })).toHaveAttribute('aria-current', 'page')
     const row = (await screen.findByText('ckpt-1')).closest('tr')!
-    expect(within(row).getByText('eu-west')).toBeInTheDocument()
+    expect(await within(row).findByText('EU West')).toBeInTheDocument()
+    expect(within(row).queryByText('eu-west')).toBeNull()
     expect(within(row).getByText('sb-0001')).toBeInTheDocument()
     expect(within(row).getByText('1 vCPU · 1 GB · 10 GB disk')).toBeInTheDocument()
-    expect(within(row).getByText('Active')).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'Push state' })).toBeNull()
+    expect(within(row).queryByText('Upload failed')).toBeNull()
     expect(calls.find((call) => call.url.startsWith('/v0/snapshots'))?.org).toBe('acme')
 
     fireEvent.click(within(row).getByRole('button', { name: 'Delete ckpt-1' }))
@@ -48,19 +55,55 @@ describe('SnapshotsPage', () => {
         org: 'acme',
       }),
     )
-    expect(await screen.findByText('Snapshots you take with the SDK show up here.')).toBeInTheDocument()
+    expect(await screen.findByText('Snapshots you take show up here.')).toBeInTheDocument()
+  })
+
+  it('marks a snapshot whose upload failed', async () => {
+    stubAPI(
+      {
+        'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () => json(200, { data: [region] }),
+        'GET /v0/snapshots': () => json(200, { data: [{ ...snapshot, push_state: 'failed' }], partial_nodes: [] }),
+      },
+      customerUser,
+      [acmeMembership],
+    )
+    renderApp('/sandboxes?tab=snapshots')
+    const row = (await screen.findByText('ckpt-1')).closest('tr')!
+    expect(within(row).getByText('Upload failed')).toBeInTheDocument()
+  })
+
+  it('shows a deleted snapshot again if a later load still has it', async () => {
+    const calls = stubAPI(
+      {
+        'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () => json(200, { data: [region] }),
+        // The region still lists it: the delete hasn't reached every node.
+        'GET /v0/snapshots': () => json(200, { data: [snapshot], partial_nodes: [] }),
+        'DELETE /v0/snapshots/ckpt-1': () => json(200, snapshot),
+      },
+      customerUser,
+      [acmeMembership],
+    )
+    renderApp('/sandboxes?tab=snapshots')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete ckpt-1' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete snapshot' }))
+    await waitFor(() => expect(calls.filter((call) => call.url.startsWith('/v0/snapshots') && call.method === 'GET')).toHaveLength(2))
+    expect(await screen.findByText('ckpt-1')).toBeInTheDocument()
   })
 
   it('says where snapshots come from when there are none', async () => {
     stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () => json(200, { data: [region] }),
         'GET /v0/snapshots': () => json(200, { data: [], partial_nodes: [] }),
       },
       customerUser,
       [acmeMembership],
     )
-    renderApp('/snapshots')
-    expect(await screen.findByText('Snapshots you take with the SDK show up here.')).toBeInTheDocument()
+    renderApp('/sandboxes?tab=snapshots')
+    expect(await screen.findByText('Snapshots you take show up here.')).toBeInTheDocument()
   })
 })

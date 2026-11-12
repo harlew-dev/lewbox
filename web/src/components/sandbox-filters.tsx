@@ -1,29 +1,26 @@
 import { Listbox, ListboxOption } from '@harlew-dev/ui'
-import * as api from '../lib/api'
-import { useLoad } from '../lib/use-load'
+import type * as api from '../lib/api'
 import { sandboxStatusOptions } from './sandbox-table'
 
-// Region and status pickers for a sandbox list; '' is "all". `org` lists
-// that workspace's regions (a customer sees no others).
+// Region and status pickers for a sandbox list; '' is "all".
 export function SandboxFilters({
-  org,
+  regions,
   region,
   status,
   onRegion,
   onStatus,
 }: {
-  org?: string
+  regions: api.Region[]
   region: string
   status: string
   onRegion: (region: string) => void
   onStatus: (status: string) => void
 }) {
-  const regions = useLoad(() => api.listRegions(org), [org])
   return (
     <div className="mb-6 flex flex-wrap gap-3">
       <Listbox aria-label="Region" value={region} onChange={onRegion} className="sm:w-48">
         <ListboxOption value="">All regions</ListboxOption>
-        {(regions.data?.data ?? []).map((option) => (
+        {regions.map((option) => (
           <ListboxOption key={option.slug} value={option.slug}>
             {option.name}
           </ListboxOption>

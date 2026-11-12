@@ -30,11 +30,43 @@ describe('routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Get started' })).toBeInTheDocument()
     const nav = screen.getAllByRole('link', { name: 'Sandboxes' })[0]!.closest('nav')!
+    const links = within(nav).getAllByRole('link').map((link) => link.textContent)
+    expect(links.filter((label) => ['Home', 'Sandboxes', 'API keys', 'Usage', 'Team'].includes(label ?? ''))).toEqual([
+      'Home',
+      'Sandboxes',
+      'API keys',
+      'Usage',
+      'Team',
+    ])
+    expect(links).not.toContain('Snapshots')
+    expect(links).not.toContain('Settings')
     expect(within(nav).getByRole('link', { name: 'API keys' })).toHaveAttribute('href', '/keys')
     expect(within(nav).queryByRole('link', { name: 'Customers' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'Plans' })).toBeNull()
     expect(within(nav).queryByRole('link', { name: 'Servers' })).toBeNull()
     expect(await screen.findByText('Owner')).toBeInTheDocument()
+  })
+
+  it('sends the old Snapshots and Settings pages to their new places', async () => {
+    stubAPI(
+      {
+        'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () => json(200, { data: [] }),
+        'GET /v0/snapshots': () => json(200, { data: [], partial_nodes: [] }),
+        'GET /v0/members': () => json(200, { data: [] }),
+      },
+      customerUser,
+      [acmeMembership],
+    )
+    const snapshots = renderApp('/snapshots')
+    const tabs = await screen.findByRole('navigation', { name: 'Sandbox views' })
+    expect(within(tabs).getByRole('link', { name: 'Snapshots' })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByText('Snapshots you take show up here.')).toBeInTheDocument()
+    snapshots.unmount()
+
+    renderApp('/settings')
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace name')).toHaveValue('Acme')
   })
 
   it('gives a customer the not-found page for the console', async () => {
