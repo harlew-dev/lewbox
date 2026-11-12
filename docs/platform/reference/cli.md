@@ -29,7 +29,7 @@ How a command picks its orchestrator: [Sign in](../accounts/sign-in.md#which-orc
 
 ### `lewbox version`
 
-Prints the CLI version.
+Prints the CLI version: the release tag for a downloaded release or `go install …@<tag>`, and `dev` for a build from a checkout that didn't set `VERSION`.
 
 ### `lewbox status [--check]`
 

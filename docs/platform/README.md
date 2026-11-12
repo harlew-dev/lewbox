@@ -28,7 +28,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | | |
 |---|---|
 | [Requirements](setup/requirements.md) | What the orchestrator and each node need, and which ports to open |
-| [Install the CLI](setup/install-the-cli.md) | Build `lewbox` and put it on each machine |
+| [Install the CLI](setup/install-the-cli.md) | Install `lewbox` on each machine |
 | [Run the orchestrator](setup/run-the-orchestrator.md) | `lewbox serve`, the first admin, where data lives |
 | [Run with Docker](setup/run-with-docker.md) | The orchestrator, console and docs in one container, with a volume |
 | [Run in production](setup/run-in-production.md) | A systemd service, TLS in front, backups |

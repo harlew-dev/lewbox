@@ -32,3 +32,8 @@ export function serverURL(): string {
 export function installCommand(host: string, runtime: Runtime): string {
   return `lewbox install --public-host ${arg(host, validHost, 'public-host')} --runtime ${runtime}`
 }
+
+// Installs the latest Lewbox on Ubuntu or Debian with Go's own installer. A
+// node doesn't need the web console, which `go install` can't build.
+export const installCLICommand =
+  'sudo apt install -y golang-go && export PATH="$PATH:$HOME/go/bin" && go install github.com/harlew-dev/lewbox/cmd/lewbox@latest && lewbox version'

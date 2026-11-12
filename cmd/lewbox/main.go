@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -35,6 +37,33 @@ import (
 
 // version is set at build time: -ldflags "-X main.version=v0.1.0".
 var version = "dev"
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		version = moduleVersion(version, info)
+	}
+}
+
+// lewboxTag is the shape of a Lewbox release tag (see `make release`). Go
+// module pseudo-versions such as v0.2.1-0.20261112211700-0123456789ab fit it.
+var lewboxTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
+
+// moduleVersion is the version for a binary built without -ldflags. `go
+// install github.com/harlew-dev/lewbox/cmd/lewbox@v0.2.0` builds from the
+// module cache and records the module's version, so that binary reports
+// v0.2.0 and `lewbox update` can compare it with a release. A build from a
+// checkout records VCS settings instead; it stays "dev" unless -ldflags set it.
+func moduleVersion(set string, info *debug.BuildInfo) string {
+	if set != "dev" || !lewboxTag.MatchString(info.Main.Version) {
+		return set
+	}
+	for _, s := range info.Settings {
+		if strings.HasPrefix(s.Key, "vcs") {
+			return set
+		}
+	}
+	return info.Main.Version
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

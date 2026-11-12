@@ -23,7 +23,7 @@ lewbox update --version v0.2.0    # a specific one
 Lewbox downloads the binary for this OS and architecture, checks it against the release's `checksums.txt`, and replaces itself in place. If its folder isn't writable by you (for example `/usr/local/bin`), it stops and prints the exact `sudo install …` command to run instead.
 
 > [!NOTE]
-> Releases are read from `LEWBOX_RELEASE_URL`, by default the GitHub releases of `harlew-dev/lewbox`. There are no releases there yet. To test with your own build, point `--release-from` at a folder holding `release.json`, `checksums.txt` and `lewbox_<os>_<arch>`.
+> Releases are read from `LEWBOX_RELEASE_URL`, by default the [GitHub releases](https://github.com/harlew-dev/lewbox/releases) of `harlew-dev/lewbox`. To test with your own build, point `--release-from` at a folder holding `release.json`, `checksums.txt` and `lewbox_<os>_<arch>`.
 
 ## Update AerolVM on this machine
 

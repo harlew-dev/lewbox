@@ -1,46 +1,66 @@
 ---
 title: Install the CLI
-description: Build the lewbox binary and put it on every machine that runs the orchestrator or an AerolVM node.
+description: Install lewbox on every machine that runs the orchestrator or an AerolVM node.
 ---
 
-`lewbox` is one binary: it's both the CLI and the orchestrator server. Every machine that runs the orchestrator, or that you turn into a node, needs it.
+`lewbox` is one binary: both the CLI and the orchestrator server. Install it on every machine that runs the orchestrator or that you turn into a node. Run these as your own user, not root.
+
+## Ubuntu and Debian
+
+```bash
+sudo apt install -y golang-go && export PATH="$PATH:$HOME/go/bin" && go install github.com/harlew-dev/lewbox/cmd/lewbox@latest && lewbox version
+```
+
+That's it. Ubuntu's Go may be older than the Go 1.27 Lewbox needs; Go downloads the newer version by itself.
+
+To keep `lewbox` on your `PATH` in new shells:
+
+```bash
+echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bashrc
+```
+
+On Fedora, use `sudo dnf install -y golang`. Anywhere else, install Go from [go.dev/dl](https://go.dev/dl/) and run the same `go install` line.
+
+> [!NOTE]
+> A binary from `go install` has no web console. That's fine on nodes. For the machine that runs `lewbox serve`, download a release (below) or use [Docker](run-with-docker.md).
+
+## Without Go: download a release
+
+Each release has prebuilt binaries for Linux `amd64` and `arm64`, with the web console included. This downloads the latest, checks its checksum, and installs it into `~/.local/bin`:
+
+```bash
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+URL=https://github.com/harlew-dev/lewbox/releases/latest/download
+cd "$(mktemp -d)" &&
+  curl -fsSL -O "$URL/lewbox_linux_$ARCH" -O "$URL/checksums.txt" &&
+  sha256sum --check --ignore-missing checksums.txt &&
+  install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox &&
+  cd - >/dev/null
+export PATH="$HOME/.local/bin:$PATH"
+lewbox version
+```
 
 ## From source
 
-You need Go 1.27 or later, and Node 24 or later for the web console.
+You need Go 1.27+ and Node 24+.
 
 ```bash
-git clone https://github.com/harlew-dev/lewbox.git
-cd lewbox
-make
-./bin/lewbox version
+git clone https://github.com/harlew-dev/lewbox.git && cd lewbox && make && ./bin/lewbox version
 ```
 
-`make` builds the web console and then `bin/lewbox` with it embedded. Add `bin/` to your `PATH`, or copy the binary somewhere you can write to.
-
-A plain `go build ./cmd/lewbox` still works, but the binary has no console until `make web` has built `web/dist`; until then the console page says it isn't built. Use `make build-go` for a fast Go-only rebuild once the console exists.
-
-## For another machine
-
-Build the binary for the target. `make build` still builds the console for the host first, then passes your `GOOS` and `GOARCH` to Go:
+## Update
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 make build BIN=lewbox-linux-amd64
-scp lewbox-linux-amd64 node-1:~/.local/bin/lewbox
+lewbox update
 ```
 
-Use `GOARCH=arm64` for ARM servers. Install it into a folder **your user can write to**, such as `~/.local/bin`, so that [`lewbox update`](../operations/update.md) can replace it later without `sudo`.
-
-> [!NOTE]
-> A one-line installer (`curl … | sh`) and prebuilt release downloads come with the first release.
+See [Update](../operations/update.md).
 
 ## Shell completion
 
 ```bash
 source <(lewbox completion bash)     # also: zsh, fish, powershell
 ```
-
-Add the line to your shell's rc file to keep it.
 
 ## Next
 

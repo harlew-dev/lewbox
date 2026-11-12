@@ -27,6 +27,7 @@ import { useState } from 'react'
 import * as api from '../../lib/api'
 import {
   arg,
+  installCLICommand,
   installCommand,
   serverURL,
   validHost,
@@ -203,10 +204,13 @@ function AddNode({
                 title="Install the Lewbox CLI on the machine"
                 description={
                   <>
-                    See <TextLink href="/docs/setup/install-the-cli">Install the CLI</TextLink>.
+                    On Ubuntu or Debian. Other systems:{' '}
+                    <TextLink href="/platform/setup/install-the-cli">Install the CLI</TextLink>.
                   </>
                 }
-              />
+              >
+                <CodeBlock code={installCLICommand} />
+              </Step>
               <Step title="Sign in to this server">
                 <CodeBlock code={`lewbox login ${serverURL()}`} />
               </Step>

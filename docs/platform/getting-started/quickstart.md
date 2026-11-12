@@ -7,22 +7,23 @@ Lewbox runs AerolVM sandbox clusters for you: it installs AerolVM on your machin
 
 You need a Linux machine with systemd and `sudo` (a VM is fine). See [Requirements](../setup/requirements.md) for the details.
 
-## 1. Build the CLI
+## 1. Install the CLI
+
+Download the latest release, check it against the release's checksums and put it in `~/.local/bin`:
 
 ```bash
-git clone https://github.com/harlew-dev/lewbox.git
-cd lewbox
-make
-```
-
-`make` builds the web console, then `bin/lewbox` with it embedded. You need Go 1.27+ and Node 24+. Put `bin` on your `PATH`:
-
-```bash
-export PATH="$PWD/bin:$PATH"
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+URL=https://github.com/harlew-dev/lewbox/releases/latest/download
+cd "$(mktemp -d)" &&
+  curl -fsSL -O "$URL/lewbox_linux_$ARCH" -O "$URL/checksums.txt" &&
+  sha256sum --check --ignore-missing checksums.txt &&
+  install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox &&
+  cd - >/dev/null
+export PATH="$HOME/.local/bin:$PATH"
 lewbox version
 ```
 
-There's no one-line installer until the first release. [Install the CLI](../setup/install-the-cli.md) covers building for another machine.
+This machine runs the orchestrator, so use the release: it includes the web console. On other nodes, the shorter `go install` route in [Install the CLI](../setup/install-the-cli.md) is enough.
 
 ## 2. Start the orchestrator
 

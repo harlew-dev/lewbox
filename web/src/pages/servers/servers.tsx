@@ -180,7 +180,7 @@ function NodesTab({ clusters }: { clusters: api.Cluster[] }) {
               ? 'Nodes appear here when a cluster is registered or a node joins one.'
               : 'No nodes belong to this cluster.'
           }
-          action={<Button href="/docs/clusters/add-nodes">Read the node guide</Button>}
+          action={<Button href="/platform/clusters/add-nodes">Read the node guide</Button>}
         />
       ) : (
         <Table>
