@@ -58,6 +58,12 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderUsage(w, data)
 	case service.LimitsReport:
 		return renderLimits(w, data)
+	case service.ClusterHealth:
+		return renderClusterHealth(w, data)
+	case service.ClusterMetrics:
+		return renderClusterMetrics(w, data)
+	case service.Overview:
+		return renderOverview(w, data)
 	case contextList:
 		return renderContexts(w, data.Data)
 	case firewallOutput:
@@ -467,4 +473,85 @@ func aliveText(alive *bool) string {
 		return "-"
 	}
 	return yesNo(*alive)
+}
+
+// renderClusterHealth prints one compact bar per cluster or node.
+func renderClusterHealth(w io.Writer, h service.ClusterHealth) error {
+	tw := newTable(w)
+	fmt.Fprintf(tw, "NAME\tUPTIME\t%dD\n", len(h.Cluster.Days))
+	fmt.Fprintf(tw, "cluster\t%s\t%s\n", percent(h.Cluster.Uptime), uptimeBar(h.Cluster.Days))
+	for _, n := range h.Nodes {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", n.Name, percent(n.Uptime), uptimeBar(n.Days))
+	}
+	return tw.Flush()
+}
+
+// renderClusterMetrics prints one row per node bucket.
+func renderClusterMetrics(w io.Writer, m service.ClusterMetrics) error {
+	fmt.Fprintf(w, "range: %s, bucket: %s\n", m.Range, bucketText(m.BucketSeconds))
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NODE\tSTART\tSANDBOXES\tVCPUS\tMEMORY_MB\tDISK_GB\tALIVE")
+	for _, node := range m.Nodes {
+		for _, point := range node.Data {
+			fmt.Fprintf(tw, "%s\t%s\t%.2f\t%.2f\t%.0f\t%.0f\t%.2f\n",
+				node.Name, point.Start.UTC().Format("2006-01-02 15:04"), point.Sandboxes,
+				point.CpuReserved, point.MemoryUsedMB, point.DiskFreeGB, point.Alive)
+		}
+	}
+	return tw.Flush()
+}
+
+// renderOverview prints the fleet counts, each cluster's bar and the busiest
+// customers.
+func renderOverview(w io.Writer, o service.Overview) error {
+	fmt.Fprintf(w, "customers: %d (%d pending, %d suspended)\n", o.Customers.Total, o.Customers.Pending, o.Customers.Suspended)
+	fmt.Fprintf(w, "sandboxes: %d running, %d stopped\n", o.Sandboxes.Running, o.Sandboxes.Stopped)
+	fmt.Fprintf(w, "capacity: %.2f/%.0f vCPUs, %d/%d MB memory, %d/%d nodes alive\n",
+		o.Capacity.CpuReserved, o.Capacity.CpuCores, o.Capacity.MemoryUsedMB, o.Capacity.MemoryTotalMB,
+		o.Capacity.NodesAlive, o.Capacity.Nodes)
+
+	tw := newTable(w)
+	fmt.Fprintln(tw, "CLUSTER\tSTATUS\tUPTIME\t30D")
+	for _, c := range o.Clusters {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", c.Slug, c.Status, percent(c.Uptime), uptimeBar(c.Days))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(o.TopCustomers) > 0 {
+		fmt.Fprintln(w, "\ntop customers this month:")
+		for _, c := range o.TopCustomers {
+			fmt.Fprintf(w, "  %s\t%.3f vCPU-hours\n", c.Name, c.VcpuHours)
+		}
+	}
+	return nil
+}
+
+func percent(uptime *float64) string {
+	if uptime == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%.2f%%", *uptime*100)
+}
+
+func uptimeBar(days []service.UptimeDay) string {
+	var b strings.Builder
+	for _, day := range days {
+		switch {
+		case day.Uptime == nil:
+			b.WriteString("·")
+		case *day.Uptime >= 1:
+			b.WriteString("█")
+		default:
+			b.WriteString("▒")
+		}
+	}
+	return b.String()
+}
+
+func bucketText(seconds int64) string {
+	if seconds%3600 == 0 {
+		return fmt.Sprintf("%dh", seconds/3600)
+	}
+	return fmt.Sprintf("%dm", seconds/60)
 }

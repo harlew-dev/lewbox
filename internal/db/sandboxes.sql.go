@@ -11,6 +11,40 @@ import (
 	"time"
 )
 
+const countSandboxesByStatus = `-- name: CountSandboxesByStatus :many
+SELECT status, COUNT(*) AS n FROM sandboxes
+WHERE gone_at IS NULL
+GROUP BY status
+`
+
+type CountSandboxesByStatusRow struct {
+	Status string
+	N      int64
+}
+
+func (q *Queries) CountSandboxesByStatus(ctx context.Context) ([]CountSandboxesByStatusRow, error) {
+	rows, err := q.db.QueryContext(ctx, countSandboxesByStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountSandboxesByStatusRow
+	for rows.Next() {
+		var i CountSandboxesByStatusRow
+		if err := rows.Scan(&i.Status, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getQuotaState = `-- name: GetQuotaState :one
 SELECT org_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ? AND cluster_id = ?
 `

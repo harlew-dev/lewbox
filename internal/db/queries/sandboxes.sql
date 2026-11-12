@@ -62,6 +62,11 @@ WHERE cluster_id = ? AND id = ?;
 UPDATE sandboxes SET gone_at = ?, status = 'destroyed'
 WHERE cluster_id = ? AND id = ?;
 
+-- name: CountSandboxesByStatus :many
+SELECT status, COUNT(*) AS n FROM sandboxes
+WHERE gone_at IS NULL
+GROUP BY status;
+
 -- name: SumSandboxesByOrg :many
 SELECT cluster_id,
        COUNT(*) AS sandboxes,

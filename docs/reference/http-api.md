@@ -108,8 +108,11 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
+| `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–90 |
+| `GET /v0/clusters/{ref}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
+| `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
 | `POST /v0/clusters/{ref}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
-| `GET /v0/clusters/resolve/{ref}` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
+| `GET /v0/clusters/resolve?ref=REF` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
 
 ### Nodes
 

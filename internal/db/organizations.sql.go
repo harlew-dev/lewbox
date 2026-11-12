@@ -43,6 +43,38 @@ func (q *Queries) CountMembersByOrganization(ctx context.Context) ([]CountMember
 	return items, nil
 }
 
+const countOrganizationsByStatus = `-- name: CountOrganizationsByStatus :many
+SELECT status, COUNT(*) AS n FROM organizations GROUP BY status
+`
+
+type CountOrganizationsByStatusRow struct {
+	Status string
+	N      int64
+}
+
+func (q *Queries) CountOrganizationsByStatus(ctx context.Context) ([]CountOrganizationsByStatusRow, error) {
+	rows, err := q.db.QueryContext(ctx, countOrganizationsByStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountOrganizationsByStatusRow
+	for rows.Next() {
+		var i CountOrganizationsByStatusRow
+		if err := rows.Scan(&i.Status, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createOrganization = `-- name: CreateOrganization :one
 INSERT INTO organizations (id, slug, name, status, created_at, team, plan_id)
 VALUES (?, ?, ?, ?, ?, ?, ?)

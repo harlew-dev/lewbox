@@ -29,6 +29,9 @@ type Service struct {
 	log          *slog.Logger
 	syncInterval time.Duration
 	syncMu       sync.Mutex
+
+	pruneMu   sync.Mutex
+	lastPrune time.Time
 }
 
 // Option changes a Service built by New.

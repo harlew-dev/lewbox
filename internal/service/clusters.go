@@ -280,6 +280,9 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 	if err := s.storeCheck(ctx, row.ID, status, detail, version, checks); err != nil {
 		return ClusterDetail{}, err
 	}
+	if err := s.recordSamples(ctx, row.ID, status, result.healthLatency, !healthFailed(checks), result.membersAvailable, result.members); err != nil {
+		return ClusterDetail{}, err
+	}
 	return s.clusterDetail(ctx, row.ID)
 }
 
@@ -466,6 +469,7 @@ type checkResult struct {
 	fatal            bool
 	principalID      string
 	version          string
+	healthLatency    time.Duration
 	members          []aerolvm.Member
 	membersAvailable bool
 }
@@ -478,7 +482,9 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 	add := func(c Check) { checks = append(checks, c) }
 	client := s.aerolvmClient(spec.AdminURL, spec.AdminToken)
 
+	healthStart := time.Now()
 	health, err := client.Health(ctx)
+	result.healthLatency = time.Since(healthStart)
 	if err != nil {
 		result.fatal = true
 		add(Check{

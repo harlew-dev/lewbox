@@ -43,6 +43,13 @@ type Cluster struct {
 	SyncError       string
 }
 
+type ClusterSample struct {
+	ClusterID string
+	At        time.Time
+	Status    string
+	LatencyMs int64
+}
+
 type Membership struct {
 	ID        string
 	OrgID     string
@@ -61,6 +68,19 @@ type Node struct {
 	Version    string
 	Alive      sql.NullInt64
 	LastSeenAt sql.NullTime
+}
+
+type NodeSample struct {
+	NodeID        string
+	At            time.Time
+	Alive         int64
+	Sandboxes     int64
+	CpuCores      int64
+	CpuReserved   float64
+	MemoryTotalMb int64
+	MemoryFreeMb  int64
+	DiskFreeGb    int64
+	CanAdmit      int64
 }
 
 type Organization struct {

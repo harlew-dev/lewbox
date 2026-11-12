@@ -206,9 +206,10 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusCreated, resp, err)
 	})
 
-	// A ref may contain "/" for the cluster/<x> and node/<x> forms.
-	mux.HandleFunc("GET "+Prefix+"/clusters/resolve/{ref...}", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.ResolveCluster(r.Context(), r.PathValue("ref"))
+	// The ref query parameter may contain "/" for the cluster/<x> and
+	// node/<x> forms.
+	mux.HandleFunc("GET "+Prefix+"/clusters/resolve", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ResolveCluster(r.Context(), r.URL.Query().Get("ref"))
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -230,6 +231,30 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 
 	mux.HandleFunc("POST "+Prefix+"/clusters/{ref}/check", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.CheckCluster(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/clusters/{ref}/health", func(w http.ResponseWriter, r *http.Request) {
+		days := 0
+		if raw := r.URL.Query().Get("days"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				respond(w, log, 0, nil, &service.Error{Code: service.CodeInvalid, Message: "days must be a number"})
+				return
+			}
+			days = parsed
+		}
+		resp, err := svc.ClusterHealth(r.Context(), r.PathValue("ref"), days)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/clusters/{ref}/metrics", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ClusterMetrics(r.Context(), r.PathValue("ref"), r.URL.Query().Get("range"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/overview", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.Overview(r.Context())
 		respond(w, log, http.StatusOK, resp, err)
 	})
 

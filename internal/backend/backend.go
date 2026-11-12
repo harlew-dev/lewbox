@@ -27,6 +27,9 @@ type Backend interface {
 	ListClusters(ctx context.Context) (service.ClusterList, error)
 	GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
 	CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
+	ClusterHealth(ctx context.Context, ref string, days int) (service.ClusterHealth, error)
+	ClusterMetrics(ctx context.Context, ref, rng string) (service.ClusterMetrics, error)
+	Overview(ctx context.Context) (service.Overview, error)
 	RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error)
 	ResolveCluster(ctx context.Context, ref string) (service.Cluster, error)
 	CreateJoinToken(ctx context.Context, ref string, req service.JoinTokenRequest) (service.JoinToken, error)
@@ -150,6 +153,21 @@ func (l Local) GetCluster(ctx context.Context, ref string) (service.ClusterDetai
 // CheckCluster runs the cluster checks now.
 func (l Local) CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error) {
 	return l.Svc.CheckCluster(l.withPrincipal(ctx), ref)
+}
+
+// ClusterHealth returns a cluster's uptime history.
+func (l Local) ClusterHealth(ctx context.Context, ref string, days int) (service.ClusterHealth, error) {
+	return l.Svc.ClusterHealth(l.withPrincipal(ctx), ref, days)
+}
+
+// ClusterMetrics returns a cluster's node metrics.
+func (l Local) ClusterMetrics(ctx context.Context, ref, rng string) (service.ClusterMetrics, error) {
+	return l.Svc.ClusterMetrics(l.withPrincipal(ctx), ref, rng)
+}
+
+// Overview returns the console home.
+func (l Local) Overview(ctx context.Context) (service.Overview, error) {
+	return l.Svc.Overview(l.withPrincipal(ctx))
 }
 
 // RemoveCluster unregisters a cluster.

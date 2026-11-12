@@ -220,6 +220,18 @@ One cluster: its fields, the last check results, and its nodes. Doesn't contact 
 
 Runs every check now and syncs the node list. See [Health and checks](../clusters/health-and-checks.md).
 
+### `lewbox cluster health ID|SLUG [--days 30]`
+
+A 30-day uptime bar for the cluster and each node, and the percentage. `--days` is 1–90.
+
+### `lewbox cluster metrics ID|SLUG [--range 24h]`
+
+Each node's sandboxes, reserved vCPUs and memory, averaged into buckets. `--range` is `24h` (15-minute buckets), `7d` (hourly) or `30d` (6-hourly).
+
+### `lewbox overview`
+
+The fleet: customer counts, running sandboxes, capacity, per-cluster uptime and the month's busiest customers.
+
 ### `lewbox cluster join-command ID|SLUG`
 
 Prints a command that joins a machine without the Lewbox CLI, with a fresh single-use join token.

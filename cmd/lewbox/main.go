@@ -339,6 +339,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newInstallCmd(a),
 		newNodeCmd(a),
 		newClusterCmd(a),
+		newOverviewCmd(a),
 		newFirewallCmd(a),
 		newUserCmd(a),
 		newOrgCmd(a),
@@ -524,8 +525,42 @@ func newClusterCmd(a *app) *cobra.Command {
 	joinCommand.Flags().StringVar(&joinRole, "role", "mixed", "role for the new node: worker, ingress, server or mixed")
 	joinCommand.Flags().StringVar(&joinTTL, "ttl", "15m", "how long the token is valid")
 
-	cluster.AddCommand(add, list, get, check, remove, joinCommand)
+	var healthDays int
+	health := &cobra.Command{
+		Use:   "health <id|slug>",
+		Short: "Show uptime history (GET /v0/clusters/{id|slug}/health)",
+		Args:  usageArgs(cobra.ExactArgs(1)),
+		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
+			return b.ClusterHealth(ctx, args[0], healthDays)
+		}),
+	}
+	health.Flags().IntVar(&healthDays, "days", 30, "how many UTC days to show (1-90)")
+
+	var metricsRange string
+	metrics := &cobra.Command{
+		Use:   "metrics <id|slug>",
+		Short: "Show node metrics (GET /v0/clusters/{id|slug}/metrics)",
+		Args:  usageArgs(cobra.ExactArgs(1)),
+		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
+			return b.ClusterMetrics(ctx, args[0], metricsRange)
+		}),
+	}
+	metrics.Flags().StringVar(&metricsRange, "range", "24h", "24h, 7d or 30d")
+
+	cluster.AddCommand(add, list, get, check, health, metrics, remove, joinCommand)
 	return cluster
+}
+
+// newOverviewCmd mirrors GET /v0/overview.
+func newOverviewCmd(a *app) *cobra.Command {
+	return &cobra.Command{
+		Use:   "overview",
+		Short: "Show the fleet at a glance (GET /v0/overview)",
+		Args:  usageArgs(cobra.NoArgs),
+		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
+			return b.Overview(ctx)
+		}),
+	}
 }
 
 // readSecret reads a secret from stdin when the matching flag is set. The
