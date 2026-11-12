@@ -49,6 +49,15 @@ type Member struct {
 
 // Capacity is the part of a member's capacity Lewbox reads.
 type Capacity struct {
+	HostCPUCores      int64   `json:"host_cpu_cores"`
+	HostMemoryTotalMB int64   `json:"host_memory_total_mb"`
+	LiveMemoryFreeMB  int64   `json:"live_memory_free_mb"`
+	HostDiskFreeGB    int64   `json:"host_disk_free_gb"`
+	ReservedCPU       float64 `json:"reserved_cpu"`
+	ReservedMemoryMB  int64   `json:"reserved_memory_mb"`
+	SandboxesActive   int64   `json:"sandboxes_active"`
+	CanAdmit          bool    `json:"can_admit"`
+
 	SupportedRuntimes []string `json:"supported_runtimes"`
 }
 

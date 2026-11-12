@@ -651,6 +651,35 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 	}
 }
 
+func TestMonitoringBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.CheckCluster(ctx, "eu-west"); err != nil {
+		t.Fatal(err)
+	}
+
+	runSteps(t, h, []step{
+		both("cluster health", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ClusterHealth(ctx, "eu-west", 30)
+		}),
+		both("cluster metrics", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ClusterMetrics(ctx, "eu-west", "24h")
+		}),
+		both("overview", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.Overview(ctx)
+		}),
+	})
+}
+
 func TestCustomerBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

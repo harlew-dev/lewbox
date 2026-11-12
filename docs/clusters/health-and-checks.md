@@ -39,6 +39,18 @@ A node that isn't in cluster mode (a local-mode install) counts as a one-node cl
 
 Every check also syncs the node list from AerolVM. New members appear, members that left disappear, and each node's role, version and alive state is updated. You don't add or remove node records by hand.
 
+## History and uptime
+
+Every check keeps a sample of the cluster's status and each node's capacity, and Lewbox deletes samples older than 31 days. The console and the CLI show a 30-day bar from them. A day with no samples is "no data", not downtime: a stopped orchestrator says nothing about the cluster.
+
+```bash
+lewbox cluster health eu-west --days 30    # a bar per day, then the percentage
+lewbox cluster metrics eu-west --range 24h # sandboxes, reserved vCPUs and memory
+lewbox overview                            # customers, capacity, clusters, top usage
+```
+
+`--days` is 1–90. `--range` is `24h`, `7d` or `30d`; metrics are averaged into 15-minute, 1-hour or 6-hour buckets. The bars use `█` for a full day, `▒` for a partial one and `·` when there is no data.
+
 ## Next
 
 - [Remove nodes and clusters](remove-nodes-and-clusters.md)

@@ -74,7 +74,16 @@ func New(t testing.TB) *Server {
 		Role:     "mixed",
 		Alive:    true,
 		Version:  s.version,
-		Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+		Capacity: aerolvm.Capacity{
+			HostCPUCores:      4,
+			HostMemoryTotalMB: 15364,
+			LiveMemoryFreeMB:  8552,
+			HostDiskFreeGB:    13,
+			ReservedCPU:       1,
+			ReservedMemoryMB:  1024,
+			CanAdmit:          true,
+			SupportedRuntimes: []string{"docker"},
+		},
 	}}
 	s.srv = httptest.NewServer(s.routes())
 	s.members[0].APIURL = s.srv.URL

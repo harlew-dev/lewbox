@@ -25,6 +25,9 @@ ORDER BY organizations.slug;
 -- name: CountMembersByOrganization :many
 SELECT org_id, COUNT(*) AS members FROM memberships GROUP BY org_id;
 
+-- name: CountOrganizationsByStatus :many
+SELECT status, COUNT(*) AS n FROM organizations GROUP BY status;
+
 -- name: SetOrganizationName :one
 UPDATE organizations SET name = ? WHERE id = ? RETURNING *;
 

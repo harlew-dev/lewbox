@@ -358,10 +358,10 @@ func TestClusterHTTP(t *testing.T) {
 	if status, out := e.http("POST", "/v0/clusters/eu-west/check", ""); status != http.StatusOK {
 		t.Fatalf("POST check: status %d body %s", status, out)
 	}
-	if status, out := e.http("GET", "/v0/clusters/resolve/cluster/eu-west", ""); status != http.StatusOK {
+	if status, out := e.http("GET", "/v0/clusters/resolve?ref=cluster/eu-west", ""); status != http.StatusOK {
 		t.Fatalf("GET resolve cluster/x: status %d body %s", status, out)
 	}
-	if status, out := e.http("GET", "/v0/clusters/resolve/node/node-a", ""); status != http.StatusOK {
+	if status, out := e.http("GET", "/v0/clusters/resolve?ref=node/node-a", ""); status != http.StatusOK {
 		t.Fatalf("GET resolve node/x: status %d body %s", status, out)
 	}
 
@@ -657,6 +657,41 @@ func TestSandboxesAndUsage(t *testing.T) {
 	e.sameOrg("acme", []string{"usage", "--org", "acme", "--from", "2026-11-01", "--to", "2026-11-03"},
 		"GET", "/v0/usage?from=2026-11-01&to=2026-11-03", 200)
 	e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
+}
+
+func TestMonitoring(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_monitoring_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0",
+		Capacity: aerolvm.Capacity{
+			HostCPUCores: 4, HostMemoryTotalMB: 15364, LiveMemoryFreeMB: 8552, HostDiskFreeGB: 13,
+			ReservedCPU: 1, SandboxesActive: 2, CanAdmit: true, SupportedRuntimes: []string{"docker"},
+		},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("cluster", "check", "eu-west"); code != 0 {
+		t.Fatalf("cluster check: exit %d: %s", code, errOut)
+	}
+
+	e.same([]string{"cluster", "health", "eu-west"}, "GET", "/v0/clusters/eu-west/health?days=30", "", 200)
+	e.same([]string{"cluster", "health", "eu-west", "--days", "7"}, "GET", "/v0/clusters/eu-west/health?days=7", "", 200)
+	e.same([]string{"cluster", "metrics", "eu-west"}, "GET", "/v0/clusters/eu-west/metrics?range=24h", "", 200)
+	e.same([]string{"cluster", "metrics", "eu-west", "--range", "7d"}, "GET", "/v0/clusters/eu-west/metrics?range=7d", "", 200)
+	overview := e.same([]string{"overview"}, "GET", "/v0/overview", "", 200)
+	if !strings.Contains(overview, `"customers"`) || !strings.Contains(overview, `"running"`) {
+		t.Errorf("overview = %s", overview)
+	}
+
+	e.sameError([]string{"cluster", "metrics", "eu-west", "--range", "1h"},
+		"GET", "/v0/clusters/eu-west/metrics?range=1h", "", 400)
+	e.sameError([]string{"cluster", "health", "eu-west", "--days", "91"},
+		"GET", "/v0/clusters/eu-west/health?days=91", "", 400)
 }
 
 func TestPlansSettingsAndSignup(t *testing.T) {

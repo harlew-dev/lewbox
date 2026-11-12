@@ -144,6 +144,29 @@ func (c *Client) CheckCluster(ctx context.Context, ref string) (service.ClusterD
 	return out, err
 }
 
+// ClusterHealth returns a cluster's uptime history.
+func (c *Client) ClusterHealth(ctx context.Context, ref string, days int) (service.ClusterHealth, error) {
+	path := "/v0/clusters/" + url.PathEscape(ref) + "/health?days=" + strconv.Itoa(days)
+	var out service.ClusterHealth
+	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ClusterMetrics returns a cluster's node metrics for a range.
+func (c *Client) ClusterMetrics(ctx context.Context, ref, rng string) (service.ClusterMetrics, error) {
+	path := "/v0/clusters/" + url.PathEscape(ref) + "/metrics?range=" + url.QueryEscape(rng)
+	var out service.ClusterMetrics
+	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
+	return out, err
+}
+
+// Overview returns the console home.
+func (c *Client) Overview(ctx context.Context) (service.Overview, error) {
+	var out service.Overview
+	err := c.do(ctx, http.MethodGet, "/v0/overview", nil, &out, defaultTimeout)
+	return out, err
+}
+
 // RemoveCluster unregisters a cluster.
 func (c *Client) RemoveCluster(ctx context.Context, ref string) (service.Cluster, error) {
 	var out service.Cluster
@@ -152,10 +175,10 @@ func (c *Client) RemoveCluster(ctx context.Context, ref string) (service.Cluster
 }
 
 // ResolveCluster finds a cluster by cluster or node reference. A ref may
-// contain "/" (cluster/<x>), which the server's wildcard route decodes.
+// contain "/" (cluster/<x>), so it travels as a query parameter.
 func (c *Client) ResolveCluster(ctx context.Context, ref string) (service.Cluster, error) {
 	var out service.Cluster
-	err := c.do(ctx, http.MethodGet, "/v0/clusters/resolve/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, "/v0/clusters/resolve?ref="+url.QueryEscape(ref), nil, &out, defaultTimeout)
 	return out, err
 }
 
