@@ -369,6 +369,77 @@ func (c *Client) RevokeSandboxKey(ctx context.Context, org, ref string) (service
 	return out, err
 }
 
+// ListSandboxes returns mirrored sandboxes, optionally filtered.
+func (c *Client) ListSandboxes(ctx context.Context, req service.ListSandboxesRequest) (service.SandboxList, error) {
+	query := url.Values{}
+	if req.Region != "" {
+		query.Set("region", req.Region)
+	}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	path := "/v0/sandboxes"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.SandboxList
+	err := c.doOrg(ctx, req.Org, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// StopSandbox stops a sandbox on its cluster.
+func (c *Client) StopSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+	var out service.Sandbox
+	err := c.doOrg(ctx, req.Org, http.MethodPost, sandboxActionPath(id, "stop", req.Region), nil, &out)
+	return out, err
+}
+
+// DeleteSandbox deletes a sandbox on its cluster.
+func (c *Client) DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+	var out service.Sandbox
+	err := c.doOrg(ctx, req.Org, http.MethodDelete, sandboxActionPath(id, "", req.Region), nil, &out)
+	return out, err
+}
+
+func sandboxActionPath(id, action, region string) string {
+	path := "/v0/sandboxes/" + url.PathEscape(id)
+	if action != "" {
+		path += "/" + action
+	}
+	if region != "" {
+		path += "?region=" + url.QueryEscape(region)
+	}
+	return path
+}
+
+// Usage returns metered usage.
+func (c *Client) Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error) {
+	query := url.Values{}
+	if req.From != "" {
+		query.Set("from", req.From)
+	}
+	if req.To != "" {
+		query.Set("to", req.To)
+	}
+	if req.Granularity != "" {
+		query.Set("granularity", req.Granularity)
+	}
+	path := "/v0/usage"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.Usage
+	err := c.doOrg(ctx, req.Org, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// Limits returns an organization's limits and live use.
+func (c *Client) Limits(ctx context.Context, org string) (service.LimitsReport, error) {
+	var out service.LimitsReport
+	err := c.doOrg(ctx, org, http.MethodGet, "/v0/limits", nil, &out)
+	return out, err
+}
+
 // doOrg is do for the member and admin-key routes, which name their
 // organization in a header ("" leaves it to the admin key).
 func (c *Client) doOrg(ctx context.Context, org, method, path string, in, out any) error {

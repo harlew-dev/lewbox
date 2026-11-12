@@ -12,6 +12,9 @@ SELECT * FROM organizations WHERE slug = ?;
 -- name: ListOrganizations :many
 SELECT * FROM organizations ORDER BY slug;
 
+-- name: ListOrganizationsByPlan :many
+SELECT * FROM organizations WHERE plan_id = ? ORDER BY slug;
+
 -- name: ListOrganizationsForUser :many
 SELECT sqlc.embed(organizations), memberships.role
 FROM organizations

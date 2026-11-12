@@ -228,6 +228,11 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 			return Plan{}, err
 		}
 	}
+	if req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set {
+		if err := s.syncPlanQuotas(ctx, updated.ID); err != nil {
+			s.log.Warn("quota sync failed", "plan", updated.Slug, "err", err)
+		}
+	}
 	counts, err := s.planOrganizationCounts(ctx)
 	if err != nil {
 		return Plan{}, err

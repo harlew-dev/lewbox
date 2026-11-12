@@ -39,6 +39,8 @@ type Cluster struct {
 	Checks          string
 	CheckedAt       sql.NullTime
 	CreatedAt       time.Time
+	SyncedAt        sql.NullTime
+	SyncError       string
 }
 
 type Membership struct {
@@ -85,6 +87,33 @@ type Plan struct {
 	CreatedAt    time.Time
 }
 
+type QuotaState struct {
+	OrgID     string
+	ClusterID string
+	Quota     string
+	PushedAt  time.Time
+	Error     string
+}
+
+type Sandbox struct {
+	ClusterID    string
+	ID           string
+	OrgID        sql.NullString
+	Team         string
+	Node         string
+	Name         string
+	Image        string
+	Status       string
+	StatusReason string
+	Runtime      string
+	Cpu          float64
+	MemoryMb     int64
+	DiskGb       int64
+	CreatedAt    time.Time
+	LastSeenAt   time.Time
+	GoneAt       sql.NullTime
+}
+
 type SandboxKey struct {
 	ID         string
 	OrgID      string
@@ -111,6 +140,16 @@ type Session struct {
 type Setting struct {
 	Key   string
 	Value string
+}
+
+type UsageHourly struct {
+	OrgID           string
+	ClusterID       string
+	Hour            time.Time
+	SandboxSeconds  int64
+	VcpuSeconds     float64
+	MemoryMbSeconds int64
+	PeakSandboxes   int64
 }
 
 type User struct {

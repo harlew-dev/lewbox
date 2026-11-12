@@ -52,6 +52,12 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderSandboxKeys(w, data.Data, now)
 	case service.NewSandboxKey:
 		return renderNewSandboxKey(w, data, now)
+	case service.SandboxList:
+		return renderSandboxes(w, data.Data, now)
+	case service.Usage:
+		return renderUsage(w, data)
+	case service.LimitsReport:
+		return renderLimits(w, data)
 	case contextList:
 		return renderContexts(w, data.Data)
 	case firewallOutput:
@@ -254,6 +260,58 @@ func renderNewSandboxKey(w io.Writer, k service.NewSandboxKey, now time.Time) er
 	}
 	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its last four characters and cannot show it again.")
 	return nil
+}
+
+// renderSandboxes prints a sandbox table.
+func renderSandboxes(w io.Writer, sandboxes []service.Sandbox, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "ID\tREGION\tSTATUS\tNAME\tIMAGE\tCPU\tMEMORY\tCREATED")
+	for _, s := range sandboxes {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%g\t%d\t%s\n",
+			s.ID, s.Region, s.Status, dash(s.Name), dash(s.Image), s.CPU, s.MemoryMB, relativeTime(s.CreatedAt, now))
+	}
+	return tw.Flush()
+}
+
+// renderUsage prints the totals and one row per bucket.
+func renderUsage(w io.Writer, u service.Usage) error {
+	fmt.Fprintf(w, "from: %s\n", u.From.UTC().Format(time.RFC3339))
+	fmt.Fprintf(w, "to: %s\n", u.To.UTC().Format(time.RFC3339))
+	fmt.Fprintf(w, "granularity: %s\n", u.Granularity)
+	fmt.Fprintf(w, "totals: %.3f sandbox-hours, %.3f vCPU-hours, %.3f GiB-hours\n",
+		u.Totals.SandboxHours, u.Totals.VcpuHours, u.Totals.MemoryGiBHours)
+
+	tw := newTable(w)
+	fmt.Fprintln(w, "START\tSANDBOX_H\tVCPU_H\tGIB_H\tPEAK")
+	for _, b := range u.Data {
+		fmt.Fprintf(tw, "%s\t%.3f\t%.3f\t%.3f\t%d\n",
+			b.Start.UTC().Format(time.RFC3339), b.SandboxHours, b.VcpuHours, b.MemoryGiBHours, b.PeakSandboxes)
+	}
+	return tw.Flush()
+}
+
+// renderLimits prints effective limits, live use and per-region quotas.
+func renderLimits(w io.Writer, l service.LimitsReport) error {
+	fmt.Fprintf(w, "limits: %s sandboxes, %s vCPUs, %s MB\n",
+		limitText(l.Limits.Sandboxes, ""), limitText(l.Limits.Vcpus, ""), limitText(l.Limits.MemoryMB, ""))
+	fmt.Fprintf(w, "used: %d sandboxes, %g vCPUs, %d MB\n", l.Used.Sandboxes, l.Used.Vcpus, l.Used.MemoryMB)
+
+	tw := newTable(w)
+	fmt.Fprintln(tw, "REGION\tSANDBOXES\tVCPUS\tMEMORY_MB\tQUOTA\tBLOCKED\tPUSHED\tERROR")
+	for _, r := range l.Regions {
+		quota := "none"
+		if r.Quota != nil {
+			quota = fmt.Sprintf("%d sandboxes, %g vCPUs, %d MB",
+				r.Quota.MaxSandboxes, r.Quota.MaxCPU, r.Quota.MaxMemoryMB)
+		}
+		pushed := "never"
+		if r.PushedAt != nil {
+			pushed = relativeTime(*r.PushedAt, time.Now())
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%g\t%d\t%s\t%s\t%s\t%s\n",
+			r.Slug, r.Used.Sandboxes, r.Used.Vcpus, r.Used.MemoryMB, quota, yesNo(r.Blocked), pushed, dash(r.Error))
+	}
+	return tw.Flush()
 }
 
 // renderContexts prints the saved contexts, marking the current one.

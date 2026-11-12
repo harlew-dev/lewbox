@@ -48,7 +48,7 @@ INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_to
                       admin_token_id, admin_token_last4, status, status_detail, version,
                       checks, checked_at, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error
 `
 
 type CreateClusterParams struct {
@@ -104,6 +104,8 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.Checks,
 		&i.CheckedAt,
 		&i.CreatedAt,
+		&i.SyncedAt,
+		&i.SyncError,
 	)
 	return i, err
 }
@@ -121,7 +123,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id string) (int64, error) {
 }
 
 const getClusterByID = `-- name: GetClusterByID :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at FROM clusters WHERE id = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE id = ?
 `
 
 func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error) {
@@ -143,12 +145,14 @@ func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error
 		&i.Checks,
 		&i.CheckedAt,
 		&i.CreatedAt,
+		&i.SyncedAt,
+		&i.SyncError,
 	)
 	return i, err
 }
 
 const getClusterBySlug = `-- name: GetClusterBySlug :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at FROM clusters WHERE slug = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE slug = ?
 `
 
 func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, error) {
@@ -170,12 +174,14 @@ func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, e
 		&i.Checks,
 		&i.CheckedAt,
 		&i.CreatedAt,
+		&i.SyncedAt,
+		&i.SyncError,
 	)
 	return i, err
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at FROM clusters ORDER BY slug
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters ORDER BY slug
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -203,6 +209,8 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.Checks,
 			&i.CheckedAt,
 			&i.CreatedAt,
+			&i.SyncedAt,
+			&i.SyncError,
 		); err != nil {
 			return nil, err
 		}
@@ -215,6 +223,34 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setClusterSyncError = `-- name: SetClusterSyncError :exec
+UPDATE clusters SET sync_error = ? WHERE id = ?
+`
+
+type SetClusterSyncErrorParams struct {
+	SyncError string
+	ID        string
+}
+
+func (q *Queries) SetClusterSyncError(ctx context.Context, arg SetClusterSyncErrorParams) error {
+	_, err := q.db.ExecContext(ctx, setClusterSyncError, arg.SyncError, arg.ID)
+	return err
+}
+
+const setClusterSynced = `-- name: SetClusterSynced :exec
+UPDATE clusters SET synced_at = ?, sync_error = '' WHERE id = ?
+`
+
+type SetClusterSyncedParams struct {
+	SyncedAt sql.NullTime
+	ID       string
+}
+
+func (q *Queries) SetClusterSynced(ctx context.Context, arg SetClusterSyncedParams) error {
+	_, err := q.db.ExecContext(ctx, setClusterSynced, arg.SyncedAt, arg.ID)
+	return err
 }
 
 const updateClusterCheck = `-- name: UpdateClusterCheck :exec

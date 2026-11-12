@@ -35,7 +35,7 @@ services:
       context: ../..
       dockerfile: deploy/dev-cluster/Dockerfile
       target: orchestrator
-    command: ["serve", "--port", "8080", "--check-interval", "30s"]
+    command: ["serve", "--port", "8080", "--check-interval", "30s", "--sync-interval", "5s"]
     environment:
       LEWBOX_BOOTSTRAP_ADMIN_EMAIL: ${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}
       LEWBOX_BOOTSTRAP_ADMIN_PASSWORD: ${LEWBOX_DEV_PASSWORD:-dev-password-123}

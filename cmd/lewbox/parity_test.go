@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
@@ -588,6 +589,74 @@ func TestSandboxKeys(t *testing.T) {
 	if status != http.StatusNotFound || errOut != body {
 		t.Errorf("revoked key error = %d %q, want 404 %q", status, body, errOut)
 	}
+}
+
+// TestSandboxesAndUsage exercises the mirror, sandboxes, usage and limits
+// commands against one HTTP server and the same database in local mode.
+func TestSandboxesAndUsage(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_sandbox_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	out, errOut, code := e.cli("org", "create", "acme")
+	if code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	var org service.Organization
+	if err := json.Unmarshal([]byte(out), &org); err != nil {
+		t.Fatal(err)
+	}
+	fake.AddSandbox(org.Team, aerolvm.Sandbox{
+		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
+		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+
+	// Run one sync pass through a second service on the same database.
+	conn, err := db.Open(context.Background(), e.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	keyring, err := secrets.LoadOrCreate(filepath.Join(filepath.Dir(e.dbPath), "keyring.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(db.New(conn), service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
+	if err := svc.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	e.same([]string{"sandbox", "list"}, "GET", "/v0/sandboxes", "", 200)
+	e.same([]string{"sandbox", "list", "--region", "eu-west", "--status", "started"},
+		"GET", "/v0/sandboxes?region=eu-west&status=started", "", 200)
+	e.sameOrg("acme", []string{"sandbox", "list", "--org", "acme"}, "GET", "/v0/sandboxes", 200)
+	e.sameOrg("acme", []string{"sandbox", "stop", "sb-1", "--region", "eu-west", "--org", "acme"},
+		"POST", "/v0/sandboxes/sb-1/stop?region=eu-west", 200)
+	deleted, errOut, code := e.cli("sandbox", "delete", "sb-1", "--region", "eu-west", "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("sandbox delete: exit %d: %s", code, errOut)
+	}
+	var gone service.Sandbox
+	if err := json.Unmarshal([]byte(deleted), &gone); err != nil {
+		t.Fatal(err)
+	}
+	if gone.ID != "sb-1" || gone.Status != "destroyed" {
+		t.Errorf("deleted sandbox = %+v", gone)
+	}
+	// A second delete is a 404 either way.
+	e.sameError([]string{"sandbox", "delete", "sb-1", "--region", "eu-west", "--org", "acme", "--yes"},
+		"DELETE", "/v0/sandboxes/sb-1?region=eu-west", "", 404)
+	e.sameOrg("acme", []string{"usage", "--org", "acme", "--from", "2026-11-01", "--to", "2026-11-03"},
+		"GET", "/v0/usage?from=2026-11-01&to=2026-11-03", 200)
+	e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
 }
 
 func TestPlansSettingsAndSignup(t *testing.T) {

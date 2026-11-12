@@ -92,3 +92,39 @@ type JoinTokenRequest struct {
 	TTL      string `json:"ttl"`
 	Reusable bool   `json:"reusable"`
 }
+
+// Sandbox is one entry of GET /v1/sandboxes.
+type Sandbox struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Image        string    `json:"image"`
+	Status       string    `json:"status"`
+	StatusReason string    `json:"status_reason"`
+	Runtime      string    `json:"runtime"`
+	CPU          float64   `json:"cpu"`
+	MemoryMB     int64     `json:"memory_mb"`
+	DiskGB       int64     `json:"disk_gb"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
+}
+
+// Placement is one entry of the cluster sandbox index: which team owns a
+// sandbox and on which node it runs.
+type Placement struct {
+	SandboxID     string  `json:"sandbox_id"`
+	OwnerNodeID   string  `json:"owner_node_id"`
+	OwnerRef      string  `json:"owner_ref"`
+	QuotaCPU      float64 `json:"quota_cpu"`
+	QuotaMemoryMB int64   `json:"quota_memory_mb"`
+	CreatedUnix   int64   `json:"created_unix"`
+	State         string  `json:"state"`
+}
+
+// TeamQuota is the body of PUT /v1/teams/{team}/quota. A zero field means
+// "no limit on that axis", so every field is omitted when it is zero.
+type TeamQuota struct {
+	MaxSandboxes int     `json:"max_sandboxes,omitempty"`
+	MaxCPU       float64 `json:"max_cpu,omitempty"`
+	MaxMemoryMB  int     `json:"max_memory_mb,omitempty"`
+}

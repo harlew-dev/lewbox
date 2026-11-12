@@ -22,5 +22,11 @@ WHERE id = ?;
 -- name: DeleteCluster :execrows
 DELETE FROM clusters WHERE id = ?;
 
+-- name: SetClusterSynced :exec
+UPDATE clusters SET synced_at = ?, sync_error = '' WHERE id = ?;
+
+-- name: SetClusterSyncError :exec
+UPDATE clusters SET sync_error = ? WHERE id = ?;
+
 -- name: CountNodesByCluster :many
 SELECT cluster_id, COUNT(*) AS n FROM nodes WHERE cluster_id IS NOT NULL GROUP BY cluster_id;

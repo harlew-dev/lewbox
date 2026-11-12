@@ -150,30 +150,119 @@ func (c *Client) DeleteNode(ctx context.Context, id string, force bool) error {
 	return c.do(ctx, http.MethodDelete, path, nil, nil, true)
 }
 
+// ListSandboxes reads every page of GET /v1/sandboxes. It reports whether any
+// page was partial, which means a node did not answer.
+func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, bool, error) {
+	all := make([]Sandbox, 0)
+	partial := false
+	token := ""
+	for {
+		path := "/v1/sandboxes?limit=500"
+		if token != "" {
+			path += "&page_token=" + url.QueryEscape(token)
+		}
+		var page []Sandbox
+		header, err := c.doWithHeaders(ctx, http.MethodGet, path, nil, &page, true)
+		if err != nil {
+			return nil, false, err
+		}
+		all = append(all, page...)
+		if strings.EqualFold(header.Get("X-Cluster-List-Partial"), "true") {
+			partial = true
+		}
+		token = header.Get("X-Cluster-List-Next-Page-Token")
+		if token == "" {
+			return all, partial, nil
+		}
+	}
+}
+
+// SandboxIndex reads every page of GET /v1/cluster/sandbox-index.
+func (c *Client) SandboxIndex(ctx context.Context) ([]Placement, error) {
+	all := make([]Placement, 0)
+	token := ""
+	for {
+		path := "/v1/cluster/sandbox-index?limit=5000"
+		if token != "" {
+			path += "&page_token=" + url.QueryEscape(token)
+		}
+		var page struct {
+			Placements    []Placement `json:"placements"`
+			NextPageToken string      `json:"next_page_token"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, nil, &page, true); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Placements...)
+		token = page.NextPageToken
+		if token == "" {
+			return all, nil
+		}
+	}
+}
+
+// PutTeamQuota calls PUT /v1/teams/{team}/quota.
+func (c *Client) PutTeamQuota(ctx context.Context, team string, quota TeamQuota) error {
+	return c.do(ctx, http.MethodPut, "/v1/teams/"+url.PathEscape(team)+"/quota", quota, nil, true)
+}
+
+// DeleteTeamQuota calls DELETE /v1/teams/{team}/quota.
+func (c *Client) DeleteTeamQuota(ctx context.Context, team string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/teams/"+url.PathEscape(team)+"/quota", nil, nil, true)
+}
+
+// StopSandbox calls POST /v1/sandboxes/{id}/stop. A sandbox that is already
+// gone is not an error.
+func (c *Client) StopSandbox(ctx context.Context, id string) error {
+	return c.goneOK(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(id)+"/stop")
+}
+
+// DeleteSandbox calls DELETE /v1/sandboxes/{id}. A sandbox that is already
+// gone is not an error.
+func (c *Client) DeleteSandbox(ctx context.Context, id string) error {
+	return c.goneOK(ctx, http.MethodDelete, "/v1/sandboxes/"+url.PathEscape(id))
+}
+
+func (c *Client) goneOK(ctx context.Context, method, path string) error {
+	err := c.do(ctx, method, path, nil, nil, true)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
 // do sends one logical request, retrying the one 503 that usually clears up:
 // a token write before raft has a leader.
 func (c *Client) do(ctx context.Context, method, path string, body, out any, auth bool) error {
+	_, err := c.doWithHeaders(ctx, method, path, body, out, auth)
+	return err
+}
+
+// doWithHeaders is do, returning the final response's headers. Paged cluster
+// routes put their next page token there.
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, auth bool) (http.Header, error) {
 	var payload []byte
 	if body != nil {
 		var err error
 		payload, err = json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("aerolvm %s %s: encode request: %w", method, path, err)
+			return nil, fmt.Errorf("aerolvm %s %s: encode request: %w", method, path, err)
 		}
 	}
 
 	var waited time.Duration
 	wait := initialRetryWait
 	for {
-		err := c.doOnce(ctx, method, path, payload, out, auth)
+		header, err := c.doOnce(ctx, method, path, payload, out, auth)
 		if err == nil {
-			return nil
+			return header, nil
 		}
 		if !retryable(err) || waited+wait > c.retry {
-			return err
+			return nil, err
 		}
 		if ctx.Err() != nil {
-			return err
+			return nil, err
 		}
 		c.sleep(wait)
 		waited += wait
@@ -186,10 +275,10 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any, aut
 	}
 }
 
-func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, out any, auth bool) error {
+func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, out any, auth bool) (http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("aerolvm %s %s: %w", method, path, err)
+		return nil, fmt.Errorf("aerolvm %s %s: %w", method, path, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
@@ -201,22 +290,22 @@ func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, o
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("aerolvm %s %s: %w", method, path, err)
+		return nil, fmt.Errorf("aerolvm %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("aerolvm %s %s: read response: %w", method, path, err)
+		return nil, fmt.Errorf("aerolvm %s %s: read response: %w", method, path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return parseAPIError(resp.StatusCode, data)
+		return nil, parseAPIError(resp.StatusCode, data)
 	}
 	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("aerolvm %s %s: decode response: %w", method, path, err)
+			return nil, fmt.Errorf("aerolvm %s %s: decode response: %w", method, path, err)
 		}
 	}
-	return nil
+	return resp.Header, nil
 }
 
 func retryable(err error) bool {

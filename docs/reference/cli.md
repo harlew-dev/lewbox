@@ -85,6 +85,7 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--port N` | `LEWBOX_PORT` | `8080` | Listen on every interface on this port |
 | `--listen ADDR` | `LEWBOX_LISTEN` | `:8080` | The whole listen address, such as `127.0.0.1:8080`. Not with `--port` |
 | `--check-interval D` | `LEWBOX_CHECK_INTERVAL` | `1m` | How often to check every cluster. `0` turns it off |
+| `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
 
@@ -326,6 +327,22 @@ See [Customers, plans and limits](../accounts/customers-and-plans.md).
 ### `lewbox region list`
 
 The clusters customers can use: ready or degraded ones, with their endpoint, runtime and status. Any signed-in account or API key.
+
+### `lewbox sandbox list [--region SLUG] [--status STATUS] [--all]`
+
+Sandboxes Lewbox has mirrored from every region, newest first. Members see their organization's; instance admins see the whole fleet with `--all` (or with no organization chosen). `--status` is `creating`, `started`, `stopped`, `destroyed` or `error`.
+
+### `lewbox sandbox stop ID [--region SLUG]` · `lewbox sandbox delete ID [--region SLUG] [--yes]`
+
+Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--region` picks the cluster when the same ID exists more than once. Delete asks to confirm.
+
+### `lewbox usage [--from DATE] [--to DATE] [--hourly]`
+
+Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Members see their organization's; instance admins the whole fleet unless they choose one.
+
+### `lewbox limits`
+
+The organization's effective limits, live use, and the quota Lewbox has pushed to each region, with the last push time and error.
 
 ### `lewbox settings` · `lewbox settings set [--name NAME] [--signup MODE] [--default-plan SLUG]`
 

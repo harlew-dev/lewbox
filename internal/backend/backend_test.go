@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
@@ -594,6 +595,60 @@ func resultJSON(t *testing.T, v any, err error) string {
 		t.Fatal(mErr)
 	}
 	return string(data)
+}
+
+func TestSandboxAndUsageBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	org, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.fake.AddSandbox(org.Team, aerolvm.Sandbox{
+		ID: "sb-1", Name: "agent", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
+		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+	h.fake.AddSandbox(org.Team, aerolvm.Sandbox{
+		ID: "sb-2", Name: "worker", Image: "ubuntu:22.04", Status: "started", Runtime: "docker",
+		CPU: 1, MemoryMB: 512, DiskGB: 10, CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+	if err := h.local.(backend.Local).Svc.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	runSteps(t, h, []step{
+		both("list sandboxes", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListSandboxes(ctx, service.ListSandboxesRequest{Org: "acme"})
+		}),
+		both("stop a sandbox", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.StopSandbox(ctx, "sb-1", service.SandboxActionRequest{Org: "acme", Region: "eu-west"})
+		}),
+		both("usage", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.Usage(ctx, service.UsageRequest{From: "2026-11-01", To: "2026-12-01", Org: "acme"})
+		}),
+		both("limits", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.Limits(ctx, "acme")
+		}),
+	})
+	if _, err := h.remote.DeleteSandbox(ctx, "sb-2", service.SandboxActionRequest{Org: "acme"}); err != nil {
+		t.Fatalf("delete sandbox: %v", err)
+	}
+	list, err := h.local.ListSandboxes(ctx, service.ListSandboxesRequest{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].ID != "sb-1" {
+		t.Errorf("after delete = %+v", list.Data)
+	}
 }
 
 func TestCustomerBackendsAgree(t *testing.T) {

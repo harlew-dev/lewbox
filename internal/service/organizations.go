@@ -30,6 +30,7 @@ type Organization struct {
 	Overrides    *Limits   `json:"overrides,omitempty"`
 	Members      int       `json:"members"`
 	Role         string    `json:"role,omitempty"`
+	VcpuHours30d *float64  `json:"vcpu_hours_30d,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -283,12 +284,60 @@ func (s *Service) toOrganization(ctx context.Context, row db.Organization, role 
 	if err != nil {
 		return Organization{}, err
 	}
-	return toOrganization(row, role, counts, plans, admin), nil
+	var usage map[string]float64
+	if admin {
+		if usage, err = s.vcpuHoursByOrg(ctx); err != nil {
+			return Organization{}, err
+		}
+	}
+	return toOrganization(row, role, counts, plans, usage, admin), nil
+}
+
+// vcpuHoursByOrg sums each organization's metered vCPUs over the last 30 days.
+func (s *Service) vcpuHoursByOrg(ctx context.Context) (map[string]float64, error) {
+	rows, err := s.q.SumVcpuSecondsByOrg(ctx, s.now().Add(-30*24*time.Hour))
+	if err != nil {
+		return nil, fmt.Errorf("sum vcpu seconds: %w", err)
+	}
+	out := make(map[string]float64, len(rows))
+	for _, row := range rows {
+		out[row.OrgID] = row.VcpuSeconds / 3600
+	}
+	return out, nil
+}
+
+// effectiveLimits is an organization's effective limits: an override if it is
+// set, otherwise the plan's value. A nil value is unlimited.
+func effectiveLimits(row db.Organization, plans map[string]db.Plan) Limits {
+	var limits Limits
+	if row.PlanID.Valid {
+		if plan, ok := plans[row.PlanID.String]; ok {
+			limits = Limits{
+				Sandboxes: nullInt(plan.MaxSandboxes),
+				Vcpus:     nullInt(plan.MaxVcpus),
+				MemoryMB:  nullInt(plan.MaxMemoryMb),
+			}
+		}
+	}
+	if row.MaxSandboxes.Valid {
+		v := row.MaxSandboxes.Int64
+		limits.Sandboxes = &v
+	}
+	if row.MaxVcpus.Valid {
+		v := row.MaxVcpus.Int64
+		limits.Vcpus = &v
+	}
+	if row.MaxMemoryMb.Valid {
+		v := row.MaxMemoryMb.Int64
+		limits.MemoryMB = &v
+	}
+	return limits
 }
 
 // toOrganization renders an organization. admin decides whether to include
-// the fields only instance admins see: team and the raw limit overrides.
-func toOrganization(row db.Organization, role string, counts map[string]int, plans map[string]db.Plan, admin bool) Organization {
+// the fields only instance admins see: team, the raw limit overrides and
+// recent vCPU-hours.
+func toOrganization(row db.Organization, role string, counts map[string]int, plans map[string]db.Plan, usage map[string]float64, admin bool) Organization {
 	org := Organization{
 		ID:           row.ID,
 		Slug:         row.Slug,
@@ -302,34 +351,21 @@ func toOrganization(row db.Organization, role string, counts map[string]int, pla
 	if row.Team.Valid {
 		org.Team = row.Team.String
 	}
-	var limits Limits
 	if row.PlanID.Valid {
 		if plan, ok := plans[row.PlanID.String]; ok {
 			org.Plan = &PlanRef{Slug: plan.Slug, Name: plan.Name}
-			limits = Limits{
-				Sandboxes: nullInt(plan.MaxSandboxes),
-				Vcpus:     nullInt(plan.MaxVcpus),
-				MemoryMB:  nullInt(plan.MaxMemoryMb),
-			}
 		}
 	}
+	org.Limits = effectiveLimits(row, plans)
 	overrides := Limits{
 		Sandboxes: nullInt(row.MaxSandboxes),
 		Vcpus:     nullInt(row.MaxVcpus),
 		MemoryMB:  nullInt(row.MaxMemoryMb),
 	}
-	if overrides.Sandboxes != nil {
-		limits.Sandboxes = overrides.Sandboxes
-	}
-	if overrides.Vcpus != nil {
-		limits.Vcpus = overrides.Vcpus
-	}
-	if overrides.MemoryMB != nil {
-		limits.MemoryMB = overrides.MemoryMB
-	}
-	org.Limits = limits
 	if admin {
 		org.Overrides = &overrides
+		hours := usage[row.ID]
+		org.VcpuHours30d = &hours
 	} else {
 		org.Team = ""
 	}
@@ -363,6 +399,12 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	keep := func(org Organization) bool {
 		return status == "" || org.Status == status
 	}
+	var usage map[string]float64
+	if p.InstanceAdmin {
+		if usage, err = s.vcpuHoursByOrg(ctx); err != nil {
+			return OrganizationList{}, err
+		}
+	}
 
 	if p.Kind == "key" {
 		if strings.TrimSpace(req.User) != "" {
@@ -372,7 +414,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		if err != nil {
 			return OrganizationList{}, fmt.Errorf("get organization: %w", err)
 		}
-		if org := toOrganization(row, "", counts, plans, false); keep(org) {
+		if org := toOrganization(row, "", counts, plans, nil, false); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 		return out, nil
@@ -386,11 +428,11 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		if !p.InstanceAdmin && p.UserID != user.ID {
 			return OrganizationList{}, forbidden("only an instance admin can list another account's organizations")
 		}
-		return s.organizationsOf(ctx, user.ID, counts, plans, p.InstanceAdmin, keep)
+		return s.organizationsOf(ctx, user.ID, counts, plans, usage, p.InstanceAdmin, keep)
 	}
 
 	if !p.InstanceAdmin {
-		return s.organizationsOf(ctx, p.UserID, counts, plans, false, keep)
+		return s.organizationsOf(ctx, p.UserID, counts, plans, nil, false, keep)
 	}
 	rows, err := s.q.ListOrganizations(ctx)
 	if err != nil {
@@ -407,21 +449,21 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		}
 	}
 	for _, r := range rows {
-		if org := toOrganization(r, roles[r.ID], counts, plans, true); keep(org) {
+		if org := toOrganization(r, roles[r.ID], counts, plans, usage, true); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 	}
 	return out, nil
 }
 
-func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, plans map[string]db.Plan, admin bool, keep func(Organization) bool) (OrganizationList, error) {
+func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, plans map[string]db.Plan, usage map[string]float64, admin bool, keep func(Organization) bool) (OrganizationList, error) {
 	rows, err := s.q.ListOrganizationsForUser(ctx, userID)
 	if err != nil {
 		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
 	}
 	out := OrganizationList{Data: make([]Organization, 0, len(rows))}
 	for _, r := range rows {
-		if org := toOrganization(r.Organization, r.Role, counts, plans, admin); keep(org) {
+		if org := toOrganization(r.Organization, r.Role, counts, plans, usage, admin); keep(org) {
 			out.Data = append(out.Data, org)
 		}
 	}
@@ -624,6 +666,11 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		})
 		if err != nil {
 			return Organization{}, fmt.Errorf("set organization limits: %w", err)
+		}
+	}
+	if adminOnly {
+		if err := s.syncOrganizationQuotas(ctx, row); err != nil {
+			s.log.Warn("quota sync failed", "organization", row.Slug, "err", err)
 		}
 	}
 	return s.toOrganization(ctx, row, c.role, c.p.InstanceAdmin)

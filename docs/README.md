@@ -57,6 +57,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | | |
 |---|---|
 | [Sandbox API keys](customers/api-keys.md) | Create a key for a region and use it with the AerolVM or E2B SDK |
+| [Sandboxes and usage](customers/sandboxes-and-usage.md) | See and stop your sandboxes, and read your usage and limits |
 
 ## Operations
 

@@ -156,6 +156,20 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 
 "Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
 
+### Sandboxes and usage
+
+These routes take the organization as `?org={slug}` when present, otherwise in the `Lewbox-Organization` header. An instance admin with neither sees the whole fleet. Another organization's sandbox is always `404`, never `403`.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/sandboxes?region={slug}&status={status}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region and status |
+| `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
+| `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
+| `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
+| `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: effective limits, live use, per-region quota and last push |
+
+Suspending an organization pushes a blocking quota to every region on the next change and stops its running sandboxes on the next sync pass. Stopped sandboxes still count against limits, as AerolVM counts them.
+
 ### Docs
 
 Public and static: no token and no cookie. The web console renders them at `/docs/...`.

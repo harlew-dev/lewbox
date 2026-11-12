@@ -6,6 +6,8 @@ package service
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
@@ -22,6 +24,10 @@ type Service struct {
 	aerolvmOptions []aerolvm.Option
 
 	limiter *loginLimiter
+
+	log          *slog.Logger
+	syncInterval time.Duration
+	syncMu       sync.Mutex
 }
 
 // Option changes a Service built by New.
@@ -56,12 +62,41 @@ func WithLoginLimits(perIPPerMinute, failuresPerEmailPerMinute int) Option {
 	}
 }
 
+// WithLogger gives the service a logger for background work.
+func WithLogger(log *slog.Logger) Option {
+	return func(s *Service) {
+		if log != nil {
+			s.log = log
+		}
+	}
+}
+
+// WithSyncInterval is how often the sync loop runs. It caps the metered gap
+// at twice this value.
+func WithSyncInterval(d time.Duration) Option {
+	return func(s *Service) {
+		if d > 0 {
+			s.syncInterval = d
+		}
+	}
+}
+
+// SetSyncInterval changes the interval the background sync uses for its
+// metered-gap cap. Call it before starting the loop.
+func (s *Service) SetSyncInterval(d time.Duration) {
+	if d > 0 {
+		s.syncInterval = d
+	}
+}
+
 // New returns a Service backed by q.
 func New(q *db.Queries, opts ...Option) *Service {
 	s := &Service{
-		q:       q,
-		now:     func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
-		limiter: newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
+		q:            q,
+		now:          func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
+		limiter:      newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
+		log:          slog.New(slog.DiscardHandler),
+		syncInterval: 15 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(s)

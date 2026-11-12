@@ -63,6 +63,12 @@ type Backend interface {
 	ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error)
 	CreateSandboxKey(ctx context.Context, org string, req service.CreateSandboxKeyRequest) (service.NewSandboxKey, error)
 	RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error)
+
+	ListSandboxes(ctx context.Context, req service.ListSandboxesRequest) (service.SandboxList, error)
+	StopSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error)
+	DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error)
+	Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error)
+	Limits(ctx context.Context, org string) (service.LimitsReport, error)
 }
 
 // Local runs every operation in-process as the local principal. Whoever can
@@ -289,6 +295,31 @@ func (l Local) CreateSandboxKey(ctx context.Context, org string, req service.Cre
 // RevokeSandboxKey revokes a sandbox key.
 func (l Local) RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error) {
 	return l.Svc.RevokeSandboxKey(l.withPrincipal(ctx), org, ref)
+}
+
+// ListSandboxes returns mirrored sandboxes.
+func (l Local) ListSandboxes(ctx context.Context, req service.ListSandboxesRequest) (service.SandboxList, error) {
+	return l.Svc.ListSandboxes(l.withPrincipal(ctx), req)
+}
+
+// StopSandbox stops a sandbox on its cluster.
+func (l Local) StopSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+	return l.Svc.StopSandbox(l.withPrincipal(ctx), id, req)
+}
+
+// DeleteSandbox deletes a sandbox on its cluster.
+func (l Local) DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
+	return l.Svc.DeleteSandbox(l.withPrincipal(ctx), id, req)
+}
+
+// Usage returns metered usage.
+func (l Local) Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error) {
+	return l.Svc.Usage(l.withPrincipal(ctx), req)
+}
+
+// Limits returns an organization's limits and live use.
+func (l Local) Limits(ctx context.Context, org string) (service.LimitsReport, error) {
+	return l.Svc.Limits(l.withPrincipal(ctx), org)
 }
 
 func (l Local) withPrincipal(ctx context.Context) context.Context {

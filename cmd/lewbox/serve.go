@@ -30,6 +30,7 @@ type serveOptions struct {
 	port           int
 	listen         string
 	interval       time.Duration
+	syncInterval   time.Duration
 	cookieSecure   string
 	trustedOrigins []string
 }
@@ -41,6 +42,8 @@ func addServeFlags(cmd *cobra.Command, o *serveOptions) {
 		"the whole listen address, e.g. 127.0.0.1:8080 (env LEWBOX_LISTEN; default :8080)")
 	cmd.Flags().DurationVar(&o.interval, "check-interval", envDuration("LEWBOX_CHECK_INTERVAL", 60*time.Second),
 		"how often to check every cluster; 0 disables (env LEWBOX_CHECK_INTERVAL)")
+	cmd.Flags().DurationVar(&o.syncInterval, "sync-interval", envDuration("LEWBOX_SYNC_INTERVAL", 15*time.Second),
+		"how often to sync sandboxes and usage; 0 disables (env LEWBOX_SYNC_INTERVAL)")
 	cmd.Flags().StringVar(&o.cookieSecure, "cookie-secure", envOr("LEWBOX_COOKIE_SECURE", "auto"),
 		"session cookie security: auto or always (env LEWBOX_COOKIE_SECURE)")
 	cmd.Flags().StringSliceVar(&o.trustedOrigins, "trusted-origin", envList("LEWBOX_TRUSTED_ORIGINS"),
@@ -149,7 +152,9 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 		return err
 	}
 	log.Info("database ready", "path", a.dbPath)
+	svc.SetSyncInterval(o.syncInterval)
 	startClusterChecks(ctx, svc, o.interval, log)
+	startSync(ctx, svc, o.syncInterval, log)
 	site, err := loadDocs()
 	if err != nil {
 		return err

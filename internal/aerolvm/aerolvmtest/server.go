@@ -36,6 +36,15 @@ type Server struct {
 	failures    map[string]*failure
 	tokenTTLCap time.Duration
 	nextID      int
+
+	sandboxes    []aerolvm.Sandbox
+	sandboxTeams map[string]string
+	sandboxNodes map[string]string
+	partial      bool
+	pageLimit    int
+	quotas       map[string]aerolvm.TeamQuota
+	quotaPushes  map[string][]aerolvm.TeamQuota
+	quotaDeletes map[string]int
 }
 
 type failure struct {
@@ -48,11 +57,16 @@ type failure struct {
 func New(t testing.TB) *Server {
 	t.Helper()
 	s := &Server{
-		t:          t,
-		version:    "v0.7.0",
-		clusterOn:  true,
-		tokenByVal: make(map[string]aerolvm.Token),
-		failures:   make(map[string]*failure),
+		t:            t,
+		version:      "v0.7.0",
+		clusterOn:    true,
+		tokenByVal:   make(map[string]aerolvm.Token),
+		failures:     make(map[string]*failure),
+		sandboxTeams: make(map[string]string),
+		sandboxNodes: make(map[string]string),
+		quotas:       make(map[string]aerolvm.TeamQuota),
+		quotaPushes:  make(map[string][]aerolvm.TeamQuota),
+		quotaDeletes: make(map[string]int),
 	}
 	s.members = []aerolvm.Member{{
 		NodeID:   "node-a",
@@ -102,6 +116,70 @@ func (s *Server) SetTokenTTLCap(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokenTTLCap = d
+}
+
+// AddSandbox adds a sandbox owned by team on the first member. Tests use it
+// to fill the sandbox list and the cluster sandbox index.
+func (s *Server) AddSandbox(team string, sandbox aerolvm.Sandbox) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addSandboxLocked(team, "", sandbox)
+}
+
+// AddSandboxOn is AddSandbox with an explicit owner node.
+func (s *Server) AddSandboxOn(team, node string, sandbox aerolvm.Sandbox) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.addSandboxLocked(team, node, sandbox)
+}
+
+func (s *Server) addSandboxLocked(team, node string, sandbox aerolvm.Sandbox) {
+	if sandbox.CreatedAt.IsZero() {
+		sandbox.CreatedAt = time.Now().UTC().Truncate(time.Second)
+	}
+	s.sandboxes = append(s.sandboxes, sandbox)
+	s.sandboxTeams[sandbox.ID] = team
+	if node != "" {
+		s.sandboxNodes[sandbox.ID] = node
+	}
+}
+
+// SetSandboxListPartial makes GET /v1/sandboxes say that a node did not
+// answer.
+func (s *Server) SetSandboxListPartial(partial bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.partial = partial
+}
+
+// SetPageLimit caps the page size of the sandbox list and index, so tests can
+// exercise paging without hundreds of rows.
+func (s *Server) SetPageLimit(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pageLimit = n
+}
+
+// QuotaPushes returns the quotas PUT for team, in order.
+func (s *Server) QuotaPushes(team string) []aerolvm.TeamQuota {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]aerolvm.TeamQuota(nil), s.quotaPushes[team]...)
+}
+
+// QuotaDeletes returns how many times DELETE removed team's quota.
+func (s *Server) QuotaDeletes(team string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.quotaDeletes[team]
+}
+
+// TeamQuota returns the quota currently set for team.
+func (s *Server) TeamQuota(team string) (aerolvm.TeamQuota, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q, ok := s.quotas[team]
+	return q, ok
 }
 
 // FailNext makes the next n requests to path fail with status and body,
@@ -161,6 +239,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/cluster/join-tokens", s.handleCreateJoinToken)
 	mux.HandleFunc("POST /v1/cluster/nodes/{id}/drain", s.handleDrainNode)
 	mux.HandleFunc("DELETE /v1/cluster/nodes/{id}", s.handleDeleteNode)
+	mux.HandleFunc("GET /v1/sandboxes", s.handleListSandboxes)
+	mux.HandleFunc("POST /v1/sandboxes/{id}/stop", s.handleStopSandbox)
+	mux.HandleFunc("DELETE /v1/sandboxes/{id}", s.handleDeleteSandbox)
+	mux.HandleFunc("GET /v1/cluster/sandbox-index", s.handleSandboxIndex)
+	mux.HandleFunc("GET /v1/teams/{team}/quota", s.handleGetTeamQuota)
+	mux.HandleFunc("PUT /v1/teams/{team}/quota", s.handlePutTeamQuota)
+	mux.HandleFunc("DELETE /v1/teams/{team}/quota", s.handleDeleteTeamQuota)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.injected(w, r) {
 			return
@@ -388,6 +473,143 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.writeError(w, http.StatusNotFound, "cluster: unknown node")
+}
+
+// page bounds returns the slice [start:end] a request asks for.
+func (s *Server) page(r *http.Request, n int) (int, int) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || (s.pageLimit > 0 && limit > s.pageLimit) {
+		limit = s.pageLimit
+	}
+	if limit <= 0 {
+		limit = n
+	}
+	start, _ := strconv.Atoi(r.URL.Query().Get("page_token"))
+	if start < 0 || start > n {
+		start = n
+	}
+	end := start + limit
+	if end > n {
+		end = n
+	}
+	return start, end
+}
+
+func (s *Server) handleListSandboxes(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	n := len(s.sandboxes)
+	start, end := s.page(r, n)
+	page := append([]aerolvm.Sandbox(nil), s.sandboxes[start:end]...)
+	partial := s.partial
+	s.mu.Unlock()
+	if partial {
+		w.Header().Set("X-Cluster-List-Partial", "true")
+	}
+	if end < n {
+		w.Header().Set("X-Cluster-List-Next-Page-Token", strconv.Itoa(end))
+	}
+	s.writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) handleSandboxIndex(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	placements := make([]aerolvm.Placement, 0, len(s.sandboxes))
+	for _, sb := range s.sandboxes {
+		node := s.sandboxNodes[sb.ID]
+		if node == "" && len(s.members) > 0 {
+			node = s.members[0].NodeID
+		}
+		placements = append(placements, aerolvm.Placement{
+			SandboxID:     sb.ID,
+			OwnerNodeID:   node,
+			OwnerRef:      "team:" + s.sandboxTeams[sb.ID],
+			QuotaCPU:      sb.CPU,
+			QuotaMemoryMB: sb.MemoryMB,
+			CreatedUnix:   sb.CreatedAt.Unix(),
+			State:         sb.Status,
+		})
+	}
+	start, end := s.page(r, len(placements))
+	page := append([]aerolvm.Placement(nil), placements[start:end]...)
+	next := ""
+	if end < len(placements) {
+		next = strconv.Itoa(end)
+	}
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, map[string]any{"placements": page, "next_page_token": next})
+}
+
+func (s *Server) handleStopSandbox(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	for i := range s.sandboxes {
+		if s.sandboxes[i].ID != id {
+			continue
+		}
+		s.sandboxes[i].Status = "stopped"
+		sandbox := s.sandboxes[i]
+		s.mu.Unlock()
+		s.writeJSON(w, http.StatusOK, sandbox)
+		return
+	}
+	s.mu.Unlock()
+	s.writeError(w, http.StatusNotFound, "sandbox not found")
+}
+
+func (s *Server) handleDeleteSandbox(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, sb := range s.sandboxes {
+		if sb.ID != id {
+			continue
+		}
+		s.sandboxes = append(s.sandboxes[:i], s.sandboxes[i+1:]...)
+		delete(s.sandboxTeams, id)
+		delete(s.sandboxNodes, id)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.writeError(w, http.StatusNotFound, "sandbox not found")
+}
+
+func (s *Server) handleGetTeamQuota(w http.ResponseWriter, r *http.Request) {
+	team := r.PathValue("team")
+	s.mu.Lock()
+	quota, ok := s.quotas[team]
+	s.mu.Unlock()
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "team quota not found")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, quota)
+}
+
+func (s *Server) handlePutTeamQuota(w http.ResponseWriter, r *http.Request) {
+	team := r.PathValue("team")
+	var quota aerolvm.TeamQuota
+	if err := json.NewDecoder(r.Body).Decode(&quota); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if quota.MaxSandboxes == 0 && quota.MaxCPU == 0 && quota.MaxMemoryMB == 0 {
+		s.writeError(w, http.StatusBadRequest, "a quota needs at least one limit")
+		return
+	}
+	s.mu.Lock()
+	s.quotas[team] = quota
+	s.quotaPushes[team] = append(s.quotaPushes[team], quota)
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, quota)
+}
+
+func (s *Server) handleDeleteTeamQuota(w http.ResponseWriter, r *http.Request) {
+	team := r.PathValue("team")
+	s.mu.Lock()
+	delete(s.quotas, team)
+	s.quotaDeletes[team]++
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {

@@ -180,6 +180,45 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 	return items, nil
 }
 
+const listOrganizationsByPlan = `-- name: ListOrganizationsByPlan :many
+SELECT id, slug, name, status, created_at, team, plan_id, max_sandboxes, max_vcpus, max_memory_mb, status_reason FROM organizations WHERE plan_id = ? ORDER BY slug
+`
+
+func (q *Queries) ListOrganizationsByPlan(ctx context.Context, planID sql.NullString) ([]Organization, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationsByPlan, planID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Organization
+	for rows.Next() {
+		var i Organization
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Name,
+			&i.Status,
+			&i.CreatedAt,
+			&i.Team,
+			&i.PlanID,
+			&i.MaxSandboxes,
+			&i.MaxVcpus,
+			&i.MaxMemoryMb,
+			&i.StatusReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrganizationsForUser = `-- name: ListOrganizationsForUser :many
 SELECT organizations.id, organizations.slug, organizations.name, organizations.status, organizations.created_at, organizations.team, organizations.plan_id, organizations.max_sandboxes, organizations.max_vcpus, organizations.max_memory_mb, organizations.status_reason, memberships.role
 FROM organizations

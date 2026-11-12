@@ -433,6 +433,46 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("GET "+Prefix+"/sandboxes", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListSandboxes(r.Context(), service.ListSandboxesRequest{
+			Region: r.URL.Query().Get("region"),
+			Status: r.URL.Query().Get("status"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/sandboxes/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.StopSandbox(r.Context(), r.PathValue("id"), service.SandboxActionRequest{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/sandboxes/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteSandbox(r.Context(), r.PathValue("id"), service.SandboxActionRequest{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/usage", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.Usage(r.Context(), service.UsageRequest{
+			From:        r.URL.Query().Get("from"),
+			To:          r.URL.Query().Get("to"),
+			Granularity: r.URL.Query().Get("granularity"),
+			Org:         requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/limits", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.Limits(r.Context(), r.Header.Get(OrganizationHeader))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	// Docs are static content and public, so they are an HTTP-only exception
 	// to the two-entry-points rule.
 	mux.HandleFunc("GET "+Prefix+"/docs", func(w http.ResponseWriter, r *http.Request) {
@@ -670,6 +710,15 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 		return &service.Error{Code: service.CodeInvalid, Message: "invalid JSON body: " + err.Error()}
 	}
 	return nil
+}
+
+// requestOrganization resolves the organization a fleet-capable route acts
+// on: the org query parameter when present, otherwise the header.
+func requestOrganization(r *http.Request) string {
+	if org := strings.TrimSpace(r.URL.Query().Get("org")); org != "" {
+		return org
+	}
+	return r.Header.Get(OrganizationHeader)
 }
 
 // queryBool parses an optional boolean query parameter. An empty value is

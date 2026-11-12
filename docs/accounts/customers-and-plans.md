@@ -65,6 +65,25 @@ lewbox region list
 
 Any signed-in account, and any organization API key, can list regions. Cluster, node, account, plan and settings routes are instance-admin only.
 
+## How limits are enforced
+
+A plan's limits are shared across every region. On each sync pass (every 15 seconds) Lewbox counts the sandboxes the organization holds on each cluster — stopped ones included, as AerolVM counts them — and works out the headroom:
+
+```
+headroom = max(0, limit − use in all regions)
+quota in a region = use in that region + headroom
+```
+
+It then sets that region's AerolVM **team quota** for the organization's team. AerolVM enforces it atomically, so a create that would exceed the quota fails with `429 team_quota_exceeded`; lowering a limit never removes a running sandbox, it only refuses growth. With one region this is a plain limit; with several, the free headroom follows the region that needs it.
+
+AerolVM reads a quota of `0` as "no limit", so when a limited kind would compute to zero, Lewbox pushes a **blocking quota** (`max_cpu: 0.001`, `max_memory_mb: 1`) instead. When every limit is unlimited, it deletes the quota.
+
+Suspending an organization pushes the blocking quota to every region at once, and the next sync stops its running sandboxes so they stop accruing compute. Pending organizations have the same block.
+
+Quotas are only pushed when they change, when the last push failed, or after ten minutes; what Lewbox last pushed and any error is stored per organization and region. A changed plan, limit or status is pushed immediately. `lewbox limits` shows the current state and every push error.
+
+Limits apply on top of what is already running: a suspended or over-limit organization can read its data but not grow.
+
 ## What customers see
 
 | | Instance admin | Org owner/admin | Org member/viewer | Org API key |

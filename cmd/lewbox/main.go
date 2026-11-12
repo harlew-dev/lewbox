@@ -347,6 +347,9 @@ func newRootCmd(a *app) *cobra.Command {
 		newMemberCmd(a),
 		newAdminKeyCmd(a),
 		newSandboxKeyCmd(a),
+		newSandboxCmd(a),
+		newUsageCmd(a),
+		newLimitsCmd(a),
 		newRegionCmd(a),
 		newPlanCmd(a),
 		newSettingsCmd(a),
@@ -697,6 +700,28 @@ func newVersionCmd() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
+}
+
+// startSync mirrors sandboxes and meters usage in the background until ctx
+// ends.
+func startSync(ctx context.Context, svc *service.Service, every time.Duration, log *slog.Logger) {
+	if every <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := svc.Sync(ctx); err != nil {
+					log.Warn("sync failed", "err", err)
+				}
+			}
+		}
+	}()
 }
 
 // startClusterChecks checks every cluster in the background until ctx ends.
