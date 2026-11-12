@@ -118,6 +118,22 @@ type Sandbox struct {
 	LastActiveAt time.Time `json:"last_active_at"`
 }
 
+// Snapshot is one entry of GET /v1/snapshots. AerolVM reports no owner and no
+// size, and lists only the snapshots of the node that answers.
+type Snapshot struct {
+	Name             string    `json:"name"`
+	Image            string    `json:"image"`
+	ImageID          string    `json:"image_id"`
+	SourceSandboxID  string    `json:"source_sandbox_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	CPU              float64   `json:"cpu"`
+	MemoryMB         int64     `json:"memory_mb"`
+	DiskGB           int64     `json:"disk_gb"`
+	PushState        string    `json:"push_state"`
+	PushError        string    `json:"push_error"`
+	ImageRegistryRef string    `json:"image_registry_ref"`
+}
+
 // Placement is one entry of the cluster sandbox index: which team owns a
 // sandbox and on which node it runs.
 type Placement struct {

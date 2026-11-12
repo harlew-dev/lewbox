@@ -458,6 +458,32 @@ func sandboxActionPath(id, action, region string) string {
 	return path
 }
 
+// ListSnapshots lists snapshots, optionally filtered by region.
+func (c *Client) ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error) {
+	query := url.Values{}
+	if req.Region != "" {
+		query.Set("region", req.Region)
+	}
+	path := "/v0/snapshots"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.SnapshotList
+	err := c.request(ctx, http.MethodGet, path, req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
+// DeleteSnapshot deletes a snapshot on its cluster.
+func (c *Client) DeleteSnapshot(ctx context.Context, name string, req service.SnapshotActionRequest) (service.Snapshot, error) {
+	path := "/v0/snapshots/" + url.PathEscape(name)
+	if req.Region != "" {
+		path += "?region=" + url.QueryEscape(req.Region)
+	}
+	var out service.Snapshot
+	err := c.request(ctx, http.MethodDelete, path, req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
 // Usage returns metered usage.
 func (c *Client) Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error) {
 	query := url.Values{}

@@ -32,6 +32,10 @@ type Service struct {
 
 	pruneMu   sync.Mutex
 	lastPrune time.Time
+
+	snapshotMu     sync.Mutex
+	snapshotTokens map[snapshotKey]snapshotToken
+	snapshotCache  map[snapshotKey]snapshotCacheEntry
 }
 
 // Option changes a Service built by New.
@@ -109,6 +113,9 @@ func New(q *db.Queries, opts ...Option) *Service {
 		signupLimiter: newLimiter(signupIPAttemptsPerHour, 0, signupIPWindow),
 		log:           slog.New(slog.DiscardHandler),
 		syncInterval:  15 * time.Second,
+
+		snapshotTokens: make(map[snapshotKey]snapshotToken),
+		snapshotCache:  make(map[snapshotKey]snapshotCacheEntry),
 	}
 	for _, opt := range opts {
 		opt(s)

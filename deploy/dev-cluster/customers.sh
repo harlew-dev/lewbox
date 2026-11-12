@@ -129,6 +129,17 @@ expect "b's list doesn't" "[.data[] | select(.id == \"$id1\")] | length == 0" "$
 [[ $(avm b GET "/v1/sandboxes/$id1" -o /dev/null -w '%{http_code}') == 404 ]] && pass "b's key gets 404 for a's sandbox" || fail "b reached a's sandbox"
 [[ $(code -X POST -b "$JAR/b" -H "Lewbox-Organization: ${ORG[b]}" "$API/v0/sandboxes/$id1/stop?region=$CLUSTER") == 404 ]] && pass "b can't stop it through Lewbox" || fail "b stopped a's sandbox"
 
+step "a snapshots a sandbox with its key; Lewbox lists it for a, and a deletes it"
+snapname="snap-$RUN"
+sc=$(avm a POST "/v1/sandboxes/$id1/snapshot" -d "{\"name\":\"$snapname\"}" -o "$JAR/snapshot" -w '%{http_code}')
+[[ $sc == 201 ]] && pass "a took a snapshot with its key" || { cat "$JAR/snapshot" >&2; fail "snapshot got $sc, want 201"; }
+has_snapshot() { cust "$1" GET "/v0/snapshots?region=$CLUSTER" | jq -e "[.data[] | select(.name == \"$snapname\" and .region == \"$CLUSTER\")] | length == 1"; }
+eventually 60 "Lewbox lists it for a" has_snapshot a
+expect "b's snapshot list doesn't have it" "[.data[] | select(.name == \"$snapname\")] | length == 0" "$(cust b GET "/v0/snapshots?region=$CLUSTER")"
+cust a DELETE "/v0/snapshots/$snapname?region=$CLUSTER" >/dev/null && pass "a deleted it through Lewbox"
+snapshot_gone() { avm a GET /v1/snapshots | jq -e "[.snapshots[] | select(.name == \"$snapname\")] | length == 0"; }
+eventually 30 "the cluster no longer lists it" snapshot_gone
+
 step "the plan's limit (2 sandboxes) is enforced by AerolVM"
 eventually 60 "the quota reached the cluster" quota_pushed a 2
 create_ok a && pass "a second sandbox is fine" || { cat "$JAR/created" >&2; fail "second sandbox"; }
@@ -143,7 +154,9 @@ cust a DELETE "/v0/sandboxes/$id1?region=$CLUSTER" >/dev/null && pass "deleted"
 
 step "usage is recorded and the operator sees the fleet"
 eventually 60 "a has usage" has_usage a
-expect "overview counts customers and running sandboxes" '.customers.total >= 2 and .sandboxes.running >= 1' "$(admin GET /v0/overview)"
+# The mirror can lag a sync pass behind the cluster, so give it a few passes.
+overview_ok() { admin GET /v0/overview | jq -e '.customers.total >= 2 and .sandboxes.running >= 1'; }
+eventually 30 "overview counts customers and running sandboxes" overview_ok
 # The first health sample comes with the first check after the orchestrator starts.
 has_health() { admin GET "/v0/clusters/$CLUSTER/health?days=30" | jq -e '(.cluster.days | length == 30) and ([.cluster.days[] | select(.uptime != null)] | length >= 1) and (.nodes | length >= 1)'; }
 eventually 90 "the cluster has health history" has_health

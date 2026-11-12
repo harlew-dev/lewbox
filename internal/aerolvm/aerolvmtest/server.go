@@ -41,6 +41,7 @@ type Server struct {
 	sandboxes    []aerolvm.Sandbox
 	sandboxTeams map[string]string
 	sandboxNodes map[string]string
+	snapshots    map[string][]aerolvm.Snapshot
 	partial      bool
 	pageLimit    int
 	quotas       map[string]aerolvm.TeamQuota
@@ -65,6 +66,7 @@ func New(t testing.TB) *Server {
 		failures:     make(map[string]*failure),
 		sandboxTeams: make(map[string]string),
 		sandboxNodes: make(map[string]string),
+		snapshots:    make(map[string][]aerolvm.Snapshot),
 		quotas:       make(map[string]aerolvm.TeamQuota),
 		quotaPushes:  make(map[string][]aerolvm.TeamQuota),
 		quotaDeletes: make(map[string]int),
@@ -160,6 +162,32 @@ func (s *Server) addSandboxLocked(team, node string, sandbox aerolvm.Sandbox) {
 	if node != "" {
 		s.sandboxNodes[sandbox.ID] = node
 	}
+}
+
+// AddSnapshot adds a snapshot owned by team. A team-bound token sees only its
+// team's snapshots, as on a real cluster.
+func (s *Server) AddSnapshot(team string, snapshot aerolvm.Snapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = time.Now().UTC().Truncate(time.Second)
+	}
+	s.snapshots[team] = append(s.snapshots[team], snapshot)
+}
+
+// Snapshots returns the snapshots stored for team, in order.
+func (s *Server) Snapshots(team string) []aerolvm.Snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]aerolvm.Snapshot(nil), s.snapshots[team]...)
+}
+
+// AcceptToken makes a token minted on another fake node valid here, the way
+// AerolVM replicates tokens across a cluster.
+func (s *Server) AcceptToken(token aerolvm.Token) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tokenByVal[token.Token] = token
 }
 
 // SetSandboxListPartial makes GET /v1/sandboxes say that a node did not
@@ -261,6 +289,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/sandboxes", s.handleListSandboxes)
 	mux.HandleFunc("POST /v1/sandboxes/{id}/stop", s.handleStopSandbox)
 	mux.HandleFunc("DELETE /v1/sandboxes/{id}", s.handleDeleteSandbox)
+	mux.HandleFunc("GET /v1/snapshots", s.handleListSnapshots)
+	mux.HandleFunc("DELETE /v1/snapshots/{name}", s.handleDeleteSnapshot)
 	mux.HandleFunc("GET /v1/cluster/sandbox-index", s.handleSandboxIndex)
 	mux.HandleFunc("GET /v1/teams/{team}/quota", s.handleGetTeamQuota)
 	mux.HandleFunc("PUT /v1/teams/{team}/quota", s.handlePutTeamQuota)
@@ -605,6 +635,87 @@ func (s *Server) handleDeleteSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeError(w, http.StatusNotFound, "sandbox not found")
+}
+
+func (s *Server) requestTeam(r *http.Request) (string, bool) {
+	_, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if token == s.AdminToken {
+		return "*", true
+	}
+	record, ok := s.tokenByVal[token]
+	if !ok {
+		return "", false
+	}
+	return record.Team, true
+}
+
+func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mu.Lock()
+	list := make([]aerolvm.Snapshot, 0)
+	if team == "*" {
+		for _, snapshots := range s.snapshots {
+			list = append(list, snapshots...)
+		}
+	} else {
+		list = append(list, s.snapshots[team]...)
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || (s.pageLimit > 0 && limit > s.pageLimit) {
+		limit = s.pageLimit
+	}
+	if limit <= 0 {
+		limit = len(list)
+	}
+	start := 0
+	if after := r.URL.Query().Get("starting_after"); after != "" {
+		for i, snapshot := range list {
+			if snapshot.Name == after {
+				start = i + 1
+				break
+			}
+		}
+	}
+	if start > len(list) {
+		start = len(list)
+	}
+	end := start + limit
+	if end > len(list) {
+		end = len(list)
+	}
+	page := append([]aerolvm.Snapshot(nil), list[start:end]...)
+	hasMore := end < len(list)
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusOK, map[string]any{"snapshots": page, "has_more": hasMore})
+}
+
+func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The admin token's own namespace is empty, as on a real cluster.
+	if team != "*" {
+		for i, snapshot := range s.snapshots[team] {
+			if snapshot.Name != name {
+				continue
+			}
+			s.snapshots[team] = append(s.snapshots[team][:i], s.snapshots[team][i+1:]...)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+	s.writeError(w, http.StatusNotFound, "snapshot not found")
 }
 
 func (s *Server) handleGetTeamQuota(w http.ResponseWriter, r *http.Request) {

@@ -217,6 +217,37 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, bool, error) {
 	}
 }
 
+// ListSnapshots reads every page of GET /v1/snapshots. It is node-local: a
+// team-bound token sees only that team's snapshots on the node that answers.
+func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {
+	all := make([]Snapshot, 0)
+	after := ""
+	for {
+		path := "/v1/snapshots?limit=500"
+		if after != "" {
+			path += "&starting_after=" + url.QueryEscape(after)
+		}
+		var page struct {
+			Snapshots []Snapshot `json:"snapshots"`
+			HasMore   bool       `json:"has_more"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, nil, &page, true); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Snapshots...)
+		if !page.HasMore || len(page.Snapshots) == 0 {
+			return all, nil
+		}
+		after = page.Snapshots[len(page.Snapshots)-1].Name
+	}
+}
+
+// DeleteSnapshot calls DELETE /v1/snapshots/{name}. A missing snapshot is a
+// 404, because the caller has to find the node that holds it.
+func (c *Client) DeleteSnapshot(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, "/v1/snapshots/"+url.PathEscape(name), nil, nil, true)
+}
+
 // SandboxIndex reads every page of GET /v1/cluster/sandbox-index.
 func (c *Client) SandboxIndex(ctx context.Context) ([]Placement, error) {
 	all := make([]Placement, 0)

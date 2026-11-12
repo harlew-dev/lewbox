@@ -657,6 +657,60 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 	}
 }
 
+func TestSnapshotBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	org, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	h.fake.AddSnapshot(org.Team, aerolvm.Snapshot{
+		Name: "ckpt-a", Image: "ubuntu:22.04", SourceSandboxID: "sb-1", CPU: 1, MemoryMB: 512, DiskGB: 10,
+		PushState: "active", CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+	h.fake.AddSnapshot(org.Team, aerolvm.Snapshot{
+		Name: "ckpt-b", Image: "ubuntu:22.04", SourceSandboxID: "sb-2", CPU: 1, MemoryMB: 512, DiskGB: 10,
+		PushState: "pending", CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+
+	listSnapshots := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListSnapshots(ctx, service.ListSnapshotsRequest{Org: "acme"})
+	}
+	runSteps(t, h, []step{
+		both("list snapshots", listSnapshots),
+		{
+			name: "delete snapshots",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteSnapshot(ctx, "ckpt-a", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteSnapshot(ctx, "ckpt-b", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+			},
+			check: func(t *testing.T, v any) {
+				if snapshot, ok := v.(service.Snapshot); !ok || snapshot.Region != "eu-west" {
+					t.Errorf("deleted snapshot = %+v", v)
+				}
+			},
+		},
+		both("list snapshots after delete", listSnapshots),
+		both("missing snapshot", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.DeleteSnapshot(ctx, "missing", service.SnapshotActionRequest{Org: "acme", Region: "eu-west"})
+		}),
+	})
+}
+
 func TestMonitoringBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

@@ -349,6 +349,10 @@ Sandboxes Lewbox has mirrored from every region, newest first. Members see their
 
 Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--region` picks the cluster when the same ID exists more than once. Delete asks to confirm.
 
+### `lewbox snapshot list [--region SLUG]` · `lewbox snapshot delete NAME [--region SLUG] [--yes]`
+
+Your workspace's snapshots, from every node of every subscribed region (or one region). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm.
+
 ### `lewbox usage [--from DATE] [--to DATE] [--hourly]`
 
 Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Members see their organization's; instance admins the whole fleet unless they choose one.

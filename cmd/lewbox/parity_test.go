@@ -682,6 +682,60 @@ func TestSandboxesAndUsage(t *testing.T) {
 	e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
 }
 
+// TestSnapshots exercises listing and deleting a workspace's snapshots
+// through the CLI and HTTP.
+func TestSnapshots(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_snapshot_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	out, errOut, code := e.cli("org", "create", "acme")
+	if code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	var org service.Organization
+	if err := json.Unmarshal([]byte(out), &org); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
+		t.Fatalf("subscription set: %s", errOut)
+	}
+	fake.AddSnapshot(org.Team, aerolvm.Snapshot{
+		Name: "ckpt-1", Image: "ubuntu:22.04", SourceSandboxID: "sb-1",
+		CPU: 1, MemoryMB: 512, DiskGB: 10, PushState: "active",
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	})
+
+	e.sameOrg("acme", []string{"snapshot", "list", "--org", "acme"}, "GET", "/v0/snapshots", 200)
+	e.sameOrg("acme", []string{"snapshot", "list", "--region", "eu-west", "--org", "acme"},
+		"GET", "/v0/snapshots?region=eu-west", 200)
+
+	deleted, errOut, code := e.cli("snapshot", "delete", "ckpt-1", "--region", "eu-west", "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("snapshot delete: exit %d: %s", code, errOut)
+	}
+	var gone service.Snapshot
+	if err := json.Unmarshal([]byte(deleted), &gone); err != nil {
+		t.Fatal(err)
+	}
+	if gone.Name != "ckpt-1" || gone.Region != "eu-west" || gone.SourceSandboxID != "sb-1" {
+		t.Errorf("deleted snapshot = %+v", gone)
+	}
+	e.sameError([]string{"snapshot", "delete", "ckpt-1", "--region", "eu-west", "--org", "acme", "--yes"},
+		"DELETE", "/v0/snapshots/ckpt-1?region=eu-west", "", 404)
+	if got, errOut, code := e.cli("snapshot", "list", "--org", "acme"); code != 0 || got != `{"data":[],"partial_nodes":[]}`+"\n" {
+		t.Errorf("list after delete: exit %d stdout %q stderr %q", code, got, errOut)
+	}
+}
+
 func TestMonitoring(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)

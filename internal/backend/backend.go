@@ -74,6 +74,8 @@ type Backend interface {
 	ListSandboxes(ctx context.Context, req service.ListSandboxesRequest) (service.SandboxList, error)
 	StopSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error)
 	DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error)
+	ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error)
+	DeleteSnapshot(ctx context.Context, name string, req service.SnapshotActionRequest) (service.Snapshot, error)
 	Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error)
 	Limits(ctx context.Context, org string) (service.LimitsReport, error)
 }
@@ -347,6 +349,16 @@ func (l Local) StopSandbox(ctx context.Context, id string, req service.SandboxAc
 // DeleteSandbox deletes a sandbox on its cluster.
 func (l Local) DeleteSandbox(ctx context.Context, id string, req service.SandboxActionRequest) (service.Sandbox, error) {
 	return l.Svc.DeleteSandbox(l.withPrincipal(ctx), id, req)
+}
+
+// ListSnapshots lists the snapshots of the workspaces the caller may see.
+func (l Local) ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error) {
+	return l.Svc.ListSnapshots(l.withPrincipal(ctx), req)
+}
+
+// DeleteSnapshot deletes a snapshot on its cluster.
+func (l Local) DeleteSnapshot(ctx context.Context, name string, req service.SnapshotActionRequest) (service.Snapshot, error) {
+	return l.Svc.DeleteSnapshot(l.withPrincipal(ctx), name, req)
 }
 
 // Usage returns metered usage.

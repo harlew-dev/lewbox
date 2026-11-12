@@ -497,6 +497,23 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("GET "+Prefix+"/snapshots", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListSnapshots(r.Context(), service.ListSnapshotsRequest{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// {name} is the snapshot's name, which is unique per member team.
+	mux.HandleFunc("DELETE "+Prefix+"/snapshots/{name}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteSnapshot(r.Context(), r.PathValue("name"), service.SnapshotActionRequest{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/usage", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.Usage(r.Context(), service.UsageRequest{
 			From:        r.URL.Query().Get("from"),

@@ -27,6 +27,18 @@ Stopping frees the compute but keeps the sandbox and its disk. Deleting removes 
 
 A sandbox belongs to one organization: another organization's member gets "not found", never a peek at it.
 
+## Snapshots
+
+Snapshots you take with the SDK (`sandbox.snapshot()`) show up in the portal and in the CLI:
+
+```bash
+lewbox snapshot list
+lewbox snapshot list --region eu-west
+lewbox snapshot delete ckpt-1 --region eu-west --yes
+```
+
+A snapshot belongs to your workspace, so every member sees it. Lewbox asks each node of each region, since AerolVM stores snapshots per node; if a node does not answer, its name is listed as partial and the rest are shown. `--region` picks the region when the same name exists more than once. Deleting asks to confirm. AerolVM reports no snapshot size, so snapshots are not charged.
+
 ## Usage
 
 ```bash

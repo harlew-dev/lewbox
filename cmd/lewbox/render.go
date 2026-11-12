@@ -58,6 +58,8 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderNewSandboxKey(w, data, now)
 	case service.SandboxList:
 		return renderSandboxes(w, data.Data, now)
+	case service.SnapshotList:
+		return renderSnapshots(w, data, now)
 	case service.Usage:
 		return renderUsage(w, data)
 	case service.LimitsReport:
@@ -295,6 +297,24 @@ func renderSandboxes(w io.Writer, sandboxes []service.Sandbox, now time.Time) er
 			s.ID, s.Region, s.Status, dash(s.Name), dash(s.Image), s.CPU, s.MemoryMB, relativeTime(s.CreatedAt, now))
 	}
 	return tw.Flush()
+}
+
+// renderSnapshots prints a snapshot table and any nodes that did not answer.
+func renderSnapshots(w io.Writer, list service.SnapshotList, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tREGION\tSOURCE\tCREATED\tCPU\tMEMORY\tDISK\tPUSH_STATE")
+	for _, s := range list.Data {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%g\t%d\t%d\t%s\n",
+			s.Name, s.Region, dash(s.SourceSandboxID), relativeTime(s.CreatedAt, now),
+			s.CPU, s.MemoryMB, s.DiskGB, dash(s.PushState))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(list.PartialNodes) > 0 {
+		fmt.Fprintf(w, "partial: %s did not answer\n", strings.Join(list.PartialNodes, ", "))
+	}
+	return nil
 }
 
 // renderUsage prints the totals and one row per bucket.
