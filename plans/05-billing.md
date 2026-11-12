@@ -23,14 +23,13 @@ All amounts are integers in **micro-units** of the instance currency (1 000 000 
 ## Schema (`00010_billing.sql`)
 
 ```sql
-ALTER TABLE plans ADD COLUMN monthly_credits_micros INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE usage_hourly ADD COLUMN charged_at DATETIME;
 
 CREATE TABLE credit_txns (                 -- append-only ledger
     id         TEXT PRIMARY KEY,
     org_id     TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     amount     INTEGER NOT NULL,           -- micro-units, + credit / − charge
-    kind       TEXT NOT NULL,              -- grant | usage | monthly | signup
+    kind       TEXT NOT NULL,              -- grant | usage | signup
     reference  TEXT NOT NULL UNIQUE,       -- makes every write idempotent
     note       TEXT NOT NULL DEFAULT '',
     created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -44,7 +43,6 @@ Balance = `SUM(amount)` for the organization. References:
 | kind | reference | when |
 |---|---|---|
 | `usage` | `usage:<org>:<cluster>:<hour RFC3339>` | each closed hour of `usage_hourly` with cost > 0, charged by the sync pass after the hour ends |
-| `monthly` | `monthly:<org>:<YYYY-MM>` | first sync pass of each calendar month (UTC) for orgs whose plan has monthly credits; also right after sign-up/plan change if this month's grant is missing |
 | `signup` | `signup:<org>` | at sign-up when `signup_credits_micros > 0` |
 | `grant` | caller's `reference`, or `grant:<txn id>` | operator adds or removes credits |
 
@@ -61,10 +59,10 @@ Balance = `SUM(amount)` for the organization. References:
 
 | Route | Who | What |
 |---|---|---|
-| `GET /v0/credits` | members (their org), org API key, instance admins | `{"currency","balance_micros","month_spend_micros","unbilled_micros","monthly_credits_micros","data":[txn…]}` (newest 100) |
+| `GET /v0/credits` | members (their org), org API key, instance admins | `{"currency","balance_micros","month_spend_micros","unbilled_micros","data":[txn…]}` (newest 100) |
 | `POST /v0/credits {"amount_micros","note","reference"}` | instance admins | Adds a ledger entry (negative removes credits); `409` if the reference exists |
 
-`unbilled_micros` is the cost of the current, not yet charged hours (an estimate for the UI). Usage responses (Phase 3) gain `cost_micros` per bucket and in totals when billing isn't `off`. Organization responses gain `balance_micros` when billing isn't `off`. Plans gain `monthly_credits_micros`. `/v0/instance` gains `billing` and `currency` so the portal knows whether to show the Billing page.
+`unbilled_micros` is the cost of the current, not yet charged hours (an estimate for the UI). Usage responses (Phase 3) gain `cost_micros` per bucket and in totals when billing isn't `off`. Organization responses gain `balance_micros` when billing isn't `off`. `/v0/instance` gains `billing` and `currency` so the portal knows whether to show the Billing page.
 
 ## CLI
 
@@ -72,11 +70,10 @@ Balance = `SUM(amount)` for the organization. References:
 lewbox credits [--org acme]
 lewbox credits add 25 --org acme --note "Invoice 1042"   # 25.00 in the currency; --reference optional
 lewbox settings set --billing enforce --price-vcpu-hour 0.05 --price-memory-gib-hour 0.016 --currency USD --signup-credits 5
-lewbox plan update pro --monthly-credits 50
 ```
 
 ## Done when
 
-- Tests: cost math (rounding down), hourly charging idempotent across passes and restarts, no charge for the open hour, monthly grant once per month, signup credit, enforce suspend/restore, admin suspension untouched, switching billing modes, `POST /v0/credits` admin-only and idempotent by reference, scoping.
+- Tests: cost math (rounding down), hourly charging idempotent across passes and restarts, no charge for the open hour, signup credit, enforce suspend/restore, admin suspension untouched, switching billing modes, `POST /v0/credits` admin-only and idempotent by reference, scoping.
 - Parity tests; docs: `docs/accounts/billing-and-credits.md` (operator) and the customer page mentions credits; references updated.
 - The four Go checks pass.

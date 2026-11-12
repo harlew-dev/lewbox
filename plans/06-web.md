@@ -12,21 +12,21 @@ Principles: few pages, few words, numbers first, one primary action per page, em
 | `/` | customer | **Home**: pending/suspended banner; until the first sandbox exists, a 3-step *Get started* (create a key in a region → copy the env vars and snippet → "Waiting for your first sandbox…", which turns green when one appears); otherwise stat tiles (running sandboxes, vCPU-hours this month, credits) and limit meters |
 | `/sandboxes` | customer | Every sandbox in every region: id (copy), region, status badge, size (vCPU / memory), started, actions (stop, delete, with confirmation). Filter by region and status. Refreshes every 10 s |
 | `/keys` | customer | Sandbox API keys: list (name, region, `avm_…last4`, created, expires, last used), create (name, region, expiry), revoke. The create result shows the key once, plus tabs **AerolVM SDK (TypeScript / Python)**, **E2B SDK**, **curl**, each with env vars and a 6-line example |
-| `/usage` | customer | Range 7 / 30 / 90 days. Tiles: vCPU-hours, memory GiB-hours, sandbox-hours, cost (if prices are set). Stacked daily bar chart by region. Limits: `Meter` per limit (used now vs limit) |
+| `/usage` | customer | Range 7 / 30 / 90 days. Tiles: vCPU-hours, memory GiB-hours, sandbox-hours, cost (if prices are set). Stacked daily bar chart by region. Limits **per region**: the region's plan name and a `Meter` per limit (used now vs that region's limit) |
 | `/billing` | customer | Only when billing is on: balance, this month's spend, monthly grant, transactions table |
 | `/team` | customer | Members (existing members page), management API keys (existing `lba_` page) |
-| `/settings` | customer | Organization name, plan (read-only with limits), leave organization |
+| `/settings` | customer | Organization name, regions with their plan and limits (read-only), leave organization. A customer with no regions sees "Your provider hasn't enabled a region for you yet" on Home and Keys |
 | `/account` | everyone | Existing account page |
 | `/docs/*` | everyone | Existing docs; customer guides first for customers |
 | `/admin` | operator | **Overview**: tiles (customers, pending approvals, sandboxes running, vCPUs in use, clusters healthy n/m); running sandboxes over 7 days; 30-day uptime bar per cluster; top 5 customers by usage this month (BarList) |
 | `/admin/customers` | operator | Table: name, plan, status, running sandboxes, vCPU-hours (30 d), balance. Tabs: All / Pending / Suspended. Bulk-free; row → detail |
-| `/admin/customers/:org` | operator | Header with status + actions (Approve, Suspend/Restore, Change plan, Add credits). Sections: limits (plan + overrides, editable), live usage vs limits, usage chart, sandboxes, sandbox keys, members, credit transactions |
+| `/admin/customers/:org` | operator | Header with status + actions (Approve, Suspend/Restore, Change plan, Add credits). Sections: **regions** (a row per subscription: region, plan, limits, used now; add a region, change its plan or overrides, remove it with confirmation), usage chart, sandboxes, sandbox keys, members, credit transactions |
 | `/admin/sandboxes` | operator | Every sandbox of every customer (for abuse triage): customer, region, status, size, running for; sort by longest running; stop/delete |
-| `/admin/plans` | operator | Plans table (limits, monthly credits, customers on it, default badge); create/edit dialog |
+| `/admin/plans` | operator | Plans table (limits, subscriptions on it, default badge); create/edit dialog |
 | `/admin/servers` | operator | Existing servers page (clusters + nodes), moved |
 | `/admin/servers/clusters/:ref` | operator | Existing cluster page + 30-day uptime bars for the cluster and each node, node metrics |
 | `/admin/users` | operator | Existing users pages, moved |
-| `/admin/settings` | operator | Instance name, sign-up mode, default plan, prices, credits required, currency label |
+| `/admin/settings` | operator | Instance name, sign-up mode, default plan and default regions for new sign-ups, billing mode, prices, currency label, sign-up credits |
 
 Old console paths (`/servers…`, `/users…`, `/organizations…`) redirect to their `/admin` equivalents for admins. A customer hitting `/admin` gets the not-found page. An instance admin who opens `/` is sent to `/admin` unless they're a member of an organization (then the org switcher offers both).
 

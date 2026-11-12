@@ -42,6 +42,8 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D5. Plans are named limit sets; limits are global across regions
 
+> **Superseded by D20** (2026-11-12): plans are now assigned per region.
+
 **Chosen.** A plan is `{max_sandboxes, max_vcpus, max_memory_mb}` (each nullable for unlimited). Every organization is on one plan, with optional per-organization overrides. New sign-ups get the default plan. Limits apply to the organization's total across all regions.
 
 **Why.** The simplest model that covers "Free: 2 sandboxes" / "Pro: 20 sandboxes, 40 vCPU" and custom deals. Per-region limits and per-sandbox size caps were left out (AerolVM can't enforce per-team size caps anyway; MVP.md §8.5).
@@ -82,6 +84,8 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D10. Limits are shared across regions in "shared" mode
 
+> **Superseded by D20** (2026-11-12): each region has its own plan, so there is no cross-region headroom. Built in Phase 3, removed in Phase 3b.
+
 **Chosen.** Every pass, for each customer and each limit: `headroom = limit − total use in all regions`, and each region's AerolVM team quota is set to `use there + headroom`. A region whose quota would be 0 gets a blocking quota (`max_cpu 0.001, max_memory_mb 1`), because 0 means "no limit" to AerolVM.
 
 **Why.** No spurious "quota exceeded" errors while there's room anywhere, and nothing to tune. AerolVM enforces each region's quota atomically.
@@ -117,6 +121,66 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Why.** One build, one login, one origin and CSP. The URL tells you which side you're on.
 
 **Other options.** A separate admin build on a secret path (lewcontext did this). More isolation, twice the build.
+
+## D14. Limit values: a positive number or null, nothing else
+
+**Chosen.** On a plan, `null` means unlimited. On a customer's override, `null` means "use the plan's value". `0` and negatives are refused everywhere. To give one customer unlimited use, put them on a plan without that limit.
+
+**Why.** The first version treated `0` as "unlimited" on plans but as "zero" on overrides, and the CLI and API disagreed. One rule is easier to explain. "Block everything" already has a name: suspend.
+
+**Other options.** A separate "unlimited" marker on overrides (`-1` or the string `"unlimited"`). That's more flexible, but every client has to learn a third value.
+
+## D15. Sign-up has its own rate limit, and Lewbox can trust a reverse proxy
+
+**Chosen.** Sign-up allows 5 attempts per IP per hour, separate from sign-in's budget. `--trusted-proxy CIDR` (`LEWBOX_TRUSTED_PROXIES`) makes Lewbox take the client IP from `X-Forwarded-For` when the connection comes from that proxy.
+
+**Why.** Behind Caddy on the same host, every request otherwise comes from `127.0.0.1`. One person spamming sign-up would then lock everyone out of signing in. Set `--trusted-proxy 127.0.0.1/32` in production (RELEASING.md does).
+
+**Caveats.** IPv6 users can rotate addresses. `approval` sign-up mode remains the real defence against abuse.
+
+## D16. Removing a cluster refuses if its customer keys can't be revoked
+
+**Chosen.** `cluster remove` revokes every customer key on the cluster first. If any revoke fails, it refuses, unless you pass `--force`.
+
+**Why.** Otherwise those tokens keep working on the cluster while Lewbox has forgotten them. That's the "fail closed" rule from AGENTS.md.
+
+## D17. Errors shown to customers never include cluster internals
+
+**Chosen.** When a region can't be reached, customers see "region X is not reachable right now". The real error (which includes the admin URL) is logged and shown only to instance admins. AerolVM's own 4xx messages (for example a quota 429) are passed through.
+
+## D18. Members are added directly, without an invitation
+
+**Chosen.** An organization's owner or admin adds an existing account by email. A customer can't add an instance admin account. There are no invitation emails or accept links.
+
+**Why.** There's no email (D4). Being added only grants access, so the risk is low.
+
+**Other options.** Invitation links: a one-time URL the owner copies and sends; the new member signs up or signs in through it. This is the natural next step for teams, and works without SMTP.
+
+## D19. MIT licence
+
+**Chosen.** Added an MIT `LICENSE` (copyright Harrison Lewis), because MVP.md states "Licence: MIT". Change it before publishing if that's not what you want.
+
+## D20. A plan per region, assigned by the operator (your call, 2026-11-12)
+
+**Chosen.** A customer has a **subscription** in each region they may use: a plan, plus optional per-region overrides. Only the operator creates, changes or removes subscriptions. A customer sees only the regions they're subscribed to. They can create keys only there, and each region's AerolVM quota is exactly that region's plan. New sign-ups get the default plan in the default regions (both in Settings; either can be empty, and then the customer waits for you).
+
+**Why.** You asked for limits per cluster, with customers subscribing per cluster. With the operator choosing (also your call), nobody can pick a bigger plan than they paid for. Limits are now enforced by AerolVM alone, atomically, with no race between regions (the D10 caveat is gone).
+
+**Other options.** Customer self-serve from "public" plans. Easy to add later: a `public` flag on plans and a "choose a plan" step in the portal, gated by credits.
+
+**Caveats.** Removing a customer's subscription revokes their keys in that region and stops their sandboxes there. It refuses if a key can't be revoked, unless forced (D16).
+
+## D21. Plans have no price (your call, 2026-11-12)
+
+**Chosen.** Plans only set limits. Money is purely usage-based (vCPU-hours and GiB-hours from credits, D12). The "monthly credits per plan" idea was dropped.
+
+**Other options.** A monthly price per plan, charged from credits per region subscription. A fixed monthly charge per subscription would slot into the same ledger.
+
+## D22. Watch node certificate expiry
+
+**Chosen.** AerolVM v0.7.0 node certificates last 90 days and renew themselves at two-thirds of that (`internal/cluster/cert_renew.go`). Lewbox's health checks read each node's `aerolvm_cluster_mtls_cert_not_after_unix` metric and warn when one is within 14 days of expiry, so a silently failing renewal shows up before the cluster splits.
+
+**Why.** AerolVM PR #986 (an open plan) says older join paths never renew. v0.7.0's built-in join, which Lewbox uses, does. Watching costs one metrics call per node per check.
 
 ---
 

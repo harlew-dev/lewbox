@@ -8,6 +8,7 @@ Lewbox's goal: **a self-hosted E2B.** An operator installs AerolVM on their own 
 | [01-customers-and-plans.md](01-customers-and-plans.md) | Phase 1. Sign-up, customer accounts, plans and limits, instance settings |
 | [02-sandbox-keys.md](02-sandbox-keys.md) | Phase 2. Per-region sandbox API keys minted on the clusters |
 | [03-sync-and-metering.md](03-sync-and-metering.md) | Phase 3. Sandbox mirror, limits synced across clusters, usage metering |
+| [03b-region-plans.md](03b-region-plans.md) | Phase 3b. A plan per region, assigned by the operator (replaces shared limits) |
 | [04-monitoring.md](04-monitoring.md) | Phase 4. 30-day cluster and node health, uptime, fleet metrics |
 | [05-billing.md](05-billing.md) | Phase 5. Prices, credits, automatic suspension |
 | [06-web.md](06-web.md) | Phase 6. Customer portal and operator console (UI) |
