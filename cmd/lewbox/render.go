@@ -341,9 +341,30 @@ func renderSandboxes(w io.Writer, sandboxes []service.Sandbox, now time.Time) er
 
 // renderSnapshots prints a snapshot table and any nodes that did not answer.
 func renderSnapshots(w io.Writer, list service.SnapshotList, now time.Time) error {
+	// An instance admin's list names the owner and node of each snapshot.
+	fleet := false
+	for _, s := range list.Data {
+		if s.Organization != nil {
+			fleet = true
+			break
+		}
+	}
 	tw := newTable(w)
+	if fleet {
+		fmt.Fprint(tw, "WORKSPACE\tNODE\t")
+	}
 	fmt.Fprintln(tw, "NAME\tREGION\tSOURCE\tCREATED\tCPU\tMEMORY\tDISK\tPUSH_STATE")
 	for _, s := range list.Data {
+		if fleet {
+			workspace, node := "-", "-"
+			if s.Organization != nil {
+				workspace = s.Organization.Slug
+			}
+			if s.Node != nil {
+				node = *s.Node
+			}
+			fmt.Fprintf(tw, "%s\t%s\t", workspace, node)
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%g\t%d\t%d\t%s\n",
 			s.Name, s.Region, dash(s.SourceSandboxID), relativeTime(s.CreatedAt, now),
 			s.CPU, s.MemoryMB, s.DiskGB, dash(s.PushState))

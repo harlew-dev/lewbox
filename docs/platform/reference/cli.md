@@ -351,7 +351,7 @@ Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--re
 
 ### `lewbox snapshot list [--region SLUG]` · `lewbox snapshot delete NAME [--region SLUG] [--yes]`
 
-Your workspace's snapshots, from every node of every subscribed region (or one region). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm.
+Your workspace's snapshots, from every node of every subscribed region (or one region). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm. As an instance admin without `--org`, the list is every workspace's snapshots, with WORKSPACE and NODE columns.
 
 ### `lewbox usage [--from DATE] [--to DATE] [--hourly]`
 

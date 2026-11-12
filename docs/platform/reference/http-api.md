@@ -179,7 +179,7 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 | `GET /v0/sandboxes?region={slug}&status={status}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region and status |
 | `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
-| `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. Lists the workspace's snapshots on every node of each subscribed region; `partial_nodes` names nodes that did not answer. Cached for 30 s |
+| `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. Lists the workspace's snapshots on every node of each subscribed region; `partial_nodes` names nodes that did not answer. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
 | `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
@@ -298,4 +298,4 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **JoinToken**: `{cluster_id, cluster, runtime, version, role, token_role, token, ca_cert_hash, join_urls, expires_at, command}`. `token` is single-use and is shown only in this response.
 
-**Snapshot**: `{name, region, source_sandbox_id, image, created_at, cpu, memory_mb, disk_gb, push_state}`. `push_state` describes a push to an image registry. AerolVM reports no owner and no size, so a snapshot is attributed to its workspace's team and is not billed.
+**Snapshot**: `{name, region, organization?, node?, source_sandbox_id, image, created_at, cpu, memory_mb, disk_gb, push_state}`. `organization` (`{slug, name}`) and `node` (the member that holds it) are only included for instance admins. `push_state` describes a push to an image registry. AerolVM reports no owner and no size, so a snapshot is attributed to its workspace's team and is not billed.

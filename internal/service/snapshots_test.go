@@ -76,6 +76,26 @@ func TestListSnapshotsScoping(t *testing.T) {
 	if len(list.Data) != 1 || list.Data[0].Name != "ckpt-b" {
 		t.Errorf("outsider sees %+v", list.Data)
 	}
+	if list.Data[0].Organization != nil || list.Data[0].Node != nil {
+		t.Errorf("a workspace member sees the owner or node: %+v", list.Data[0])
+	}
+
+	// An instance admin with no workspace chosen sees every workspace's
+	// snapshots, with the owner and the node that holds each.
+	list, err = f.s.ListSnapshots(f.root, RegionScope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := make(map[string]string)
+	for _, snapshot := range list.Data {
+		if snapshot.Organization == nil || snapshot.Node == nil || *snapshot.Node != "node-a" {
+			t.Fatalf("fleet snapshot = %+v", snapshot)
+		}
+		owners[snapshot.Name] = snapshot.Organization.Slug
+	}
+	if len(owners) != 2 || owners["ckpt-a"] != "acme" || owners["ckpt-b"] != "other" {
+		t.Errorf("fleet owners = %v", owners)
+	}
 
 	// An API key sees its own workspace only.
 	key, err := f.s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend"})

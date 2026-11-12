@@ -72,6 +72,7 @@ const WorkspacesPage = lazyPage(() => import('./pages/admin/workspaces'), 'Works
 const OverviewPage = lazyPage(() => import('./pages/admin/overview'), 'OverviewPage')
 const PlansPage = lazyPage(() => import('./pages/admin/plans'), 'PlansPage')
 const FleetSandboxesPage = lazyPage(() => import('./pages/admin/sandboxes'), 'FleetSandboxesPage')
+const FleetSnapshotsPage = lazyPage(() => import('./pages/admin/snapshots'), 'FleetSnapshotsPage')
 const AdminSettingsPage = lazyPage(() => import('./pages/admin/settings'), 'AdminSettingsPage')
 const DocsPage = lazyPage(() => import('./pages/docs'), 'DocsPage')
 const PlatformDocsPage = lazyPage(() => import('./pages/docs'), 'PlatformDocsPage')
@@ -232,6 +233,7 @@ export function App() {
           <Route path="customers" element={<Navigate to="/admin/workspaces" replace />} />
           <Route path="customers/:org" element={<LegacyCustomer />} />
           <Route path="sandboxes" element={<FleetSandboxesPage />} />
+          <Route path="snapshots" element={<FleetSnapshotsPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="servers" element={<ServersPage />} />
           <Route path="servers/clusters/:ref" element={<ClusterDetailPage />} />

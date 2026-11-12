@@ -26,16 +26,19 @@ const (
 )
 
 // Snapshot is a sandbox snapshot owned by one workspace's AerolVM team.
+// Organization and Node are only included for instance admins.
 type Snapshot struct {
-	Name            string    `json:"name"`
-	Region          string    `json:"region"`
-	SourceSandboxID string    `json:"source_sandbox_id"`
-	Image           string    `json:"image"`
-	CreatedAt       time.Time `json:"created_at"`
-	CPU             float64   `json:"cpu"`
-	MemoryMB        int64     `json:"memory_mb"`
-	DiskGB          int64     `json:"disk_gb"`
-	PushState       string    `json:"push_state"`
+	Name            string               `json:"name"`
+	Region          string               `json:"region"`
+	Organization    *SandboxOrganization `json:"organization,omitempty"`
+	Node            *string              `json:"node,omitempty"`
+	SourceSandboxID string               `json:"source_sandbox_id"`
+	Image           string               `json:"image"`
+	CreatedAt       time.Time            `json:"created_at"`
+	CPU             float64              `json:"cpu"`
+	MemoryMB        int64                `json:"memory_mb"`
+	DiskGB          int64                `json:"disk_gb"`
+	PushState       string               `json:"push_state"`
 }
 
 // SnapshotList is returned by ListSnapshots. Data is never null; PartialNodes
@@ -73,6 +76,10 @@ type snapshotTarget struct {
 // every node of each region. A node that does not answer is reported in
 // PartialNodes.
 func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotList, error) {
+	p, err := requirePrincipal(ctx)
+	if err != nil {
+		return SnapshotList{}, err
+	}
 	org, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return SnapshotList{}, err
@@ -102,7 +109,9 @@ func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotL
 			}
 			continue
 		}
-		out.Data = append(out.Data, data...)
+		for _, snapshot := range data {
+			out.Data = append(out.Data, forPrincipal(snapshot, target.org, p.InstanceAdmin))
+		}
 		for _, node := range nodes {
 			addPartial(node)
 		}
@@ -147,7 +156,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	type match struct {
 		target   snapshotTarget
 		snapshot Snapshot
-		node     string
+		node     snapshotNode
 	}
 	matches := make([]match, 0, 1)
 	for _, target := range targets {
@@ -174,7 +183,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	if err != nil {
 		return Snapshot{}, err
 	}
-	admin := s.aerolvmClient(found.node, adminToken)
+	admin := s.aerolvmClient(found.node.url, adminToken)
 	team := found.target.org.Team.String
 	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
 	token, err := mintSandboxToken(mintCtx, admin, aerolvm.CreateTokenRequest{
@@ -191,7 +200,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 		return Snapshot{}, unavailable("region %q returned no token", found.target.cluster.Slug)
 	}
 	deleteCtx, cancelDelete := context.WithTimeout(ctx, requestCallTimeout)
-	deleteErr := s.aerolvmClient(found.node, token.Token).DeleteSnapshot(deleteCtx, name)
+	deleteErr := s.aerolvmClient(found.node.url, token.Token).DeleteSnapshot(deleteCtx, name)
 	cancelDelete()
 	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
 	revokeErr := admin.RevokeToken(cleanup, token.ID)
@@ -208,7 +217,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	s.snapshotMu.Lock()
 	delete(s.snapshotCache, snapshotKey{found.target.cluster.ID, team})
 	s.snapshotMu.Unlock()
-	return found.snapshot, nil
+	return forPrincipal(found.snapshot, found.target.org, p.InstanceAdmin), nil
 }
 
 // snapshotTargets lists the workspaces and regions the caller may read. With
@@ -280,14 +289,14 @@ func (s *Service) snapshotNodes(ctx context.Context, cluster db.Cluster) ([]snap
 
 // findSnapshotOnNodes returns one snapshot and the node that holds it. A node
 // that failed to answer is reported as a region error, never as "not found".
-func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget, name string) (Snapshot, string, bool, error) {
+func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget, name string) (Snapshot, snapshotNode, bool, error) {
 	token, err := s.snapshotToken(ctx, target.cluster, target.org)
 	if err != nil {
-		return Snapshot{}, "", false, err
+		return Snapshot{}, snapshotNode{}, false, err
 	}
 	nodes, err := s.snapshotNodes(ctx, target.cluster)
 	if err != nil {
-		return Snapshot{}, "", false, err
+		return Snapshot{}, snapshotNode{}, false, err
 	}
 	var firstErr error
 	for _, node := range nodes {
@@ -300,14 +309,14 @@ func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget
 		}
 		for _, snapshot := range snapshots {
 			if snapshot.Name == name {
-				return toSnapshot(snapshot, target.cluster.Slug), node.url, true, nil
+				return toSnapshot(snapshot, target.cluster.Slug, node.name), node, true, nil
 			}
 		}
 	}
 	if firstErr != nil {
-		return Snapshot{}, "", false, s.regionUnavailable(ctx, target.cluster.Slug, firstErr)
+		return Snapshot{}, snapshotNode{}, false, s.regionUnavailable(ctx, target.cluster.Slug, firstErr)
 	}
-	return Snapshot{}, "", false, nil
+	return Snapshot{}, snapshotNode{}, false, nil
 }
 
 // listNodeSnapshots reads one node's snapshots. A freshly minted token may not
@@ -381,7 +390,7 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 					continue
 				}
 				seen[snapshot.Name] = true
-				data = append(data, toSnapshot(snapshot, target.cluster.Slug))
+				data = append(data, toSnapshot(snapshot, target.cluster.Slug, n.name))
 			}
 		}(n)
 	}
@@ -441,10 +450,13 @@ func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.
 	return minted, nil
 }
 
-func toSnapshot(snapshot aerolvm.Snapshot, region string) Snapshot {
+// toSnapshot converts one node's snapshot. node is the member that holds it;
+// forPrincipal decides whether the caller sees it.
+func toSnapshot(snapshot aerolvm.Snapshot, region, node string) Snapshot {
 	return Snapshot{
 		Name:            snapshot.Name,
 		Region:          region,
+		Node:            &node,
 		SourceSandboxID: snapshot.SourceSandboxID,
 		Image:           snapshot.Image,
 		CreatedAt:       snapshot.CreatedAt.UTC().Truncate(time.Millisecond),
@@ -453,6 +465,22 @@ func toSnapshot(snapshot aerolvm.Snapshot, region string) Snapshot {
 		DiskGB:          snapshot.DiskGB,
 		PushState:       snapshot.PushState,
 	}
+}
+
+// forPrincipal names the owning workspace and the node for an instance admin,
+// and hides the node from everyone else.
+func forPrincipal(snapshot Snapshot, org db.Organization, admin bool) Snapshot {
+	if !admin {
+		snapshot.Node = nil
+		snapshot.Organization = nil
+		return snapshot
+	}
+	if snapshot.Node != nil {
+		node := *snapshot.Node
+		snapshot.Node = &node
+	}
+	snapshot.Organization = &SandboxOrganization{Slug: org.Slug, Name: org.Name}
+	return snapshot
 }
 
 // tempTokenName names a short-lived token Lewbox mints for a workspace:

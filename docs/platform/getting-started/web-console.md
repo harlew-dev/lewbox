@@ -45,7 +45,7 @@ The console and the CLI share accounts, so a password change in either place aff
 
 ## Console pages (`/admin`, instance admins)
 
-The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sandboxes, Servers) and **Manage** (Plans, Settings). Home is the Overview page.
+The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sandboxes, Snapshots, Servers) and **Manage** (Plans, Settings). Home is the Overview page.
 
 | Page | Shows | Actions |
 |---|---|---|
@@ -53,6 +53,7 @@ The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sand
 | Workspaces | Every workspace: its cluster and plan, status, running sandboxes, vCPU-hours over 30 days. Tabs for pending and suspended workspaces, and for **setup links** | **New workspace**: the owner's email (and a password if the account is new), a workspace name, a cluster and a plan, in one dialog. **Create setup link**: a single-use link for a plan in a cluster. Each row's `⋯` menu: view, approve, suspend or restore |
 | Workspace | One workspace: status, its cluster and plan (limits, use, quota push errors), usage, sandboxes, sandbox keys, members | Approve, suspend, restore; assign a cluster and plan, change the plan or limits, remove it (and remove anyway if keys couldn't be revoked) |
 | Sandboxes | Every workspace's sandboxes, longest-running first | Stop, delete |
+| Snapshots | Every workspace's snapshots with their workspace and node; totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Filter by region and workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk | Delete |
 | Plans | Plans with their limits, how many workspaces use each, and the default | Create, edit, delete an unused plan |
 | Servers | **Clusters** (status, runtime, nodes, version, last check) and **Nodes** | **Add server** (the commands to run on the machine, or a single-use join command), register an existing cluster, remove a node or cluster |
 | Cluster | Node metrics (sandboxes, vCPU allocated, memory, disk) over 24 hours, 7 or 30 days; 30-day uptime bars for the cluster and each node; the summary and latest checks; the nodes | Run the checks, add or remove a node |

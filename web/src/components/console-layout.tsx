@@ -5,6 +5,7 @@ import {
   CubeIcon,
   HomeIcon,
   RectangleStackIcon,
+  CameraIcon,
   ServerStackIcon,
   UserCircleIcon,
   UsersIcon,
@@ -40,6 +41,7 @@ export function ConsoleLayout({ children }: { children: ReactNode }) {
       heading: 'Compute',
       items: [
         { href: '/admin/sandboxes', label: 'Sandboxes', icon: CubeIcon },
+        { href: '/admin/snapshots', label: 'Snapshots', icon: CameraIcon },
         { href: '/admin/servers', label: 'Servers', icon: ServerStackIcon },
       ],
     },

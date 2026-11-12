@@ -115,6 +115,9 @@ export interface SubscriptionInput {
 export interface Snapshot {
   name: string
   region: string
+  // Only for instance admins: the owning workspace and the node that holds it.
+  organization?: { slug: string; name: string }
+  node?: string
   source_sandbox_id: string
   image: string
   created_at: string
