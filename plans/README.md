@@ -10,7 +10,7 @@ Lewbox's goal: **a self-hosted E2B.** An operator installs AerolVM on their own 
 | [03-sync-and-metering.md](03-sync-and-metering.md) | Phase 3. Sandbox mirror, limits synced across clusters, usage metering |
 | [03b-region-plans.md](03b-region-plans.md) | Phase 3b. A plan per region, assigned by the operator (replaces shared limits) |
 | [03c-snapshots.md](03c-snapshots.md) | Phase 3c. Customers' snapshots per region, listed and deleted through Lewbox |
-| [03d-member-shares.md](03d-member-shares.md) | Phase 3d. A workspace's plan split into member shares, one AerolVM team per member |
+| [03d-member-shares.md](03d-member-shares.md) | ~~Phase 3d. Member shares, one AerolVM team per member~~ Built, then reverted (D29) |
 | [04-monitoring.md](04-monitoring.md) | Phase 4. 30-day cluster and node health, uptime, fleet metrics |
 | [05-billing.md](05-billing.md) | ~~Phase 5. Prices, credits, automatic suspension~~ Dropped (D24) |
 | [06-web.md](06-web.md) | Phase 6. Customer portal and operator console (UI) |

@@ -188,13 +188,13 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D23. Customers' snapshots are listed with a read-only token per region
 
-**Chosen.** When someone opens the Snapshots page, Lewbox mints a one-hour `viewer` token for each member team it needs (D26), keeps it in memory only (reused for 50 minutes), and lists that team's snapshots on every node of the region, caching the result for 30 s. Deleting mints a one-hour `runner` token for the snapshot's member team, deletes, and revokes it. Nothing is stored.
+**Chosen.** When someone opens the Snapshots page, Lewbox mints a one-hour `viewer` token for the workspace's team, keeps it in memory only (reused for 50 minutes), and lists that team's snapshots on every node of the region, caching the result for 30 s. Deleting mints a one-hour `runner` token for the workspace's team, deletes, and revokes it. Nothing is stored.
 
 **Why.** AerolVM v0.7.0's snapshot list doesn't say who owns a snapshot, is per node, and the admin token can't address a customer's snapshot by name. A team-bound token sees exactly that team's snapshots.
 
 **Other options.** Only list snapshots that were pushed to a registry, and infer the team from the `tenant-<hash>` path segment. That needs a registry set up on every cluster.
 
-**Caveats.** Listing costs a token mint per member team per hour and one call per node per page view. No snapshot sizes.
+**Caveats.** Listing costs a token mint per workspace and region per hour and one call per node per page view. No snapshot sizes.
 
 ## D24. No billing: plans only set limits (your call, 2026-11-12)
 
@@ -208,6 +208,8 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D25. A workspace's plan is split between its members (your call, 2026-11-12)
 
+> **Superseded by D29**: built, then reverted.
+
 **Chosen.** Each region's plan belongs to the workspace and is divided into fixed member shares. Owners and admins set shares; members without one split the rest equally (one member gets everything; 4 members on 4 GB get 1 GB each). Explicit shares can't add up to more than the plan, and AerolVM enforces each share exactly. A member whose share of something is 0 is blocked in that region until an owner gives them some.
 
 **Why.** You wanted per-member limits inside a workspace (4 GB workspace, 1 GB each) and chose a fixed split over shared caps, so the workspace total can never be exceeded, not even briefly.
@@ -218,11 +220,15 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 ## D26. Each member has their own AerolVM team (your call, 2026-11-12)
 
+> **Superseded by D29**: built, then reverted.
+
 **Chosen.** AerolVM can only cap teams, so every workspace member gets a team, and their keys are bound to it. A member's keys see only that member's sandboxes and snapshots. Owners and admins see and stop everyone's from the portal.
 
 **Caveats.** Members can't share a sandbox through the SDK. One member can't attach to another's sandbox with their own key.
 
 ## D27. Shares are set per region (your call, 2026-11-12)
+
+> **Superseded by D29**: built, then reverted.
 
 **Chosen.** A member's share is set separately in each region where the workspace has a plan.
 
@@ -231,6 +237,16 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Chosen.** Customers and the console call a customer's unit a **workspace**, your word for it. The API, CLI and database keep `organization` (`/v0/organizations`, `lewbox org`), which were already built and documented.
 
 **Other options.** Rename the API and CLI too (`/v0/workspaces`, `lewbox workspace`). That's cleaner for API users, and a mechanical change best done before the first release if you want it.
+
+## D29. Limits are per workspace only: one AerolVM team per workspace (your call, 2026-11-12)
+
+**Chosen.** A workspace is exactly one AerolVM team. Its plan in a region is that team's quota on that cluster, pushed as-is. All members share it, and every member's keys see the workspace's sandboxes. There are no per-member limits.
+
+**Why.** You want Lewbox to be a UI wrapper around what AerolVM supports natively, not to invent things on top. AerolVM v0.7.0 limits only teams (`PUT /v1/teams/{team}/quota`). It has no per-user or per-key limits (checked in its source). Per-member limits (D25–D27) were built and verified on a real cluster, but needed a team per member plus Lewbox's own split arithmetic, so they were reverted (`a9fa739`).
+
+**Other options.** Re-apply `5821ce3` if you ever want per-member limits. It works and passed the real-cluster journey. Or wait for AerolVM to support per-token quotas and expose them directly.
+
+**What Lewbox adds on top of AerolVM, for the record:** accounts, workspaces, members and sign-up (AerolVM has no users); plans as named limit sets (each pushed as a native team quota); the sandbox list and usage charts (read from AerolVM's lists every 15 s); monitoring history (read from AerolVM's members and metrics); snapshot listing (native team-scoped tokens). Enforcement of every limit is AerolVM's own.
 
 ---
 

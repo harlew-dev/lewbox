@@ -1,6 +1,6 @@
 # Phase 3c: customers' snapshots per region
 
-**Asked for on 2026-11-12.** Builds on Phase 3d (member teams). A customer (and the operator) can see the snapshots the customer owns in each region, and delete them.
+**Asked for on 2026-11-12.** A customer (and the operator) can see the snapshots the customer owns in each region, and delete them.
 
 ## AerolVM facts (v0.7.0 source; see the research notes in DECISIONS D7)
 
@@ -11,9 +11,9 @@
 
 ## Design (DECISIONS D23)
 
-- **Short-lived viewer tokens, kept in memory.** Snapshots belong to member teams (Phase 3d). To list a member's snapshots in a region, Lewbox mints `POST /v1/tokens {"name":"lbx.view.<membership id>.<unix time>","role":"viewer","team":<member team>,"expires_in":"1h"}`, keeps it **in memory only**, and reuses it for 50 minutes. Nothing is stored; tokens expire on their own. Owners and admins list every member's snapshots (one token per member team); members list their own.
-- **Listing on demand, not in the sync loop.** `GET /v0/snapshots?region=` asks every node of the region (bounded concurrency 4, 5 s timeout each) with the viewer tokens, merges the pages, and caches the result per (member team, region) for 30 s in memory. Each snapshot is shown with its `member`. A node that doesn't answer is listed in `partial_nodes`.
-- **Deleting.** `DELETE /v0/snapshots/{name}?region=` mints a `runner` token for the snapshot's member team with `expires_in: "1h"`, deletes `DELETE /v1/snapshots/{name}` with it (owner-scoped, so it can only hit the customer's own), then revokes the token (with `context.WithoutCancel`). Owners, admins and members of the organization, the org API key, and instance admins may delete; viewers may not.
+- **Short-lived viewer tokens, kept in memory.** Snapshots belong to the workspace's AerolVM team. To list them in a region, Lewbox mints `POST /v1/tokens {"name":"lbx.view.<org id>.<unix time>","role":"viewer","team":<workspace team>,"expires_in":"1h"}`, keeps it **in memory only**, and reuses it for 50 minutes. Nothing is stored; tokens expire on their own. Every member of the workspace sees the workspace's snapshots (as with sandboxes).
+- **Listing on demand, not in the sync loop.** `GET /v0/snapshots?region=` asks every node of the region (bounded concurrency 4, 5 s timeout each) with the viewer tokens, merges the pages, and caches the result per (workspace, region) for 30 s in memory. A node that doesn't answer is listed in `partial_nodes`.
+- **Deleting.** `DELETE /v0/snapshots/{name}?region=` mints a `runner` token for the workspace team with `expires_in: "1h"`, deletes `DELETE /v1/snapshots/{name}` with it (owner-scoped, so it can only hit the customer's own), then revokes the token (with `context.WithoutCancel`). Owners, admins and members of the organization, the org API key, and instance admins may delete; viewers may not.
 - **No storage billing.** AerolVM reports no snapshot size, so snapshots aren't charged (D9 caveat stands).
 
 ## API

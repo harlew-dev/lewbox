@@ -1,5 +1,7 @@
 # Phase 3d: members' shares of a workspace's plan
 
+> **Built, verified, then reverted on 2026-11-12** (commit `5821ce3`, reverted in `a9fa739`; DECISIONS D29). AerolVM can only limit teams, so per-member limits meant one AerolVM team per member plus Lewbox's own split logic. You chose the purely native model instead: one team per workspace, limits per workspace. Kept as a record.
+
 **Asked for on 2026-11-12** (DECISIONS D25–D28). A workspace (the code's `organization`) has a plan in each region (Phase 3b). Inside the workspace, that plan is **split between members**: for example, a 4 GB plan with 4 members gives each member 1 GB. AerolVM enforces each member's share exactly, so the workspace can never go over its plan.
 
 ## How it's enforced
