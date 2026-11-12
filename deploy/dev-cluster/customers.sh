@@ -10,7 +10,7 @@
 #   LEWBOX_URL=https://lewbox.example.com LEWBOX_REGION=eu-west \
 #   LEWBOX_ADMIN_EMAIL=you@example.com LEWBOX_ADMIN_PASSWORD=… ./customers.sh
 #
-# Sign-up, a sandbox key, a sandbox run with that key straight on the cluster,
+# Sign-up and operator-created customers, a sandbox key, a sandbox run with that key straight on the cluster,
 # Lewbox's mirror and isolation, the plan's limit enforced by AerolVM, stop and
 # delete from Lewbox, usage, monitoring, suspension and revocation.
 # e2e.sh runs it too. Each step prints PASS or FAIL; it exits 1 on a failure.
@@ -77,13 +77,24 @@ s=$(admin PATCH /v0/settings -d "{\"signup\":\"open\",\"default_plan\":\"$plan\"
 expect "sign-up open, plan and region are the defaults" ".signup == \"open\" and .default_plan == \"$plan\" and .default_regions == [\"$CLUSTER\"]" "$s"
 expect "the public instance info says so" '.signup == "open"' "$(curl -fsS "$API/v0/instance")"
 
-step "two customers sign up and get organizations of their own on that plan"
+# The operator creates a customer the way the console's New customer form does:
+# the account, the workspace with it as owner, and (optionally) a region plan.
+new_customer() {
+	local who="$1" region="$2" email="$1-$RUN@e2e.dev"
+	admin POST /v0/users -d "{\"email\":\"$email\",\"password\":\"customer-password-123\"}" >/dev/null
+	admin POST /v0/organizations -d "{\"slug\":\"$who-$RUN\",\"name\":\"$who workspace\",\"owner\":\"$email\"}" >/dev/null
+	[[ -z $region ]] || admin PUT "/v0/subscriptions/$region" -H "Lewbox-Organization: $who-$RUN" -d "{\"plan\":\"$plan\"}" >/dev/null
+	cust "$who" POST /v0/auth/session -d "{\"email\":\"$email\",\"password\":\"customer-password-123\"}" >/dev/null
+}
+
+step "a signs up; the operator creates b; both get workspaces on that plan"
+r=$(cust a POST /v0/auth/signup -d "{\"email\":\"a-$RUN@e2e.dev\",\"password\":\"customer-password-123\"}")
+expect "a signed up" ".user.email == \"a-$RUN@e2e.dev\" and (.user.instance_admin | not)" "$r"
+new_customer b "$CLUSTER" && pass "the operator created b with a plan in $CLUSTER"
 for who in a b; do
-	r=$(cust "$who" POST /v0/auth/signup -d "{\"email\":\"$who-$RUN@e2e.dev\",\"password\":\"customer-password-123\"}")
-	expect "$who signed up" ".user.email == \"$who-$RUN@e2e.dev\" and (.user.instance_admin | not)" "$r"
 	me=$(cust "$who" GET /v0/me)
 	ORG[$who]=$(jq -r '.organizations[0].slug' <<<"$me")
-	expect "$who owns an active organization" '(.organizations | length == 1) and .organizations[0].role == "owner" and .organizations[0].status == "active"' "$me"
+	expect "$who owns an active workspace" '(.organizations | length == 1) and .organizations[0].role == "owner" and .organizations[0].status == "active"' "$me"
 	o=$(cust "$who" GET "/v0/organizations/${ORG[$who]}")
 	expect "$who is subscribed to $plan in $CLUSTER, and can't see its team" "(.regions | length == 1) and .regions[0].slug == \"$CLUSTER\" and .regions[0].plan.slug == \"$plan\" and (.team == null)" "$o"
 done
@@ -102,14 +113,12 @@ eventually 30 "a's key works on the cluster" whoami_is a 200
 eventually 30 "b's key works on the cluster" whoami_is b 200
 
 step "a customer gets no region until the operator assigns one"
-admin PATCH /v0/settings -d '{"default_regions":[]}' >/dev/null
-r=$(cust c POST /v0/auth/signup -d "{\"email\":\"c-$RUN@e2e.dev\",\"password\":\"customer-password-123\"}")
-expect "c signed up" ".user.email == \"c-$RUN@e2e.dev\"" "$r"
-ORG[c]=$(cust c GET /v0/me | jq -r '.organizations[0].slug')
+new_customer c ""
+ORG[c]="c-$RUN"
 expect "c sees no regions" '.data == []' "$(cust c GET /v0/regions)"
 c_code=$(code -X POST -b "$JAR/c" -H "Lewbox-Organization: ${ORG[c]}" -H 'Content-Type: application/json' \
 	"$API/v0/sandbox-keys" -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
-[[ $c_code == 412 ]] && pass "c's key is refused with 412" || fail "c's key got $c_code, want 412"
+[[ $c_code == 404 ]] && pass "c can't create a key in a region it has no plan in (404, the region is hidden)" || fail "c's key got $c_code, want 404"
 sub=$(admin PUT "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: ${ORG[c]}" -d "{\"plan\":\"$plan\"}")
 expect "the operator subscribed c in $CLUSTER" ".region.slug == \"$CLUSTER\" and .plan.slug == \"$plan\" and .limits.sandboxes == 2" "$sub"
 expect "c sees the region now" "[.data[] | select(.slug == \"$CLUSTER\" and .plan.slug == \"$plan\")] | length == 1" "$(cust c GET /v0/regions)"

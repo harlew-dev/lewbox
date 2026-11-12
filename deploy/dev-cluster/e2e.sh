@@ -87,7 +87,7 @@ done
 step "sandboxes run on the cluster (runner key made on node-1, used through node-2)"
 pat=$(compose exec -T node-1 sh -c "grep ^SB_PAT_TOKEN= /etc/sandboxd/sandboxd.env | cut -d= -f2")
 runner=$(compose exec -T node-1 curl -fsS -X POST -H "Authorization: Bearer $pat" -H 'Content-Type: application/json' \
-	http://127.0.0.1:21212/v1/tokens -d '{"name":"e2e-runner","role":"runner","team":"e2e","expires_in":"1h"}' | jq -r .token)
+	http://127.0.0.1:21212/v1/tokens -d '{"name":"e2e-runner-'"$(date +%s)"'","role":"runner","team":"e2e","expires_in":"1h"}' | jq -r .token)
 for i in $(seq 30); do [[ $(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $runner" http://127.0.0.1:21202/v1/whoami) == 200 ]] && break; sleep 1; done
 ids=()
 for i in 1 2 3; do
