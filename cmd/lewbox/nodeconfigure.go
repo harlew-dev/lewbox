@@ -227,13 +227,35 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 		req.DNSProfile = &name
 		req.DNSVersion = state.DNSProfileVersion
 	}
-	if _, err := b.ReportNodeSettings(ctx, state.Name, req); err != nil {
+	reportAs, err := reportNodeName(ctx, b, state)
+	if err != nil {
+		return out, err
+	}
+	if _, err := b.ReportNodeSettings(ctx, reportAs, req); err != nil {
 		return out, err
 	}
 	if err := state.Save(); err != nil {
 		return out, err
 	}
 	return out, nil
+}
+
+// reportNodeName is the orchestrator's name for this machine. It is the
+// state's name, except in local mode: AerolVM outside cluster mode names its
+// only member "standalone", so the one-node cluster's single node is this
+// machine whatever it is called.
+func reportNodeName(ctx context.Context, b backend.Backend, state *machine.State) (string, error) {
+	if state.Mode != machine.ModeLocal {
+		return state.Name, nil
+	}
+	detail, err := b.GetCluster(ctx, state.Cluster)
+	if err != nil {
+		return "", err
+	}
+	if len(detail.NodeList) != 1 {
+		return "", preconditionError("local-mode cluster %q has %d nodes, want 1: run lewbox cluster check %s", state.Cluster, len(detail.NodeList), state.Cluster)
+	}
+	return detail.NodeList[0].Name, nil
 }
 
 // registryStorage turns a cluster's storage settings into the registry's

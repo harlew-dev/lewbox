@@ -639,6 +639,45 @@ func TestNodeAddNewCluster(t *testing.T) {
 	}
 }
 
+// In local mode AerolVM is one node outside cluster mode, and it names its
+// only member "standalone", not this machine's name. node add must still
+// report its settings, to that node.
+func TestNodeAddLocalMode(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	h := newHarness(t, fake.URL())
+	fake.AdminToken = h.pat
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "standalone", NodeName: "standalone", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.6.13", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	saveState(t, machine.State{Name: "node-3", Mode: machine.ModeLocal, Runtime: "docker", AerolVMVersion: "v0.6.13"})
+
+	out, errOut, code := e.cliWith(h, "", "node", "add", "--admin-url", fake.URL(), "--endpoint-url", fake.URL())
+	if code != 0 {
+		t.Fatalf("node add: exit %d: %s", code, errOut)
+	}
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Slug != "node-3" || len(detail.NodeList) != 1 || detail.NodeList[0].Name != "standalone" {
+		t.Fatalf("cluster = %+v", detail)
+	}
+	nodeOut, errOut, code := e.cli("node", "get", "standalone")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"applied_at":"`) {
+		t.Errorf("the local node did not report its settings: %s", nodeOut)
+	}
+
+	// node configure on its own finds the same node.
+	if _, errOut, code := e.cliWith(h, "", "node", "configure"); code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+}
+
 func TestNodeAddNewClusterIsIdempotent(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)
