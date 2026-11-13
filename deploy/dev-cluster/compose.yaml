@@ -29,6 +29,20 @@ x-node: &node
   depends_on: [orchestrator]
 
 services:
+  # An S3-compatible bucket for storage profiles (archived sandboxes). RustFS,
+  # because MinIO no longer publishes public images. Access key "lewbox",
+  # secret "lewbox-dev-secret"; e2e.sh creates the bucket.
+  storage:
+    image: rustfs/rustfs:1.0.5
+    environment:
+      RUSTFS_ACCESS_KEY: lewbox
+      RUSTFS_SECRET_KEY: lewbox-dev-secret
+    volumes:
+      - storage-data:/data
+    networks:
+      lewbox:
+        ipv4_address: 172.30.0.20
+
   orchestrator:
     image: lewbox:dev
     build:
@@ -81,3 +95,4 @@ networks:
 
 volumes:
   orchestrator-data:
+  storage-data:
