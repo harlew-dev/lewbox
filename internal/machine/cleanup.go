@@ -85,13 +85,27 @@ func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client,
 	if err != nil {
 		return result, err
 	}
+	out, err := runner.Output(ctx, Cmd{Name: "docker", Args: []string{"images", "--format", "{{.Repository}}:{{.Tag}}"}, Sudo: sudo})
+	if err != nil {
+		return result, err
+	}
+	var refs []string
+	local := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if ref := strings.TrimSpace(line); ref != "" && !local[ref] {
+			local[ref] = true
+			refs = append(refs, ref)
+		}
+	}
 	seen := map[string]bool{}
 	var images []string
 	for _, snap := range snapshots {
 		if !strings.HasPrefix(snap.Name, ArchivePrefix) || snap.PushState != "active" || snap.ImageRegistryRef == "" {
 			continue
 		}
-		if image := strings.TrimSpace(snap.Image); image != "" && !seen[image] && !strings.HasPrefix(image, RegistryAddr+"/") {
+		// The snapshot's record outlives its local image, which an earlier
+		// pass removed: skip it rather than fail to remove it every pass.
+		if image := strings.TrimSpace(snap.Image); image != "" && local[image] && !seen[image] && !strings.HasPrefix(image, RegistryAddr+"/") {
 			seen[image] = true
 			if olderThan > 0 && (snap.CreatedAt.IsZero() || now.Sub(snap.CreatedAt) < olderThan) {
 				result.Young = append(result.Young, image)
@@ -101,12 +115,7 @@ func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client,
 		}
 	}
 
-	out, err := runner.Output(ctx, Cmd{Name: "docker", Args: []string{"images", "--format", "{{.Repository}}:{{.Tag}}"}, Sudo: sudo})
-	if err != nil {
-		return result, err
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		ref := strings.TrimSpace(line)
+	for _, ref := range refs {
 		if isPulledArchive(ref) && !seen[ref] {
 			seen[ref] = true
 			if olderThan > 0 {

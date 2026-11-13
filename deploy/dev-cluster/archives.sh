@@ -139,6 +139,12 @@ for n in "${NODES[@]}"; do
 		on "$n" docker images --format '{{.Repository}}:{{.Tag}} {{.CreatedAt}}' | grep '^aerolvm-snapshot/' >&2 || true
 		on "$n" journalctl -u lewbox-archive-cleanup.service -n 30 --no-pager -o short-iso >&2 || true
 		on "$n" cat /etc/systemd/system/lewbox-archive-cleanup.service >&2 || true
+		# What the node's AerolVM still knows about, and what the archiver did:
+		# an image no snapshot record names was orphaned, not missed.
+		echo "$n snapshots:" >&2
+		on "$n" sh -c '. /etc/sandboxd/sandboxd.env; curl -sS -H "Authorization: Bearer $SB_PAT_TOKEN" "http://127.0.0.1:21212/v1/snapshots?limit=500"' |
+			jq -c '.snapshots[] | {name, image, push_state, image_registry_ref, created_at}' >&2 || true
+		dc logs orchestrator 2>&1 | grep -E '"archive (state changed|step failed)"' | cut -c1-400 >&2 || true
 		fail "$n: $left local snapshot image(s) left"
 	fi
 	pass "$n: no local snapshot image left"

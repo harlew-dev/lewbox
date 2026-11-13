@@ -219,11 +219,17 @@ func TestCleanupArchives(t *testing.T) {
 	fake.AddSnapshot("t1", aerolvm.Snapshot{Name: "archive-sb-2", Image: "aerolvm-snapshot/bbb:latest", PushState: "pushing"})
 	fake.AddSnapshot("t2", aerolvm.Snapshot{Name: "my-checkpoint", Image: "aerolvm-snapshot/ccc:latest", PushState: "active", ImageRegistryRef: "127.0.0.1:5000/x"})
 	fake.AddSnapshot("t2", aerolvm.Snapshot{Name: "archive-sb-3", Image: "aerolvm-snapshot/ddd:latest", PushState: "active", ImageRegistryRef: "127.0.0.1:5000/cluster/c1/snapshots/tenant-bb/archive-sb-3:latest"})
+	// An earlier pass removed this one's image; its record stays.
+	fake.AddSnapshot("t2", aerolvm.Snapshot{Name: "archive-sb-4", Image: "aerolvm-snapshot/gone:latest", PushState: "active", ImageRegistryRef: "127.0.0.1:5000/cluster/c1/snapshots/tenant-bb/archive-sb-4:latest"})
 
 	runner := machinetest.New()
 	runner.OutputFn = func(_ context.Context, cmd machine.Cmd) ([]byte, error) {
 		return []byte(strings.Join([]string{
 			"ubuntu:22.04",
+			"aerolvm-snapshot/aaa:latest",
+			"aerolvm-snapshot/bbb:latest",
+			"aerolvm-snapshot/ccc:latest",
+			"aerolvm-snapshot/ddd:latest",
 			ref,
 			"127.0.0.1:5000/cluster/c1/snapshots/tenant-aa/my-checkpoint:latest",
 			"127.0.0.1:5000/cluster/c1/snapshots/tenant-aa/archive-sb-9:latest",
@@ -247,6 +253,9 @@ func TestCleanupArchives(t *testing.T) {
 	if strings.Join(got.Kept, ",") != "aerolvm-snapshot/ddd:latest" {
 		t.Errorf("kept = %v, want the image a container uses", got.Kept)
 	}
+	if runner.Ran("docker", "image", "rm", "aerolvm-snapshot/gone:latest") {
+		t.Error("tried to remove an image that is no longer on the node")
+	}
 	for _, cmd := range runner.Commands() {
 		if cmd.Sudo {
 			t.Errorf("ran %s with sudo as root", cmd.Display())
@@ -268,7 +277,7 @@ func TestCleanupArchivesOlderThan(t *testing.T) {
 	runner := machinetest.New()
 	runner.OutputFn = func(_ context.Context, cmd machine.Cmd) ([]byte, error) {
 		if cmd.Args[0] == "images" {
-			return []byte(strings.Join([]string{pulledOld, pulledNew, pulledUnknown}, "\n")), nil
+			return []byte(strings.Join([]string{"aerolvm-snapshot/old:latest", "aerolvm-snapshot/new:latest", pulledOld, pulledNew, pulledUnknown}, "\n")), nil
 		}
 		// docker image inspect: the image was built long ago; the tag (the
 		// pull) decides its age.

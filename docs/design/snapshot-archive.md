@@ -48,7 +48,7 @@
 - **Restore** = create with `image` set to the **registry ref**, not the name (finding 7), with the workspace's runner token. AerolVM keeps the ref to that team (finding 9).
 - **Node disk** has to be freed on the node itself (findings 3 and 5). Lewbox has no agent, so `node configure` installs a root systemd timer, `lewbox-archive-cleanup`. Every 5 minutes it:
   - lists the node's snapshots with the PAT over loopback;
-  - for each `archive-*` snapshot whose `push_state` is `active`, removes its local `image`;
+  - for each `archive-*` snapshot whose `push_state` is `active`, removes its local `image` if it is still on the node (the record outlives the image, so later passes skip it);
   - removes pulled `127.0.0.1:5000/cluster/<id>/snapshots/*/archive-*` images.
 
   The cluster's `archive_local_retention` (D37) can hold copies back: `--older-than` ages a snapshot's copy from the snapshot's `created_at` and a pulled one from its last tag time (finding 15); `never` installs no timer.
