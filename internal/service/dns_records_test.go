@@ -417,3 +417,23 @@ func TestAddClusterAdminIP(t *testing.T) {
 		wantCode(t, err, CodeInvalid)
 	}
 }
+
+// In domain mode AerolVM reports the domain as public_host and the machine's
+// IP as data_plane_host (testdata/members_domain.json). The records point at
+// that IP; before, a domain-mode cluster never got any.
+func TestClusterDNSRecordsDomainMode(t *testing.T) {
+	m := dnsMember("node-1", "mixed", "eu.example.com")
+	m.DataPlaneHost = "203.0.113.10"
+	private := dnsMember("node-2", "mixed", "eu.example.com")
+	private.DataPlaneHost = "10.0.0.5"
+	_, fake, _, zoneID, detail := newDNSRecordsFixtureBefore(t, nil, m, private)
+
+	got := recordSet(fake.Records(zoneID))
+	if len(got) != 2 || got["eu.example.com 203.0.113.10"] != "A" || got["*.eu.example.com 203.0.113.10"] != "A" {
+		t.Errorf("records = %v, want both names on node-1's data_plane_host", got)
+	}
+	check, ok := findCheck(detail.Checks, "dns records")
+	if !ok || !check.OK || !strings.Contains(check.Detail, "node-2: 10.0.0.5 is a private address") {
+		t.Errorf("dns records check = %+v", check)
+	}
+}

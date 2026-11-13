@@ -7,6 +7,7 @@ replaced with `REDACTED`.
 | `health.json` | `GET /health` (no auth) | 200 |
 | `whoami.json` | `GET /v1/whoami` with an admin token (`--role admin --team '*'`) | 200 |
 | `members.json` | `GET /v1/cluster/members` | 200 |
+| `members_domain.json` | `GET /v1/cluster/members` on a one-node **domain-mode** cluster (`install.sh --domain`), captured 2026-11-13 on a VPS. The public IP and domain are replaced with `203.0.113.10` and `eu.example.com`. `public_host` is the **domain**; the machine's IP is in `data_plane_host` | 200 |
 | `token_create.json` | `POST /v1/tokens {"name","role","team","expires_in":"36500d"}` | 201 |
 | `tokens_list.json` | `GET /v1/tokens` | 200 |
 | `join_token_create.json` | `POST /v1/cluster/join-tokens {"role":"server","ttl":"15m"}` | 201 |

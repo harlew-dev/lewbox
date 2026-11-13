@@ -331,21 +331,18 @@ func (a *app) localPublicIP(ctx context.Context, token, name string) (string, er
 	if err != nil {
 		return "", err
 	}
-	var host string
 	for _, m := range members.Members {
-		if m.NodeID == name || m.NodeName == name || len(members.Members) == 1 {
-			host = strings.TrimSpace(m.PublicHost)
-			break
+		if m.NodeID != name && m.NodeName != name && len(members.Members) != 1 {
+			continue
 		}
+		// In domain mode public_host is the domain; the IP is data_plane_host.
+		addr, ok := m.PublicIP()
+		if !ok {
+			return "", fmt.Errorf("neither public_host %q nor data_plane_host %q is an IP address", m.PublicHost, m.DataPlaneHost)
+		}
+		return addr.String(), nil
 	}
-	if host == "" {
-		return "", fmt.Errorf("node %q reports no public host", name)
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return "", fmt.Errorf("public host %q is not an IP address", host)
-	}
-	return addr.Unmap().String(), nil
+	return "", fmt.Errorf("node %q is not among this cluster's members", name)
 }
 
 // dialAddressForJoin returns the host and port to check before joining.

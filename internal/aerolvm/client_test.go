@@ -61,6 +61,24 @@ func TestFixturesDecode(t *testing.T) {
 		t.Errorf("member = %+v", m)
 	}
 
+	if addr, ok := m.PublicIP(); !ok || addr.String() != "172.30.0.11" {
+		t.Errorf("IP-mode PublicIP = %v, %v", addr, ok)
+	}
+
+	// Domain mode: public_host is the domain, the IP is in data_plane_host.
+	var domain aerolvm.Members
+	readFixture(t, "members_domain.json", &domain)
+	if len(domain.Members) != 1 {
+		t.Fatalf("domain members = %+v", domain.Members)
+	}
+	d := domain.Members[0]
+	if d.PublicHost != "eu.example.com" || d.DataPlaneHost != "203.0.113.10" {
+		t.Errorf("domain member = %+v", d)
+	}
+	if addr, ok := d.PublicIP(); !ok || addr.String() != "203.0.113.10" {
+		t.Errorf("domain-mode PublicIP = %v, %v; want data_plane_host", addr, ok)
+	}
+
 	var token aerolvm.Token
 	readFixture(t, "token_create.json", &token)
 	if token.ID != "tok_zc6jWAcUIWKB" || token.Role != "runner" || token.Team != "fixture" || token.Token == "" || token.ExpiresAt == nil {

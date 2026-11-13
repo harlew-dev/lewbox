@@ -238,18 +238,18 @@ func desiredDNSRecords(domain string, members []aerolvm.Member) ([]desiredDNSRec
 			continue
 		}
 		host := strings.TrimSpace(member.PublicHost)
-		if host == "" {
+		if host == "" && strings.TrimSpace(member.DataPlaneHost) == "" {
 			continue
 		}
 		name := memberName(member)
-		addr, err := netip.ParseAddr(host)
-		if err != nil {
+		// In domain mode public_host is the domain; the IP is data_plane_host.
+		addr, ok := member.PublicIP()
+		if !ok {
 			skipped = append(skipped, fmt.Sprintf("%s: %s is not an IP address, no record", name, host))
 			continue
 		}
-		addr = addr.Unmap()
 		if reason := unusablePublicAddr(addr); reason != "" {
-			skipped = append(skipped, fmt.Sprintf("%s: %s is %s, no record", name, host, reason))
+			skipped = append(skipped, fmt.Sprintf("%s: %s is %s, no record", name, addr, reason))
 			continue
 		}
 		typ := "AAAA"

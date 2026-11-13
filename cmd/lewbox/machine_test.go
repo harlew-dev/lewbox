@@ -504,8 +504,16 @@ func TestLocalPublicIP(t *testing.T) {
 		{"own member", []aerolvm.Member{member("node-0", "203.0.113.9"), member("node-1", "203.0.113.10")}, "203.0.113.10", ""},
 		{"the only member", []aerolvm.Member{member("other", "2001:db8::1")}, "2001:db8::1", ""},
 		{"mapped v4", []aerolvm.Member{member("node-1", "::ffff:203.0.113.10")}, "203.0.113.10", ""},
-		{"a name", []aerolvm.Member{member("node-1", "node-1.example.com")}, "", "not an IP address"},
-		{"no host", []aerolvm.Member{member("node-1", "")}, "", "no public host"},
+		// Domain mode (testdata/members_domain.json): public_host is the
+		// domain, the IP is data_plane_host.
+		{"domain mode", []aerolvm.Member{func() aerolvm.Member {
+			m := member("node-1", "eu.example.com")
+			m.DataPlaneHost = "203.0.113.10"
+			return m
+		}()}, "203.0.113.10", ""},
+		{"a name and no data plane host", []aerolvm.Member{member("node-1", "node-1.example.com")}, "", "is an IP address"},
+		{"no host", []aerolvm.Member{member("node-1", "")}, "", "is an IP address"},
+		{"not a member", []aerolvm.Member{member("node-0", "203.0.113.9"), member("node-2", "203.0.113.11")}, "", "not among"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

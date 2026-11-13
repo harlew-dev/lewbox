@@ -7,6 +7,8 @@
 package aerolvm
 
 import (
+	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -34,17 +36,33 @@ type WhoAmI struct {
 
 // Member is one node in GET /v1/cluster/members.
 type Member struct {
-	NodeID     string   `json:"node_id"`
-	NodeName   string   `json:"node_name"`
-	APIURL     string   `json:"api_url"`
-	RaftAddr   string   `json:"raft_addr"`
-	PublicHost string   `json:"public_host"`
-	Role       string   `json:"role"`
-	Alive      bool     `json:"alive"`
-	Version    string   `json:"version"`
-	Leader     bool     `json:"leader"`
-	Voter      bool     `json:"voter"`
-	Capacity   Capacity `json:"capacity"`
+	NodeID     string `json:"node_id"`
+	NodeName   string `json:"node_name"`
+	APIURL     string `json:"api_url"`
+	RaftAddr   string `json:"raft_addr"`
+	PublicHost string `json:"public_host"`
+	// DataPlaneHost is the address the node advertises to the cluster.
+	DataPlaneHost string   `json:"data_plane_host"`
+	Role          string   `json:"role"`
+	Alive         bool     `json:"alive"`
+	Version       string   `json:"version"`
+	Leader        bool     `json:"leader"`
+	Voter         bool     `json:"voter"`
+	Capacity      Capacity `json:"capacity"`
+}
+
+// PublicIP is the member's IP address for DNS records: public_host when it
+// is an IP, otherwise data_plane_host when that is. In domain mode AerolVM
+// sets public_host to the domain and data_plane_host to the machine's IP
+// (v0.7.0, testdata/members_domain.json). It doesn't judge whether the IP is
+// public.
+func (m Member) PublicIP() (netip.Addr, bool) {
+	for _, host := range []string{m.PublicHost, m.DataPlaneHost} {
+		if addr, err := netip.ParseAddr(strings.TrimSpace(host)); err == nil && addr.Zone() == "" {
+			return addr.Unmap(), true
+		}
+	}
+	return netip.Addr{}, false
 }
 
 // Capacity is the part of a member's capacity Lewbox reads.
