@@ -104,18 +104,31 @@ type JoinTokenRequest struct {
 
 // Sandbox is one entry of GET /v1/sandboxes.
 type Sandbox struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Image        string    `json:"image"`
-	Status       string    `json:"status"`
-	StatusReason string    `json:"status_reason"`
-	Runtime      string    `json:"runtime"`
-	CPU          float64   `json:"cpu"`
-	MemoryMB     int64     `json:"memory_mb"`
-	DiskGB       int64     `json:"disk_gb"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	LastActiveAt time.Time `json:"last_active_at"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Image        string            `json:"image"`
+	Status       string            `json:"status"`
+	StatusReason string            `json:"status_reason"`
+	Runtime      string            `json:"runtime"`
+	CPU          float64           `json:"cpu"`
+	MemoryMB     int64             `json:"memory_mb"`
+	DiskGB       int64             `json:"disk_gb"`
+	Tags         map[string]string `json:"tags,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+	LastActiveAt time.Time         `json:"last_active_at"`
+}
+
+// CreateSandboxRequest is the body of POST /v1/sandboxes. The image is the
+// only field AerolVM requires.
+type CreateSandboxRequest struct {
+	Image    string            `json:"image"`
+	Name     string            `json:"name,omitempty"`
+	Tags     map[string]string `json:"tags,omitempty"`
+	CPU      float64           `json:"cpu,omitempty"`
+	MemoryMB int64             `json:"memory_mb,omitempty"`
+	DiskGB   int64             `json:"disk_gb,omitempty"`
+	Runtime  string            `json:"runtime,omitempty"`
 }
 
 // Snapshot is one entry of GET /v1/snapshots. AerolVM reports no owner and no

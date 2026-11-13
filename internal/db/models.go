@@ -23,6 +23,32 @@ type AdminKey struct {
 	RevokedAt  sql.NullTime
 }
 
+type Archive struct {
+	ID                    string
+	OrgID                 string
+	ClusterID             string
+	SandboxID             string
+	SandboxName           string
+	Image                 string
+	Runtime               string
+	Cpu                   float64
+	MemoryMb              int64
+	DiskGb                int64
+	Tags                  string
+	SnapshotName          string
+	RegistryRef           string
+	Status                string
+	Error                 string
+	Attempts              int64
+	NextAttemptAt         sql.NullTime
+	PushingSince          sql.NullTime
+	CreatedAt             time.Time
+	ArchivedAt            sql.NullTime
+	DeletedAt             sql.NullTime
+	LastRestoredSandboxID string
+	LastRestoredAt        sql.NullTime
+}
+
 type Cluster struct {
 	ID               string
 	Slug             string

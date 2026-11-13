@@ -86,6 +86,7 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--listen ADDR` | `LEWBOX_LISTEN` | `:8080` | The whole listen address, such as `127.0.0.1:8080`. Not with `--port` |
 | `--check-interval D` | `LEWBOX_CHECK_INTERVAL` | `1m` | How often to check every cluster. `0` turns it off |
 | `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
+| `--archive-interval D` | `LEWBOX_ARCHIVE_INTERVAL` | `5s` | How often to archive stopped sandboxes on archive clusters and advance their pushes. `0` turns it off |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
 | `--trusted-proxy CIDR` | `LEWBOX_TRUSTED_PROXIES` | | Trust `X-Forwarded-For` from this proxy network for the client IP, repeatable (env: comma-separated). Behind Caddy on the same host: `127.0.0.1/32` |

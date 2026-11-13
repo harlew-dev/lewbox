@@ -34,11 +34,14 @@ type Service struct {
 	syncInterval time.Duration
 	syncMu       sync.Mutex
 
+	archiveMu sync.Mutex
+
 	pruneMu   sync.Mutex
 	lastPrune time.Time
 
 	snapshotMu     sync.Mutex
 	snapshotTokens map[snapshotKey]snapshotToken
+	archiveTokens  map[snapshotKey]snapshotToken
 	snapshotCache  map[snapshotKey]snapshotCacheEntry
 }
 
@@ -106,6 +109,7 @@ func New(q *db.Queries, opts ...Option) *Service {
 		syncInterval:  15 * time.Second,
 
 		snapshotTokens: make(map[snapshotKey]snapshotToken),
+		archiveTokens:  make(map[snapshotKey]snapshotToken),
 		snapshotCache:  make(map[snapshotKey]snapshotCacheEntry),
 	}
 	for _, opt := range opts {

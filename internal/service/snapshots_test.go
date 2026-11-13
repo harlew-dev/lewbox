@@ -330,7 +330,7 @@ func TestTempTokenNameFitsAerolVM(t *testing.T) {
 	valid := regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	id := uuid.NewV7().String()
 	now := time.Date(2026, 11, 12, 15, 0, 0, 123_000_000, time.UTC)
-	for _, kind := range []string{"view", "del"} {
+	for _, kind := range []string{"view", "del", "arch"} {
 		if name := tempTokenName(kind, id, now); !valid.MatchString(name) {
 			t.Errorf("tempTokenName(%q) = %q (%d chars), not a valid AerolVM token name", kind, name, len(name))
 		}

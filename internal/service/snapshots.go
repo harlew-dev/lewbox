@@ -408,11 +408,23 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 // snapshotToken returns a cached viewer token for a workspace's team, minting
 // one for an hour when the cache has no live entry.
 func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.Organization) (snapshotToken, error) {
+	return s.teamToken(ctx, cluster, org, "view", "viewer", s.snapshotTokens)
+}
+
+// archiveToken returns a cached runner token for a workspace's team, so the
+// archiver can read, snapshot and delete that workspace's sandboxes only.
+func (s *Service) archiveToken(ctx context.Context, cluster db.Cluster, org db.Organization) (snapshotToken, error) {
+	return s.teamToken(ctx, cluster, org, "arch", "runner", s.archiveTokens)
+}
+
+// teamToken returns a cached token for a workspace's team, minting one for an
+// hour when cache has no live entry.
+func (s *Service) teamToken(ctx context.Context, cluster db.Cluster, org db.Organization, kind, role string, cache map[snapshotKey]snapshotToken) (snapshotToken, error) {
 	team := org.Team.String
 	key := snapshotKey{cluster.ID, team}
 
 	s.snapshotMu.Lock()
-	if cached, ok := s.snapshotTokens[key]; ok && s.now().Before(cached.expires) {
+	if cached, ok := cache[key]; ok && s.now().Before(cached.expires) {
 		s.snapshotMu.Unlock()
 		return cached, nil
 	}
@@ -424,8 +436,8 @@ func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.
 	}
 	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
 	token, err := mintSandboxToken(mintCtx, client, aerolvm.CreateTokenRequest{
-		Name:      tempTokenName("view", org.ID, s.now()),
-		Role:      "viewer",
+		Name:      tempTokenName(kind, org.ID, s.now()),
+		Role:      role,
 		Team:      team,
 		ExpiresIn: "1h",
 	})
@@ -441,10 +453,10 @@ func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.
 	s.snapshotMu.Lock()
 	// A concurrent request may have stored one already; keep it and let this
 	// one expire unused.
-	if cached, ok := s.snapshotTokens[key]; ok && now.Before(cached.expires) {
+	if cached, ok := cache[key]; ok && now.Before(cached.expires) {
 		minted = cached
 	} else {
-		s.snapshotTokens[key] = minted
+		cache[key] = minted
 	}
 	s.snapshotMu.Unlock()
 	return minted, nil
