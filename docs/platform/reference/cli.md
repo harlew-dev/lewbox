@@ -113,7 +113,7 @@ These change the machine they run on. They refuse to run as root and use `sudo` 
 
 ### `lewbox install`
 
-Checks the machine and installs AerolVM with its own installer, verified by checksum. Asks to confirm before installing (`--yes` skips).
+Checks the machine and installs AerolVM with its own installer, verified by checksum. Asks to confirm before installing, `[Y/n]`: Enter installs (`--yes` skips the question, and is required outside a terminal).
 
 ```bash
 lewbox install                                   # local mode

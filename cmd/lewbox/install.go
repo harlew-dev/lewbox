@@ -186,7 +186,7 @@ func (a *app) runInstall(cmd *cobra.Command, o *installOptions, passthrough []st
 		a.say("Dry run: nothing was changed")
 		return a.write(installResult(state, false))
 	}
-	if err := a.confirm(fmt.Sprintf("Install AerolVM %s on this machine?", installer.Version)); err != nil {
+	if err := a.confirmDefaultYes(fmt.Sprintf("Install AerolVM %s on this machine?", installer.Version)); err != nil {
 		return err
 	}
 	if err := a.runInstaller(ctx, a.host().runner, run, false); err != nil {

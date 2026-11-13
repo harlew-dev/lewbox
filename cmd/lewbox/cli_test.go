@@ -214,3 +214,26 @@ func TestTextRendering(t *testing.T) {
 		})
 	}
 }
+
+func TestConfirmed(t *testing.T) {
+	cases := []struct {
+		line       string
+		defaultYes bool
+		want       bool
+	}{
+		{"\n", false, false}, // [y/N]: Enter declines
+		{"\n", true, true},   // [Y/n]: Enter confirms
+		{"", true, true},     // EOF with nothing typed
+		{"y\n", false, true},
+		{" YES \n", false, true},
+		{"n\n", true, false},
+		{"No\n", true, false},
+		{"maybe\n", true, false}, // anything else declines, even with a yes default
+		{"ye\n", false, false},
+	}
+	for _, tc := range cases {
+		if got := confirmed(tc.line, tc.defaultYes); got != tc.want {
+			t.Errorf("confirmed(%q, defaultYes=%v) = %v, want %v", tc.line, tc.defaultYes, got, tc.want)
+		}
+	}
+}

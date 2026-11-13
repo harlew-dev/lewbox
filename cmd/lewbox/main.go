@@ -286,23 +286,50 @@ func isTerminalReader(r io.Reader) bool {
 // confirm asks before a destructive command. In JSON mode or without a
 // terminal it requires --yes instead.
 func (a *app) confirm(question string) error {
+	return a.ask(question, false)
+}
+
+// confirmDefaultYes is confirm for a step the user has already asked for by
+// name, such as install: an empty answer means yes. Outside a terminal it
+// still requires --yes.
+func (a *app) confirmDefaultYes(question string) error {
+	return a.ask(question, true)
+}
+
+func (a *app) ask(question string, defaultYes bool) error {
 	if a.yes {
 		return nil
 	}
 	if a.jsonMode() || !a.terminal() {
 		return usagef("pass --yes to confirm")
 	}
-	fmt.Fprintf(a.stderr, "%s [y/N] ", question)
+	hint := "[y/N]"
+	if defaultYes {
+		hint = "[Y/n]"
+	}
+	fmt.Fprintf(a.stderr, "%s %s ", question, hint)
 	line, err := bufio.NewReader(a.stdin).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	fmt.Fprintln(a.stderr)
-	answer := strings.ToLower(strings.TrimSpace(line))
-	if answer == "y" || answer == "yes" {
+	if confirmed(line, defaultYes) {
 		return nil
 	}
 	return errCanceled
+}
+
+// confirmed reads an answer to a [y/N] or [Y/n] question. Only y or yes
+// (any case) confirms, and an empty answer takes the default; anything else
+// declines.
+func confirmed(line string, defaultYes bool) bool {
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	case "":
+		return defaultYes
+	}
+	return false
 }
 
 // write prints a result as JSON or text.
