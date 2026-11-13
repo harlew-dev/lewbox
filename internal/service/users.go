@@ -63,15 +63,17 @@ type LogoutResponse struct {
 }
 
 // Me is returned by Me. User is nil for the local principal and for an
-// admin key, which has Organization and AdminKey instead. Organizations is
+// admin key, which has Organization and AdminKey instead. A caller using an
+// access token has User and AccessToken. Organizations is
 // set for user principals so a client can pick the portal and the current
 // organization without another call.
 type Me struct {
 	User          *User            `json:"user,omitempty"`
 	Organization  *Organization    `json:"organization,omitempty"`
 	AdminKey      *AdminKey        `json:"admin_key,omitempty"`
+	AccessToken   *AccessToken     `json:"access_token,omitempty"`
 	Organizations []MeOrganization `json:"organizations,omitzero"`
-	Via           string           `json:"via"` // "session", "local" or "admin_key"
+	Via           string           `json:"via"` // "session", "access_token", "local" or "admin_key"
 }
 
 // MeOrganization is one of a user's organizations, as Me lists them.
@@ -195,7 +197,8 @@ func (s *Service) RemoveUser(ctx context.Context, ref string) (User, error) {
 }
 
 // SetUserDisabled blocks or allows sign-in. Disabling also ends every
-// session. The last enabled instance admin cannot be disabled.
+// session and revokes every access token, so enabling the account again
+// does not bring them back. The last enabled instance admin cannot be disabled.
 func (s *Service) SetUserDisabled(ctx context.Context, ref string, disabled bool) (User, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return User{}, err
@@ -236,6 +239,12 @@ func (s *Service) SetUserDisabled(ctx context.Context, ref string, disabled bool
 	if disabled {
 		if err := s.q.DeleteSessionsByUser(ctx, row.ID); err != nil {
 			return User{}, fmt.Errorf("delete sessions: %w", err)
+		}
+		if err := s.q.RevokeAccessTokensByUser(ctx, db.RevokeAccessTokensByUserParams{
+			RevokedAt: sql.NullTime{Time: s.now(), Valid: true},
+			UserID:    row.ID,
+		}); err != nil {
+			return User{}, fmt.Errorf("revoke access tokens: %w", err)
 		}
 	}
 	return toUser(updated), nil
@@ -374,6 +383,9 @@ func (s *Service) Logout(ctx context.Context) (LogoutResponse, error) {
 	if p.Kind == "key" {
 		return LogoutResponse{}, invalid("an admin key has no session: revoke it with lewbox admin-key revoke")
 	}
+	if p.TokenID != "" {
+		return LogoutResponse{}, invalid("an access token has no session: revoke it with lewbox token revoke")
+	}
 	if p.Kind != "user" {
 		return LogoutResponse{}, invalid("local mode has no session")
 	}
@@ -419,6 +431,14 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 			Status: r.Organization.Status,
 		})
 	}
+	if p.TokenID != "" {
+		row, err := s.q.GetAccessTokenByID(ctx, db.GetAccessTokenByIDParams{UserID: p.UserID, ID: p.TokenID})
+		if err != nil {
+			return Me{}, fmt.Errorf("get access token: %w", err)
+		}
+		t := toAccessToken(row, s.now())
+		return Me{User: &u, AccessToken: &t, Organizations: orgs, Via: "access_token"}, nil
+	}
 	return Me{User: &u, Organizations: orgs, Via: "session"}, nil
 }
 
@@ -427,6 +447,9 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 func (s *Service) Authenticate(ctx context.Context, token string) (Principal, error) {
 	if strings.HasPrefix(token, adminKeyPrefix) {
 		return s.authenticateAdminKey(ctx, token)
+	}
+	if strings.HasPrefix(token, accessTokenPrefix) {
+		return s.authenticateAccessToken(ctx, token)
 	}
 	if !validSessionToken(token) {
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")

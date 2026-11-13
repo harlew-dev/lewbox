@@ -56,6 +56,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderSubscription(w, data)
 	case service.MemberList:
 		return renderMembers(w, data.Data, now)
+	case service.AccessTokenList:
+		return renderAccessTokens(w, data.Data, now)
+	case service.NewAccessToken:
+		return renderNewToken(w, data.AccessToken, data.Token, now)
 	case service.AdminKeyList:
 		return renderAdminKeys(w, data.Data, now)
 	case service.NewAdminKey:
@@ -300,12 +304,31 @@ func renderAdminKeys(w io.Writer, keys []service.AdminKey, now time.Time) error 
 // renderNewAdminKey prints a new key with its token, which can't be shown
 // again.
 func renderNewAdminKey(w io.Writer, k service.NewAdminKey, now time.Time) error {
-	if err := renderObject(w, k.AdminKey, now); err != nil {
+	return renderNewToken(w, k.AdminKey, k.Token, now)
+}
+
+// renderNewToken prints a new admin key or access token and the token
+// itself, which can't be shown again.
+func renderNewToken(w io.Writer, record any, token string, now time.Time) error {
+	if err := renderObject(w, record, now); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\ntoken: %s\n", k.Token)
+	fmt.Fprintf(w, "\ntoken: %s\n", token)
 	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its hash and cannot show it again.")
 	return nil
+}
+
+// renderAccessTokens prints an access token table; the token column is what
+// is left of the token to recognise it by.
+func renderAccessTokens(w io.Writer, tokens []service.AccessToken, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tTOKEN\tSTATUS\tCREATED\tLAST_USED\tEXPIRES")
+	for _, t := range tokens {
+		fmt.Fprintf(tw, "%s\t%s…%s\t%s\t%s\t%s\t%s\n",
+			t.Name, t.Prefix, t.Last4, t.Status, relativeTime(t.CreatedAt, now),
+			optionalTime(t.LastUsedAt, now, "never"), optionalTime(t.ExpiresAt, now, "never"))
+	}
+	return tw.Flush()
 }
 
 func optionalTime(t *time.Time, now time.Time, none string) string {

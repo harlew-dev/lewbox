@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+type AccessToken struct {
+	ID         string
+	UserID     string
+	Name       string
+	Prefix     string
+	TokenHash  string
+	Last4      string
+	CreatedAt  time.Time
+	LastUsedAt sql.NullTime
+	ExpiresAt  sql.NullTime
+	RevokedAt  sql.NullTime
+}
+
 type AdminKey struct {
 	ID         string
 	OrgID      string

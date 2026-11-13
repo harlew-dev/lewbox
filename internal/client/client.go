@@ -70,6 +70,36 @@ func (c *Client) Me(ctx context.Context) (service.Me, error) {
 	return out, err
 }
 
+// CreateAccessToken creates an access token and returns it once.
+func (c *Client) CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error) {
+	var out service.NewAccessToken
+	err := c.do(ctx, http.MethodPost, "/v0/access-tokens", req, &out, defaultTimeout)
+	return out, err
+}
+
+// ListAccessTokens returns an account's access tokens; user "" is the
+// caller's own account.
+func (c *Client) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
+	var out service.AccessTokenList
+	err := c.do(ctx, http.MethodGet, "/v0/access-tokens"+userQuery(user), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// RevokeAccessToken revokes an access token.
+func (c *Client) RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error) {
+	var out service.AccessToken
+	err := c.do(ctx, http.MethodDelete, "/v0/access-tokens/"+url.PathEscape(ref)+userQuery(user), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// userQuery is "?user=<ref>", or nothing for the caller's own account.
+func userQuery(user string) string {
+	if user == "" {
+		return ""
+	}
+	return "?" + url.Values{"user": {user}}.Encode()
+}
+
 // CreateUser creates an account.
 func (c *Client) CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error) {
 	var out service.User

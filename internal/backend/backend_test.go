@@ -516,6 +516,103 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	}
 }
 
+func TestAccessTokenBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.CreateUser(ctx, service.CreateUserRequest{Email: "dev@example.com", Password: "member-password-1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Local mode names the account; the remote admin's own is the default.
+	listOwn := step{
+		name:    "list tokens",
+		local:   func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, adminEmail) },
+		remote:  func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, "") },
+		compare: true,
+	}
+	listDev := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListAccessTokens(ctx, "dev@example.com")
+	}
+	var token string
+	afterRevoke := listOwn
+	afterRevoke.name = "list tokens after revoke"
+
+	runSteps(t, h, []step{
+		{
+			name: "create token",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "laptop", User: adminEmail, ExpiresIn: "30d"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				k, err := b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "ci"})
+				token = k.Token
+				return k, err
+			},
+			check: func(t *testing.T, v any) {
+				k, ok := v.(service.NewAccessToken)
+				if !ok || !strings.HasPrefix(k.Token, "lbp_") || k.Status != "active" {
+					t.Errorf("new token = %+v", v)
+				}
+			},
+		},
+		listOwn,
+		{
+			name: "create another account's token",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "a", User: "dev@example.com"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "b", User: "dev@example.com"})
+			},
+		},
+		both("list another account's tokens", listDev),
+		{
+			name:  "revoke token",
+			local: listOwn.local,
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RevokeAccessToken(ctx, "", "laptop")
+			},
+			check: func(t *testing.T, v any) {
+				if k, ok := v.(service.AccessToken); ok && k.Status != "revoked" {
+					t.Errorf("revoked token = %+v", k)
+				}
+			},
+		},
+		afterRevoke,
+		both("revoke missing token", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.RevokeAccessToken(ctx, adminEmail, "missing")
+		}),
+		both("missing account", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListAccessTokens(ctx, "nobody@example.com")
+		}),
+		both("bad expiry", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "x", User: adminEmail, ExpiresIn: "soon"})
+		}),
+	})
+
+	// The admin's token manages the instance over HTTP, but can't mint more.
+	tokened := client.New(h.url, token, nil)
+	me, err := tokened.Me(ctx)
+	if err != nil || me.Via != "access_token" || me.User == nil || me.User.Email != adminEmail || me.AccessToken == nil || me.AccessToken.Name != "ci" {
+		t.Fatalf("me with token = %+v, %v", me, err)
+	}
+	if _, err := tokened.ListClusters(ctx); err != nil {
+		t.Errorf("clusters with an admin's token: %v", err)
+	}
+	if _, err := tokened.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "more"}); err == nil || !strings.Contains(err.Error(), "cannot create another") {
+		t.Errorf("a token created another: %v", err)
+	}
+	if _, err := tokened.Logout(ctx); err == nil {
+		t.Error("logout with a token succeeded")
+	}
+	if _, err := tokened.RevokeAccessToken(ctx, "", "ci"); err != nil {
+		t.Fatalf("a token revokes itself: %v", err)
+	}
+	if _, err := tokened.Me(ctx); err == nil {
+		t.Error("a revoked token still works")
+	}
+}
+
 func TestSandboxKeyBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

@@ -16,6 +16,10 @@ type Backend interface {
 	Logout(ctx context.Context) (service.LogoutResponse, error)
 	Me(ctx context.Context) (service.Me, error)
 
+	CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error)
+	ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error)
+	RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error)
+
 	CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error)
 	ListUsers(ctx context.Context) (service.UserList, error)
 	GetUser(ctx context.Context, ref string) (service.User, error)
@@ -135,6 +139,21 @@ func (l Local) Logout(ctx context.Context) (service.LogoutResponse, error) {
 // Me describes the local principal.
 func (l Local) Me(ctx context.Context) (service.Me, error) {
 	return l.Svc.Me(l.withPrincipal(ctx))
+}
+
+// CreateAccessToken creates an access token and returns it once.
+func (l Local) CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error) {
+	return l.Svc.CreateAccessToken(l.withPrincipal(ctx), req)
+}
+
+// ListAccessTokens returns an account's access tokens.
+func (l Local) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
+	return l.Svc.ListAccessTokens(l.withPrincipal(ctx), user)
+}
+
+// RevokeAccessToken revokes an access token.
+func (l Local) RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error) {
+	return l.Svc.RevokeAccessToken(l.withPrincipal(ctx), user, ref)
 }
 
 // CreateUser creates an account.

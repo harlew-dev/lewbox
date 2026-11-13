@@ -12,6 +12,7 @@ type Principal struct {
 	Email         string
 	InstanceAdmin bool
 	SessionID     string // set for "user" principals that came from a session token
+	TokenID       string // set for "user" principals that came from an access token
 
 	// Set for "key" principals: the admin key and the one organization it
 	// acts for.

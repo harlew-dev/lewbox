@@ -85,23 +85,36 @@ func keyChecksum(body string) string {
 // newAdminKeyToken returns a token, lba_<58 hex><6 base62 checksum> (MVP §2),
 // and the SHA-256 hex digest that is stored.
 func newAdminKeyToken() (token, digest string, err error) {
-	b := make([]byte, adminKeyBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", "", fmt.Errorf("read token: %w", err)
-	}
-	body := adminKeyPrefix + hex.EncodeToString(b)
-	token = body + keyChecksum(body)
-	return token, tokenDigest(token), nil
+	return newKeyToken(adminKeyPrefix)
 }
 
 // validAdminKeyToken reports whether token has the shape newAdminKeyToken
 // produces and a correct checksum.
 func validAdminKeyToken(token string) bool {
-	if len(token) != adminKeyLength || !strings.HasPrefix(token, adminKeyPrefix) {
+	return validKeyToken(adminKeyPrefix, token)
+}
+
+// newKeyToken returns a token, <prefix><58 hex><6 base62 checksum>, and the
+// SHA-256 hex digest that is stored. Admin keys and access tokens share the
+// format and differ only in their four-character prefix.
+func newKeyToken(prefix string) (token, digest string, err error) {
+	b := make([]byte, adminKeyBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("read token: %w", err)
+	}
+	body := prefix + hex.EncodeToString(b)
+	token = body + keyChecksum(body)
+	return token, tokenDigest(token), nil
+}
+
+// validKeyToken reports whether token has the shape newKeyToken(prefix)
+// produces and a correct checksum.
+func validKeyToken(prefix, token string) bool {
+	if len(token) != len(prefix)+adminKeyBytes*2+adminKeyChecksum || !strings.HasPrefix(token, prefix) {
 		return false
 	}
 	body := token[:len(token)-adminKeyChecksum]
-	for _, c := range body[len(adminKeyPrefix):] {
+	for _, c := range body[len(prefix):] {
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}

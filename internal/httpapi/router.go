@@ -180,6 +180,29 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// Access tokens belong to an account: the caller's own, or the one named
+	// by ?user= (an ID or email; instance admins only, required in local mode).
+	mux.HandleFunc("GET "+Prefix+"/access-tokens", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListAccessTokens(r.Context(), r.URL.Query().Get("user"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/access-tokens", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateAccessTokenRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateAccessToken(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	// {ref} is a token ID or the name of a live token.
+	mux.HandleFunc("DELETE "+Prefix+"/access-tokens/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RevokeAccessToken(r.Context(), r.URL.Query().Get("user"), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/users", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.ListUsers(r.Context())
 		respond(w, log, http.StatusOK, resp, err)

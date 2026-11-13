@@ -1561,3 +1561,125 @@ func TestLoginWithAdminKey(t *testing.T) {
 		t.Errorf("org use in local mode: exit %d, want 2", code)
 	}
 }
+
+func TestAccessTokenParity(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// Local mode has no account of its own, so it names one.
+	if _, errOut, code := e.cli("token", "create", "ci"); code != 1 || !strings.Contains(errOut, "--user") {
+		t.Errorf("token create without --user in local mode: exit %d stderr %s", code, errOut)
+	}
+	out, errOut, code := e.cli("token", "create", "ci", "--user", adminEmail, "--expires-in", "30d")
+	if code != 0 {
+		t.Fatalf("token create: %s", errOut)
+	}
+	var tok service.NewAccessToken
+	if err := json.Unmarshal([]byte(out), &tok); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(tok.Token, "lbp_") || tok.ExpiresAt == nil {
+		t.Fatalf("token = %+v", tok)
+	}
+	list := e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens", "", 200)
+	if strings.Contains(list, tok.Token) || strings.Contains(list, `"token"`) {
+		t.Errorf("the token list shows the token: %s", list)
+	}
+	e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens?user="+adminEmail, "", 200)
+	e.sameError([]string{"token", "list", "--user", "nobody@example.com"}, "GET", "/v0/access-tokens?user=nobody@example.com", "", 404)
+	e.sameError([]string{"token", "revoke", "missing", "--user", adminEmail, "--yes"}, "DELETE", "/v0/access-tokens/missing", "", 404)
+
+	// The admin's token manages the instance over HTTP.
+	if status, body := e.httpWith("GET", "/v0/nodes", "", tok.Token); status != 200 {
+		t.Errorf("nodes with an admin's token: %d %s", status, body)
+	}
+	if status, body := e.httpWith("POST", "/v0/access-tokens", `{"name":"more"}`, tok.Token); status != 403 {
+		t.Errorf("a token creates a token: %d %s", status, body)
+	}
+
+	if _, errOut, code := e.cli("token", "revoke", "ci", "--user", adminEmail, "--yes"); code != 0 {
+		t.Fatalf("token revoke: %s", errOut)
+	}
+	if status, _ := e.httpWith("GET", "/v0/nodes", "", tok.Token); status != 401 {
+		t.Errorf("revoked token: status %d", status)
+	}
+	e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens", "", 200)
+}
+
+func TestLoginWithAccessToken(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, errOut, code := e.cli("token", "create", "laptop", "--user", adminEmail, "--never-expires")
+	if code != 0 {
+		t.Fatalf("token create: %s", errOut)
+	}
+	var tok service.NewAccessToken
+	if err := json.Unmarshal([]byte(out), &tok); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remote commands: no --context local, so the saved context is used.
+	remote := func(input string, args ...string) (string, string, int) {
+		var stdout, stderr bytes.Buffer
+		code := runWithInput(context.Background(), append([]string{"--json"}, args...), strings.NewReader(input), &stdout, &stderr)
+		return stdout.String(), stderr.String(), code
+	}
+
+	// --token alone reads stdin.
+	out, errOut, code = remote(tok.Token+"\n", "login", e.srv.URL, "--token", "--context-name", "ops")
+	if code != 0 || !strings.Contains(out, `"via":"access_token"`) || strings.Contains(out, tok.Token) {
+		t.Fatalf("login --token: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "warning") {
+		t.Errorf("piped token warned: %s", errOut)
+	}
+	// An instance admin's token runs operator commands.
+	if out, errOut, code := remote("", "cluster", "list"); code != 0 || out != `{"data":[]}`+"\n" {
+		t.Errorf("cluster list with a token: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if out, errOut, code := remote("", "whoami"); code != 0 || !strings.Contains(out, `"name":"laptop"`) {
+		t.Errorf("whoami: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if _, errOut, code := remote("", "token", "create", "more"); code != 1 || !strings.Contains(errOut, "cannot create another") {
+		t.Errorf("token create with a token: exit %d stderr %s", code, errOut)
+	}
+
+	// Logout forgets the token and says it still works.
+	if _, errOut, code := remote("", "logout"); code != 0 || !strings.Contains(errOut, "still works") {
+		t.Errorf("logout: exit %d stderr %s", code, errOut)
+	}
+	if status, _ := e.httpWith("GET", "/v0/me", "", tok.Token); status != 200 {
+		t.Errorf("token after logout: status %d", status)
+	}
+
+	// --token=<token> works, with a warning about shell history.
+	out, errOut, code = remote("", "login", e.srv.URL, "--token="+tok.Token, "--context-name", "ops")
+	if code != 0 || !strings.Contains(out, `"via":"access_token"`) || !strings.Contains(errOut, "shell history") {
+		t.Fatalf("login --token=: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+
+	// A token after a space would be taken as the URL: refuse it.
+	for _, args := range [][]string{
+		{"login", e.srv.URL, "--token", tok.Token},
+		{"login", "--token", tok.Token},
+	} {
+		if _, errOut, code := remote("", args...); code != 2 || !strings.Contains(errOut, "looks like a token") {
+			t.Errorf("lewbox %v: exit %d stderr %s", args[:2], code, errOut)
+		}
+	}
+	for _, args := range [][]string{
+		{"login", e.srv.URL, "--token", "--email", adminEmail},
+		{"login", e.srv.URL, "--token", "--password-stdin"},
+		{"login", e.srv.URL, "--token", "--key-stdin"},
+	} {
+		if _, _, code := remote(tok.Token, args...); code != 2 {
+			t.Errorf("lewbox %v: exit %d, want 2", args, code)
+		}
+	}
+	if _, errOut, code := remote("", "login", e.srv.URL, "--token"); code != 1 || !strings.Contains(errOut, "no token") {
+		t.Errorf("login --token with empty stdin: exit %d stderr %s", code, errOut)
+	}
+	if _, errOut, code := remote("lbp_nope\n", "login", e.srv.URL, "--token"); code != 1 || !strings.Contains(errOut, "unauthorized") {
+		t.Errorf("login with a bad token: exit %d stderr %s", code, errOut)
+	}
+}
