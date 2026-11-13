@@ -46,8 +46,8 @@ func (q *Queries) CountNodesByCluster(ctx context.Context) ([]CountNodesByCluste
 const createCluster = `-- name: CreateCluster :one
 INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc,
                       admin_token_id, admin_token_last4, status, status_detail, version,
-                      checks, checked_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      domain, dns_profile_id, dns_records, checks, checked_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy
 `
 
@@ -64,6 +64,9 @@ type CreateClusterParams struct {
 	Status          string
 	StatusDetail    string
 	Version         string
+	Domain          string
+	DnsProfileID    sql.NullString
+	DnsRecords      string
 	Checks          string
 	CheckedAt       sql.NullTime
 	CreatedAt       time.Time
@@ -83,6 +86,9 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		arg.Status,
 		arg.StatusDetail,
 		arg.Version,
+		arg.Domain,
+		arg.DnsProfileID,
+		arg.DnsRecords,
 		arg.Checks,
 		arg.CheckedAt,
 		arg.CreatedAt,
@@ -298,4 +304,53 @@ func (q *Queries) UpdateClusterCheck(ctx context.Context, arg UpdateClusterCheck
 		arg.ID,
 	)
 	return err
+}
+
+const updateClusterSettings = `-- name: UpdateClusterSettings :one
+UPDATE clusters
+SET domain = ?, dns_profile_id = ?, dns_records = ?
+WHERE id = ?
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy
+`
+
+type UpdateClusterSettingsParams struct {
+	Domain       string
+	DnsProfileID sql.NullString
+	DnsRecords   string
+	ID           string
+}
+
+func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSettingsParams) (Cluster, error) {
+	row := q.db.QueryRowContext(ctx, updateClusterSettings,
+		arg.Domain,
+		arg.DnsProfileID,
+		arg.DnsRecords,
+		arg.ID,
+	)
+	var i Cluster
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.AdminURL,
+		&i.EndpointURL,
+		&i.Runtime,
+		&i.AdminTokenEnc,
+		&i.AdminTokenID,
+		&i.AdminTokenLast4,
+		&i.Status,
+		&i.StatusDetail,
+		&i.Version,
+		&i.Checks,
+		&i.CheckedAt,
+		&i.CreatedAt,
+		&i.SyncedAt,
+		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
+		&i.StorageProfileID,
+		&i.StopPolicy,
+	)
+	return i, err
 }

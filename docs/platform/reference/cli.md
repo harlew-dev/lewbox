@@ -109,6 +109,7 @@ Checks the machine and installs AerolVM with its own installer, verified by chec
 ```bash
 lewbox install                                   # local mode
 lewbox install --public-host 10.0.0.5            # IP mode, no TLS
+lewbox install --domain eu.api.example.com --dns-profile cf-prod
 lewbox install --domain eu.api.example.com --dns-api-token-stdin < token
 lewbox install --public-host 10.0.0.5 --dry-run  # print, change nothing
 lewbox install --public-host 10.0.0.5 -- --lb-health-port 8081   # pass flags to install.sh
@@ -119,7 +120,8 @@ lewbox install --public-host 10.0.0.5 -- --lb-health-port 8081   # pass flags to
 | `--mode local\|public-host\|domain` | `local`, unless `--domain` or `--public-host` is set | How the node is reached |
 | `--public-host HOST` | | IP mode: customers reach `http://HOST:21212` |
 | `--domain DOMAIN` | | Domain mode with wildcard TLS through Cloudflare DNS |
-| `--dns-api-token-stdin` | | Read the Cloudflare token from stdin. Required with `--domain` |
+| `--dns-profile NAME` | | Domain mode: use this [DNS profile](../clusters/dns-profiles.md)'s token and ACME email. Must contain `--domain` |
+| `--dns-api-token-stdin` | | Read the Cloudflare token from stdin. One of this and `--dns-profile` is required with `--domain` |
 | `--acme-email EMAIL` | | Let's Encrypt contact for domain mode |
 | `--runtime docker\|firecracker` | `docker` | Firecracker needs `/dev/kvm` and a non-local mode |
 | `--name NAME` | short hostname | The node name |
@@ -219,6 +221,10 @@ One cluster: its fields, the last check results, and its nodes. Doesn't contact 
 ### `lewbox cluster check ID|SLUG`
 
 Runs every check now and syncs the node list. See [Health and checks](../clusters/health-and-checks.md).
+
+### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off]`
+
+Changes the cluster's DNS settings. `--domain ""` clears the domain; `--dns-profile none` clears the profile. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. The next check reconciles the records. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps).
 
 ### `lewbox cluster health ID|SLUG [--days 30]`
 

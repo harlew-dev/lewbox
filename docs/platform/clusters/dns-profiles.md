@@ -3,7 +3,7 @@ title: DNS profiles
 description: Save a Cloudflare API token once and test it, so a cluster in domain mode can get a certificate without the token being typed on every machine.
 ---
 
-A **DNS profile** is a saved Cloudflare API token, its zone and an optional ACME account email. Lewbox tests it when you save it, seals the token with the instance keyring, and shows only its last four characters afterwards. A cluster in domain mode will name a profile when it starts, instead of the token being passed to every install.
+A **DNS profile** is a saved Cloudflare API token, its zone and an optional ACME account email. Lewbox tests it when you save it, seals the token with the instance keyring, and shows only its last four characters afterwards. `lewbox install --dns-profile` fetches it back to give a domain-mode node its certificate, and a cluster uses it to keep its domain's DNS records pointed at its nodes.
 
 Instance admins only. The token is fetched back only by `lewbox dns-profile credentials`, which exists to configure a node.
 
@@ -55,14 +55,36 @@ A failing test on `create` or a changed `update` **saves nothing**: the command 
 
 ## Deleting
 
-A profile a cluster uses cannot be deleted:
+A profile a cluster uses, or one that still has DNS records from a cluster, cannot be deleted:
 
 ```text
 DNS profile "cf-eu" is used by 1 cluster(s); stop using it in those clusters first
 ```
 
-Point the cluster at another profile first, then delete this one.
+Point the cluster at another profile first, then delete this one. If the cluster no longer names the profile but its records are still there, run `lewbox cluster check` once (it removes them) and delete the profile again.
+
+## The records Lewbox keeps
+
+When a cluster has a domain and a DNS profile, its check keeps the domain pointed at the cluster:
+
+- For every **live `mixed` or `ingress` member whose `public_host` is a public IP**, an `A` (IPv4) or `AAAA` (IPv6) record for `<domain>` and for `*.<domain>`, TTL 60, DNS only (never proxied), with the comment `lewbox <cluster> <node>`.
+- A member whose `public_host` is a private, loopback or otherwise unusable address gets no record, and the check names it (`node-1: 10.0.0.5 is a private address, no record`). A `worker` or `server` member gets none either.
+- In domain mode, AerolVM's installer sets `public_host` to the machine's first IP address. On most VPSs that is the public IP. Behind a cloud provider's NAT (AWS, GCP) it is private: pass the public IP to the installer with `lewbox install … -- --public-host 203.0.113.10`, or set `dns_records` to `off` and point the domain at your load balancer yourself.
+- Lewbox records each Cloudflare record's ID. When a member leaves, stops being ingress or changes IP, its records are deleted; records that are gone from Cloudflare already count as deleted. **Lewbox never touches another record in the zone.**
+- An identical record that already exists is adopted rather than duplicated.
+
+The cluster's `dns_records` setting controls this:
+
+| Value | |
+|---|---|
+| `auto` | The default. Keep the records as above |
+| `off` | Keep none, and delete the ones Lewbox made. Use it when the domain points at a load balancer in front of the nodes |
+
+Set it with `lewbox cluster set <cluster> --dns-records off` (and `auto` to turn it back on). The check runs the reconciliation, so a Cloudflare failure shows as a failed `dns records` check and a degraded cluster.
+
+Removing the cluster deletes the records first, best effort: Cloudflare never blocks a removal.
 
 ## Next
 
-Domain-mode clusters choose a profile when they start. Until that wiring is in place, a profile is only stored and tested.
+- [Start a cluster](start-a-cluster.md): `lewbox install --dns-profile`.
+- [Health and checks](health-and-checks.md): what the `dns records` check means.

@@ -560,6 +560,38 @@ func newClusterCmd(a *app) *cobra.Command {
 	joinCommand.Flags().StringVar(&joinRole, "role", "mixed", "role for the new node: worker, ingress, server or mixed")
 	joinCommand.Flags().StringVar(&joinTTL, "ttl", "15m", "how long the token is valid")
 
+	var setDomain, setDNSProfile, setDNSRecords string
+	set := &cobra.Command{
+		Use:   "set <id|slug>",
+		Short: "Change a cluster's DNS settings (PATCH /v0/clusters/{id|slug})",
+		Long: "Set the cluster's domain and DNS profile, or turn the records Lewbox\n" +
+			"keeps on or off. The next cluster check reconciles the records.",
+		Example: "  lewbox cluster set eu-west --domain eu.example.com --dns-profile cf-prod\n" +
+			"  lewbox cluster set eu-west --dns-records off",
+		Args: usageArgs(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := service.UpdateClusterRequest{}
+			if cmd.Flags().Changed("domain") {
+				req.Domain = &setDomain
+			}
+			if cmd.Flags().Changed("dns-profile") {
+				req.DNSProfile = &setDNSProfile
+			}
+			if cmd.Flags().Changed("dns-records") {
+				req.DNSRecords = &setDNSRecords
+			}
+			if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil {
+				return usagef("nothing to change: pass --domain, --dns-profile or --dns-records")
+			}
+			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
+				return b.UpdateCluster(ctx, args[0], req)
+			})(cmd, args)
+		},
+	}
+	set.Flags().StringVar(&setDomain, "domain", "", "the cluster's domain, such as eu.example.com (empty clears it)")
+	set.Flags().StringVar(&setDNSProfile, "dns-profile", "", "the DNS profile for TLS and records (none clears it)")
+	set.Flags().StringVar(&setDNSRecords, "dns-records", "", "keep the domain's records: auto or off")
+
 	var healthDays int
 	health := &cobra.Command{
 		Use:   "health <id|slug>",
@@ -582,7 +614,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	}
 	metrics.Flags().StringVar(&metricsRange, "range", "24h", "24h, 7d or 30d")
 
-	cluster.AddCommand(add, list, get, check, health, metrics, remove, joinCommand)
+	cluster.AddCommand(add, list, get, check, set, health, metrics, remove, joinCommand)
 	return cluster
 }
 

@@ -254,6 +254,16 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("PATCH "+Prefix+"/clusters/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateClusterRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateCluster(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("DELETE "+Prefix+"/clusters/{ref}", func(w http.ResponseWriter, r *http.Request) {
 		force, err := queryBool(r, "force")
 		if err != nil {

@@ -32,8 +32,10 @@ WHERE dns_profile_id IS NOT NULL
 GROUP BY dns_profile_id;
 
 -- name: DeleteDNSProfile :execrows
--- Refuses a profile a cluster uses. The guard is in the statement, so a
--- cluster that starts using the profile is not left pointing at nothing.
+-- Refuses a profile a cluster uses, or one that still has DNS records. The
+-- guard is in the statement, so a cluster that starts using the profile is
+-- not left pointing at nothing.
 DELETE FROM dns_profiles
 WHERE dns_profiles.id = sqlc.arg(profile_id)
-  AND NOT EXISTS (SELECT 1 FROM clusters WHERE clusters.dns_profile_id = sqlc.arg(profile_id));
+  AND NOT EXISTS (SELECT 1 FROM clusters WHERE clusters.dns_profile_id = sqlc.arg(profile_id))
+  AND NOT EXISTS (SELECT 1 FROM dns_records WHERE dns_records.profile_id = sqlc.arg(profile_id));

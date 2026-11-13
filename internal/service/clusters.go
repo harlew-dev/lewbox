@@ -47,6 +47,9 @@ type Cluster struct {
 	AdminURL        string     `json:"admin_url"`
 	EndpointURL     string     `json:"endpoint_url"`
 	Runtime         string     `json:"runtime"`
+	Domain          string     `json:"domain"`
+	DNSProfile      *string    `json:"dns_profile"`
+	DNSRecords      string     `json:"dns_records"`
 	AdminTokenLast4 string     `json:"admin_token_last4"`
 	Status          string     `json:"status"`
 	StatusDetail    string     `json:"status_detail,omitempty"`
@@ -75,7 +78,18 @@ type AddClusterRequest struct {
 	AdminURL    string `json:"admin_url"`
 	EndpointURL string `json:"endpoint_url"`
 	Runtime     string `json:"runtime"`
+	Domain      string `json:"domain"`
+	DNSProfile  string `json:"dns_profile"` // an ID or name; empty for none
+	DNSRecords  string `json:"dns_records"` // auto or off; default auto
 	AdminToken  string `json:"admin_token"`
+}
+
+// UpdateClusterRequest changes a cluster's DNS settings. A DNSProfile of ""
+// or "none" clears the profile.
+type UpdateClusterRequest struct {
+	Domain     *string `json:"domain,omitempty"`
+	DNSProfile *string `json:"dns_profile,omitempty"`
+	DNSRecords *string `json:"dns_records,omitempty"`
 }
 
 // JoinTokenRequest is the input to CreateJoinToken.
@@ -140,6 +154,25 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	if token == "" {
 		return ClusterDetail{}, invalid("admin_token is required")
 	}
+	domain, err := clusterDomain(req.Domain)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	dnsRecords, err := clusterDNSRecords(req.DNSRecords)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	var profile *db.DnsProfile
+	if strings.TrimSpace(req.DNSProfile) != "" {
+		found, err := s.findDNSProfile(ctx, req.DNSProfile)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+		profile = &found
+	}
+	if err := checkDomainProfile(domain, profile); err != nil {
+		return ClusterDetail{}, err
+	}
 
 	if _, err := s.q.GetClusterBySlug(ctx, slug); err == nil {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -177,6 +210,9 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		Status:          status,
 		StatusDetail:    detail,
 		Version:         result.version,
+		Domain:          domain,
+		DnsProfileID:    nullProfileID(profile),
+		DnsRecords:      dnsRecords,
 		Checks:          encodeChecks(checks),
 		CheckedAt:       sql.NullTime{Time: now, Valid: true},
 		CreatedAt:       now,
@@ -217,9 +253,13 @@ func (s *Service) ListClusters(ctx context.Context) (ClusterList, error) {
 	if err != nil {
 		return ClusterList{}, err
 	}
+	names, err := s.dnsProfileNames(ctx)
+	if err != nil {
+		return ClusterList{}, err
+	}
 	out := ClusterList{Data: make([]Cluster, 0, len(rows))}
 	for _, r := range rows {
-		out.Data = append(out.Data, toCluster(r, counts[r.ID]))
+		out.Data = append(out.Data, toCluster(r, counts[r.ID], profileNameAt(names, r.DnsProfileID)))
 	}
 	return out, nil
 }
@@ -234,6 +274,71 @@ func (s *Service) GetCluster(ctx context.Context, ref string) (ClusterDetail, er
 		return ClusterDetail{}, err
 	}
 	return s.clusterDetail(ctx, row.ID)
+}
+
+// UpdateCluster changes a cluster's domain, DNS profile and DNS record mode.
+// DNS records follow on the next cluster check. Instance admins only.
+func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClusterRequest) (ClusterDetail, error) {
+	if _, err := requireAdmin(ctx); err != nil {
+		return ClusterDetail{}, err
+	}
+	if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil {
+		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile or dns_records")
+	}
+	row, err := s.findCluster(ctx, ref)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+
+	domain := row.Domain
+	if req.Domain != nil {
+		domain, err = clusterDomain(*req.Domain)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+	}
+	profileID := row.DnsProfileID
+	var profile *db.DnsProfile
+	switch {
+	case req.DNSProfile == nil:
+		if row.DnsProfileID.Valid {
+			found, err := s.findDNSProfile(ctx, row.DnsProfileID.String)
+			if err != nil {
+				return ClusterDetail{}, err
+			}
+			profile = &found
+		}
+	case clearsDNSProfile(*req.DNSProfile):
+		profileID = sql.NullString{}
+	default:
+		found, err := s.findDNSProfile(ctx, *req.DNSProfile)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+		profile = &found
+		profileID = nullProfileID(profile)
+	}
+	records := row.DnsRecords
+	if req.DNSRecords != nil {
+		records, err = clusterDNSRecords(*req.DNSRecords)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+	}
+	if err := checkDomainProfile(domain, profile); err != nil {
+		return ClusterDetail{}, err
+	}
+
+	updated, err := s.q.UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
+		Domain:       domain,
+		DnsProfileID: profileID,
+		DnsRecords:   records,
+		ID:           row.ID,
+	})
+	if err != nil {
+		return ClusterDetail{}, fmt.Errorf("update cluster: %w", err)
+	}
+	return s.clusterDetail(ctx, updated.ID)
 }
 
 // CheckCluster runs the checks again with the stored token and re-syncs nodes.
@@ -279,10 +384,15 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 		}
 		if len(conflicts) > 0 {
 			checks = applyConflicts(checks, conflicts)
-			status, detail = summarizeChecks(checks)
-			if healthFailed(checks) {
-				status = "unreachable"
-			}
+		}
+		// DNS records are reconciled before the verdict is summarized, so a
+		// failed Cloudflare call shows as a degraded cluster.
+		if check := s.reconcileDNSRecords(ctx, row, result.members); check.Name != "" {
+			checks = append(checks, check)
+		}
+		status, detail = summarizeChecks(checks)
+		if healthFailed(checks) {
+			status = "unreachable"
 		}
 	}
 	if err := s.storeCheck(ctx, row.ID, status, detail, version, checks); err != nil {
@@ -334,6 +444,13 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 		_ = client.RevokeToken(callCtx, row.AdminTokenID)
 		cancel()
 	}
+	// Remove the records Lewbox put in the zone before the cluster (and its
+	// rows) go. Best effort: Cloudflare must not block a removal.
+	s.removeDNSRecords(ctx, row)
+	name, err := s.dnsProfileName(ctx, row.DnsProfileID)
+	if err != nil {
+		return Cluster{}, err
+	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
 	if err != nil {
 		return Cluster{}, fmt.Errorf("delete cluster: %w", err)
@@ -341,7 +458,7 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if n == 0 {
 		return Cluster{}, notFound("cluster %q not found", ref)
 	}
-	return toCluster(row, len(nodes)), nil
+	return toCluster(row, len(nodes), name), nil
 }
 
 func sandboxKeysNotRevoked(n int, slug string) error {
@@ -852,7 +969,11 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 		n.Cluster = row.Slug
 		nodes = append(nodes, n)
 	}
-	return ClusterDetail{Cluster: toCluster(row, len(nodes)), Checks: checks, NodeList: nodes}, nil
+	profile, err := s.dnsProfileName(ctx, row.DnsProfileID)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	return ClusterDetail{Cluster: toCluster(row, len(nodes), profile), Checks: checks, NodeList: nodes}, nil
 }
 
 func (s *Service) findCluster(ctx context.Context, ref string) (db.Cluster, error) {
@@ -947,7 +1068,11 @@ func (s *Service) clusterWithCount(ctx context.Context, row db.Cluster) (Cluster
 	if err != nil {
 		return Cluster{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
-	return toCluster(row, len(rows)), nil
+	profile, err := s.dnsProfileName(ctx, row.DnsProfileID)
+	if err != nil {
+		return Cluster{}, err
+	}
+	return toCluster(row, len(rows), profile), nil
 }
 
 func (s *Service) clusterToken(row db.Cluster) (string, error) {
@@ -1065,7 +1190,7 @@ func encodeChecks(checks []Check) string {
 	return string(data)
 }
 
-func toCluster(r db.Cluster, nodes int) Cluster {
+func toCluster(r db.Cluster, nodes int, profile *string) Cluster {
 	c := Cluster{
 		ID:              r.ID,
 		Slug:            r.Slug,
@@ -1073,6 +1198,9 @@ func toCluster(r db.Cluster, nodes int) Cluster {
 		AdminURL:        r.AdminURL,
 		EndpointURL:     r.EndpointURL,
 		Runtime:         r.Runtime,
+		Domain:          r.Domain,
+		DNSProfile:      profile,
+		DNSRecords:      r.DnsRecords,
 		AdminTokenLast4: r.AdminTokenLast4,
 		Status:          r.Status,
 		StatusDetail:    r.StatusDetail,
@@ -1085,6 +1213,106 @@ func toCluster(r db.Cluster, nodes int) Cluster {
 		c.CheckedAt = &t
 	}
 	return c
+}
+
+// clusterDomain normalizes a cluster's domain. An empty domain means none.
+func clusterDomain(raw string) (string, error) {
+	domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	if domain == "" {
+		return "", nil
+	}
+	if !dnsZoneName.MatchString(domain) {
+		return "", invalid("domain must be a domain name with a dot, such as eu.example.com")
+	}
+	return domain, nil
+}
+
+// clusterDNSRecords checks the dns_records setting. An empty value is auto.
+func clusterDNSRecords(raw string) (string, error) {
+	records := strings.ToLower(strings.TrimSpace(raw))
+	if records == "" {
+		records = "auto"
+	}
+	if records != "auto" && records != "off" {
+		return "", invalid("dns_records must be auto or off")
+	}
+	return records, nil
+}
+
+// clearsDNSProfile reports whether a dns_profile value means "no profile".
+func clearsDNSProfile(raw string) bool {
+	value := strings.TrimSpace(raw)
+	return value == "" || strings.EqualFold(value, "none")
+}
+
+// DomainInZone reports whether domain is the zone itself or a name under it.
+func DomainInZone(domain, zone string) bool {
+	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	zone = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zone)), ".")
+	return domain != "" && zone != "" && (domain == zone || strings.HasSuffix(domain, "."+zone))
+}
+
+// checkDomainProfile checks that a cluster's domain works with its profile's
+// zone. A profile needs a domain to point its certificate and records at.
+func checkDomainProfile(domain string, profile *db.DnsProfile) error {
+	if profile == nil {
+		return nil
+	}
+	if domain == "" {
+		return invalid("a domain is required when a DNS profile is set")
+	}
+	if !DomainInZone(domain, profile.Zone) {
+		return invalid("domain %s is not in the profile's zone %s", domain, profile.Zone)
+	}
+	return nil
+}
+
+// nullProfileID is the SQL value for an optional DNS profile.
+func nullProfileID(profile *db.DnsProfile) sql.NullString {
+	if profile == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: profile.ID, Valid: true}
+}
+
+// dnsProfileName is the name of the profile a cluster uses, or nil.
+func (s *Service) dnsProfileName(ctx context.Context, id sql.NullString) (*string, error) {
+	if !id.Valid {
+		return nil, nil
+	}
+	row, err := s.q.GetDNSProfileByID(ctx, id.String)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get DNS profile: %w", err)
+	}
+	return &row.Name, nil
+}
+
+// dnsProfileNames maps profile IDs to names.
+func (s *Service) dnsProfileNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.q.ListDNSProfiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list DNS profiles: %w", err)
+	}
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		names[row.ID] = row.Name
+	}
+	return names, nil
+}
+
+// profileNameAt looks up a profile's name in a dnsProfileNames map.
+func profileNameAt(names map[string]string, id sql.NullString) *string {
+	if !id.Valid {
+		return nil
+	}
+	name, ok := names[id.String]
+	if !ok {
+		return nil
+	}
+	return &name
 }
 
 func memberName(m aerolvm.Member) string {

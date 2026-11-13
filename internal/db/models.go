@@ -71,6 +71,19 @@ type DnsProfile struct {
 	UpdatedAt   time.Time
 }
 
+type DnsRecord struct {
+	ID        string
+	ClusterID string
+	ProfileID string
+	ZoneID    string
+	Node      string
+	Name      string
+	Type      string
+	Content   string
+	RecordID  string
+	CreatedAt time.Time
+}
+
 type Membership struct {
 	ID        string
 	OrgID     string

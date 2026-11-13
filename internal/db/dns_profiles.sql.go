@@ -108,10 +108,12 @@ const deleteDNSProfile = `-- name: DeleteDNSProfile :execrows
 DELETE FROM dns_profiles
 WHERE dns_profiles.id = ?1
   AND NOT EXISTS (SELECT 1 FROM clusters WHERE clusters.dns_profile_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM dns_records WHERE dns_records.profile_id = ?1)
 `
 
-// Refuses a profile a cluster uses. The guard is in the statement, so a
-// cluster that starts using the profile is not left pointing at nothing.
+// Refuses a profile a cluster uses, or one that still has DNS records. The
+// guard is in the statement, so a cluster that starts using the profile is
+// not left pointing at nothing.
 func (q *Queries) DeleteDNSProfile(ctx context.Context, profileID string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteDNSProfile, profileID)
 	if err != nil {

@@ -249,6 +249,19 @@ func TestBackendsAgree(t *testing.T) {
 		{name: "list clusters", local: listClusters, remote: listClusters, compare: true},
 		{name: "get cluster", local: getCluster, remote: getCluster, compare: true},
 		{
+			name: "update cluster DNS settings",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				domain, records := "eu.example.com", "off"
+				v, err := b.UpdateCluster(ctx, "eu-west", service.UpdateClusterRequest{
+					Domain:     &domain,
+					DNSRecords: &records,
+				})
+				return v, err
+			},
+			remote:  getCluster,
+			compare: true,
+		},
+		{
 			name: "check cluster",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
 				v, err := b.CheckCluster(ctx, "eu-west")

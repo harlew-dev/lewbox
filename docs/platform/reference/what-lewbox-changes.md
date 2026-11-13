@@ -7,10 +7,10 @@ Lewbox runs privileged steps one at a time through `sudo`, and prints each one b
 
 ## `lewbox install`
 
-1. **Checks**, changing nothing: Linux, `sudo` works, the ports are free, `/dev/kvm` for Firecracker, a DNS token for domain mode.
+1. **Checks**, changing nothing: Linux, `sudo` works, the ports are free, `/dev/kvm` for Firecracker, and a DNS token for domain mode (from `--dns-profile` or stdin).
 2. **Gets AerolVM's installer** for the chosen version from `github.com/aerol-ai/microvm/releases` (or `--from`). It checks the SHA-256 against the value built into Lewbox (for v0.7.0) or the release's `checksums.txt`, saves the verified copy to `~/.cache/lewbox/aerolvm/<tag>/install.sh`, and runs **that copy**. Lewbox never pipes a download into `sudo bash`.
 3. **Runs it**: `sudo bash install.sh --version <tag> --pat-scope host --node-name <name> <mode flags> --no-start`. Local mode passes `--local` instead of `--pat-scope host` and `--no-start`: AerolVM starts right away, listening on `127.0.0.1` only. The other modes leave it stopped for `node add`.
-4. **Saves** `~/.config/lewbox/node.json`: the version, mode, runtime and name. No secrets.
+4. **Saves** `~/.config/lewbox/node.json`: the version, mode, runtime, name, and the name and version of the DNS profile it used. No secrets.
 
 AerolVM's installer owns what it installs:
 

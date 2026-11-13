@@ -26,6 +26,7 @@ type Backend interface {
 	AddCluster(ctx context.Context, req service.AddClusterRequest) (service.ClusterDetail, error)
 	ListClusters(ctx context.Context) (service.ClusterList, error)
 	GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
+	UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error)
 	CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
 	ClusterHealth(ctx context.Context, ref string, days int) (service.ClusterHealth, error)
 	ClusterMetrics(ctx context.Context, ref, rng string) (service.ClusterMetrics, error)
@@ -173,6 +174,11 @@ func (l Local) ListClusters(ctx context.Context) (service.ClusterList, error) {
 // GetCluster returns a cluster by ID or slug.
 func (l Local) GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error) {
 	return l.Svc.GetCluster(l.withPrincipal(ctx), ref)
+}
+
+// UpdateCluster changes a cluster's DNS settings.
+func (l Local) UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error) {
+	return l.Svc.UpdateCluster(l.withPrincipal(ctx), ref, req)
 }
 
 // CheckCluster runs the cluster checks now.

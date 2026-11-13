@@ -31,7 +31,13 @@ Choose how customers will reach the node.
 lewbox install --public-host 10.0.0.5
 ```
 
-**In production**, use a domain with wildcard TLS. You need a Cloudflare API token with Zone:Read and DNS:Edit on that zone, passed on stdin:
+**In production**, use a domain with wildcard TLS and a saved [DNS profile](dns-profiles.md), which supplies the Cloudflare token and the ACME email:
+
+```bash
+lewbox install --domain eu-west.api.example.com --dns-profile cf-prod
+```
+
+The profile's zone must contain the domain. Without a profile, pass a Cloudflare API token with Zone:Read and DNS:Edit on that zone on stdin instead:
 
 ```bash
 lewbox install --domain eu-west.api.example.com --acme-email ops@example.com \

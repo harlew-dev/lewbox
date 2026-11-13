@@ -321,6 +321,61 @@ func TestUsers(t *testing.T) {
 	e.same([]string{"user", "get", "second@example.com"}, "GET", "/v0/users/second@example.com", "", 200)
 }
 
+func TestClusterSet(t *testing.T) {
+	cf := cloudflaretest.New(t)
+	cf.AddZone("example.com")
+	e := newEnvWith(t, service.WithCloudflareURL(cf.URL))
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", cf.URL)
+	if _, errOut, code := e.cliIn(cf.Token+"\n", "dns-profile", "create", "cf-prod",
+		"--zone", "example.com", "--api-token-stdin"); code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_cluster_set_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		PublicHost: "203.0.113.10", Role: "mixed", Version: "v0.7.0",
+		Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+
+	out := e.same([]string{"cluster", "set", "eu-west", "--domain", "eu.example.com",
+		"--dns-profile", "cf-prod", "--dns-records", "off"},
+		"PATCH", "/v0/clusters/eu-west",
+		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"off"}`, 200)
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Domain != "eu.example.com" || detail.DNSProfile == nil ||
+		*detail.DNSProfile != "cf-prod" || detail.DNSRecords != "off" {
+		t.Errorf("cluster = %+v", detail.Cluster)
+	}
+
+	out = e.same([]string{"cluster", "set", "eu-west", "--domain", "", "--dns-profile", "none"},
+		"PATCH", "/v0/clusters/eu-west", `{"domain":"","dns_profile":"none"}`, 200)
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Domain != "" || detail.DNSProfile != nil {
+		t.Errorf("cleared cluster = %+v", detail.Cluster)
+	}
+
+	// A domain outside the profile's zone and a bad record mode are refused
+	// the same way by both entry points.
+	e.sameError([]string{"cluster", "set", "eu-west", "--domain", "eu.example.com", "--dns-profile", "cf-prod", "--dns-records", "sometimes"},
+		"PATCH", "/v0/clusters/eu-west",
+		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"sometimes"}`, 400)
+	if status, body := e.http("PATCH", "/v0/clusters/eu-west", `{}`); status != 400 || !strings.Contains(body, "nothing to change") {
+		t.Errorf("empty update: status %d body %s", status, body)
+	}
+}
+
 func TestClusters(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)

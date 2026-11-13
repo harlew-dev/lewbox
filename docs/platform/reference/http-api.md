@@ -143,7 +143,8 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | Route | Who | |
 |---|---|---|
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
-| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, admin_token}` → `201` ClusterDetail. A failed required check → `412` with the checks in `details` |
+| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, admin_token}` → `201` ClusterDetail. `domain`, `dns_profile` (an ID or name) and `dns_records` are optional. A failed required check → `412` with the checks in `details` |
+| `PATCH /v0/clusters/{ref}` | admin | `{domain, dns_profile, dns_records}`: change the DNS settings; `dns_profile` `""` or `"none"` clears it, `dns_records` is `auto` or `off`. An empty body, a domain outside the profile's zone or a bad record mode → `400`. → ClusterDetail |
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
@@ -251,6 +252,9 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "admin_url": "http://10.0.0.5:21212",
   "endpoint_url": "http://10.0.0.5:21212",
   "runtime": "docker",
+  "domain": "eu.api.example.com",
+  "dns_profile": "cf-prod",
+  "dns_records": "auto",
   "admin_token_last4": "9f3a",
   "status": "ready",
   "version": "v0.7.0",
@@ -260,7 +264,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned.
+`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned. `domain` is `""` when the cluster has none, `dns_profile` is the profile's **name** or `null`, and `dns_records` is `auto` or `off`.
 
 **ClusterDetail** is a Cluster plus `checks` (a list of `{name, ok, fatal, detail}`) and `node_list` (a list of Nodes).
 

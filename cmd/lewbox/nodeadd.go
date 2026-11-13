@@ -164,6 +164,8 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		AdminURL:    adminURL,
 		EndpointURL: endpointURL,
 		Runtime:     state.Runtime,
+		Domain:      clusterDomainOf(state),
+		DNSProfile:  state.DNSProfile,
 		AdminToken:  token,
 	})
 	if err != nil {
@@ -306,6 +308,15 @@ func findNode(nodes []service.Node, names ...string) (service.Node, bool) {
 		}
 	}
 	return service.Node{}, false
+}
+
+// clusterDomainOf is the domain a new cluster takes from this install. Only a
+// domain-mode install has one: a public-host install has no TLS.
+func clusterDomainOf(state machine.State) string {
+	if state.Mode == machine.ModeDomain {
+		return state.Domain
+	}
+	return ""
 }
 
 // advertiseIP picks the address a public-host install should advertise.

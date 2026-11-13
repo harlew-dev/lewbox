@@ -296,7 +296,10 @@ func (s *Service) DeleteDNSProfile(ctx context.Context, ref string) (DNSProfile,
 		if err != nil {
 			return DNSProfile{}, err
 		}
-		return DNSProfile{}, conflict("DNS profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+		if counts[row.ID] > 0 {
+			return DNSProfile{}, conflict("DNS profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+		}
+		return DNSProfile{}, conflict("DNS profile %q still has DNS records that Lewbox keeps; check the clusters that used it and try again", row.Name)
 	}
 	return toDNSProfile(row, 0), nil
 }

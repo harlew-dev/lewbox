@@ -17,6 +17,7 @@ import (
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
+	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/machine"
 	"github.com/harlew-dev/lewbox/internal/machine/machinetest"
 	"github.com/harlew-dev/lewbox/internal/service"
@@ -319,6 +320,138 @@ func TestInstallDryRun(t *testing.T) {
 				t.Errorf("dry run ran commands: %v", h.runner.Displays())
 			}
 		})
+	}
+}
+
+// newProfileEnv is an env with a tested DNS profile for example.com and its
+// fake Cloudflare API. The service reads it from LEWBOX_CLOUDFLARE_API_URL.
+func newProfileEnv(t *testing.T) (*env, *cloudflaretest.Fake) {
+	t.Helper()
+	e := newEnv(t)
+	fake := cloudflaretest.New(t)
+	fake.AddZone("example.com")
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", fake.URL)
+	if _, errOut, code := e.cliIn(fake.Token+"\n", "dns-profile", "create", "cf-prod",
+		"--zone", "example.com", "--acme-email", "ops@example.com", "--api-token-stdin"); code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+	return e, fake
+}
+
+func TestInstallDNSProfile(t *testing.T) {
+	e, cf := newProfileEnv(t)
+	fake := aerolvmtest.New(t)
+	h := newHarness(t, fake.URL())
+	fake.AdminToken = h.pat
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		PublicHost: "203.0.113.10", Role: "mixed", Version: "v0.7.0",
+		Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	from := writeMirror(t, "v0.7.0", testScript)
+
+	out, errOut, code := e.cliWith(h, "", "install", "--from", from, "--name", "node-1",
+		"--domain", "eu.example.com", "--dns-profile", "cf-prod", "--yes")
+	if code != 0 {
+		t.Fatalf("install: exit %d: %s", code, errOut)
+	}
+	if strings.Contains(out, cf.Token) || strings.Contains(errOut, cf.Token) {
+		t.Errorf("the DNS profile's token leaked:\n%s\n%s", out, errOut)
+	}
+	for _, want := range []string{
+		"--domain eu.example.com", "--dns-provider cloudflare",
+		"--dns-api-token ******", "--acme-email ops@example.com",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("installer command missing %q:\n%s", want, errOut)
+		}
+	}
+
+	state := loadState(t)
+	if state.Mode != machine.ModeDomain || state.Domain != "eu.example.com" ||
+		state.DNSProfile != "cf-prod" || state.DNSProfileVersion != 1 {
+		t.Errorf("state = %+v", state)
+	}
+	path, err := machine.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"dns_profile":"cf-prod"`) {
+		t.Errorf("state file has no profile name: %s", data)
+	}
+	if strings.Contains(string(data), cf.Token) {
+		t.Errorf("state file carries the token: %s", data)
+	}
+
+	// The cluster registered from this install keeps its domain and profile.
+	out, errOut, code = e.cliWith(h, "", "node", "add", "node-1", "--new-cluster", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL())
+	if code != 0 {
+		t.Fatalf("node add: exit %d: %s", code, errOut)
+	}
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Slug != "lab" || detail.Domain != "eu.example.com" ||
+		detail.DNSProfile == nil || *detail.DNSProfile != "cf-prod" || detail.DNSRecords != "auto" {
+		t.Errorf("cluster = %+v", detail.Cluster)
+	}
+}
+
+func TestInstallDNSProfileRefusals(t *testing.T) {
+	e, cf := newProfileEnv(t)
+	from := writeMirror(t, "v0.7.0", testScript)
+	h := newHarness(t, "http://127.0.0.1:1")
+
+	out, errOut, code := e.cliWith(h, "", "install", "--dry-run", "--from", from,
+		"--domain", "eu.example.com", "--dns-profile", "cf-prod", "--dns-api-token-stdin")
+	if code != 2 || !strings.Contains(errOut, "cannot be used together") {
+		t.Errorf("both token sources: exit %d stderr %q", code, errOut)
+	}
+
+	out, errOut, code = e.cliWith(h, "", "install", "--dry-run", "--from", from,
+		"--domain", "eu.other.org", "--dns-profile", "cf-prod")
+	if code != 2 || !strings.Contains(errOut, "is not in DNS profile \"cf-prod\"'s zone example.com") {
+		t.Errorf("outside the zone: exit %d stderr %q", code, errOut)
+	}
+	if displays := h.runner.Displays(); len(displays) != 0 {
+		t.Errorf("commands ran before the zone check: %v", displays)
+	}
+
+	out, errOut, code = e.cliWith(h, "", "install", "--dry-run", "--from", from,
+		"--domain", "eu.example.com")
+	if code != 1 || !strings.Contains(errOut, "--dns-profile or --dns-api-token-stdin") {
+		t.Errorf("no token source: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	if strings.Contains(out, "cf-prod") {
+		t.Errorf("stdout = %q", out)
+	}
+
+	if _, errOut, code := h.runCLI("", "install", "--dry-run", "--from", from, "--dns-profile", "cf-prod"); code != 2 ||
+		!strings.Contains(errOut, "only makes sense with --domain") {
+		t.Errorf("profile without a domain: exit %d stderr %q", code, errOut)
+	}
+
+	// A dry run still fetches the profile, so it can show the masked command,
+	// but it saves nothing and runs nothing.
+	out, errOut, code = e.cliWith(h, "", "install", "--dry-run", "--from", from,
+		"--domain", "eu.example.com", "--dns-profile", "cf-prod")
+	if code != 0 || !strings.Contains(errOut, "--dns-api-token ******") {
+		t.Errorf("dry run: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	if strings.Contains(out+errOut, cf.Token) {
+		t.Errorf("the DNS profile's token leaked:\n%s\n%s", out, errOut)
+	}
+	if len(h.runner.Commands()) != 0 {
+		t.Errorf("dry run ran commands: %v", h.runner.Displays())
+	}
+	if _, err := machine.Load(); err == nil {
+		t.Error("dry run saved state")
 	}
 }
 

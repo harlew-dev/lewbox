@@ -137,6 +137,13 @@ func (c *Client) GetCluster(ctx context.Context, ref string) (service.ClusterDet
 	return out, err
 }
 
+// UpdateCluster changes a cluster's DNS settings.
+func (c *Client) UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error) {
+	var out service.ClusterDetail
+	err := c.do(ctx, http.MethodPatch, "/v0/clusters/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
 // CheckCluster runs the cluster checks now.
 func (c *Client) CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error) {
 	var out service.ClusterDetail
