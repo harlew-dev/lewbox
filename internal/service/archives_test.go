@@ -790,3 +790,22 @@ func TestStorageProfileUpdateRefusesWhileArchivesExist(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Archives of one workspace advance in parallel and share its team token.
+// Two mints in the same millisecond used to get the same token name, and
+// minting the second revoked the first while it was in use: one archive
+// failed with a 401 and waited for a retry.
+func TestArchivePassSameWorkspaceInParallel(t *testing.T) {
+	f := newArchiveFixture(t)
+	ids := []string{"sb-p1", "sb-p2", "sb-p3", "sb-p4"}
+	for _, id := range ids {
+		f.addStopped(t, id)
+	}
+	f.pass(t)
+	for _, id := range ids {
+		row := f.row(t, id)
+		if row.Status != archivePushing || row.Error != "" {
+			t.Errorf("%s: status %q, error %q; want pushing with no error", id, row.Status, row.Error)
+		}
+	}
+}

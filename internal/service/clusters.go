@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -865,8 +867,13 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 
 	add(s.nodeCertCheck(ctx, spec.AdminToken, result.members, pinned...))
 
+	// A fresh name each time: two checks of one cluster can run at once
+	// (the background loop and a request), and a fixed name would refuse
+	// the second with a 409, or every check after a failed revoke.
+	var suffix [4]byte
+	_, _ = rand.Read(suffix[:])
 	token, err := client.CreateToken(ctx, aerolvm.CreateTokenRequest{
-		Name:      "lewbox-ttl-check",
+		Name:      "lewbox-ttl-check-" + hex.EncodeToString(suffix[:]),
 		Role:      "runner",
 		Team:      "lewbox-check",
 		ExpiresIn: "36500d",

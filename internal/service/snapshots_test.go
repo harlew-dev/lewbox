@@ -336,6 +336,9 @@ func TestTempTokenNameFitsAerolVM(t *testing.T) {
 			t.Errorf("tempTokenName(%q) = %q (%d chars), not a valid AerolVM token name", kind, name, len(name))
 		}
 	}
+	if a, b := tempTokenName("arch", id, now), tempTokenName("arch", id, now); a == b {
+		t.Errorf("two names minted in the same millisecond are both %q", a)
+	}
 	if old := fmt.Sprintf("lbx.view.%s.%d", id, now.UnixNano()); valid.MatchString(old) {
 		t.Errorf("the old name %q should be too long; the check above proves nothing", old)
 	}

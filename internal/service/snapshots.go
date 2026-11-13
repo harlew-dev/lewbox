@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -507,7 +509,12 @@ func forPrincipal(snapshot Snapshot, org db.Organization, admin bool) Snapshot {
 }
 
 // tempTokenName names a short-lived token Lewbox mints for a workspace:
-// "lbx.view.<32 hex>.<ms base36>", well inside AerolVM's 64-character limit.
+// "lbx.view.<32 hex>.<ms base36>.<8 hex>", inside AerolVM's 64-character
+// limit. The random part keeps two mints in the same millisecond apart: on a
+// clash mintSandboxToken revokes the token holding the name, which another
+// caller may be using.
 func tempTokenName(kind, orgID string, now time.Time) string {
-	return "lbx." + kind + "." + strings.ReplaceAll(orgID, "-", "") + "." + strconv.FormatInt(now.UnixMilli(), 36)
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return "lbx." + kind + "." + strings.ReplaceAll(orgID, "-", "") + "." + strconv.FormatInt(now.UnixMilli(), 36) + "." + hex.EncodeToString(b[:])
 }

