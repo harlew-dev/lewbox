@@ -52,6 +52,7 @@ Other commands:
 | `./dev.sh logs` / `./dev.sh logs node-1` | Follow the orchestrator's log, or `sandboxd`'s on a node |
 | `./dev.sh up --three` | Also start node-3, for a three-voter cluster |
 | `./dev.sh down` | Stop everything and delete the dev cluster's volumes |
+| `./archives.sh` | Storage profiles and archived sandboxes against a running cluster (the `storage` service is an S3-compatible bucket, RustFS, at `172.30.0.20:9000`) |
 | `./e2e.sh` | The end-to-end test (below) |
 
 From the host you can also use the orchestrator directly: `lewbox login http://127.0.0.1:8080`. Each node's AerolVM API is published on `127.0.0.1:2120N`.
@@ -68,6 +69,7 @@ From the host you can also use the orchestrator directly: `lewbox login http://1
 - the installer's PAT never appears in the CLI's output;
 - sandboxes start through node-2 and spread across both nodes;
 - `firewall enable` turns on ufw on both nodes (keeping or resetting other rules), and the cluster, sandboxes and egress allowlists still work behind it;
+- a storage profile on the dev bucket (`archives.sh`): `node configure` installs the registry and the cleanup timer on both nodes, a customer's stopped sandbox is archived to the bucket as `archive-<name>-<id>`, its local copy kept under a 1d retention and removed under `instant`, restored on any node with its files, and deleted from the bucket;
 - `node add` is safe to run again;
 - a stopped cluster is reported `unreachable`, then `ready` again;
 - `node remove` needs `--yes`, removes the node from AerolVM too, and refuses the last node;

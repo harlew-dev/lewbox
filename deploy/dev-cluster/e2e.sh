@@ -140,6 +140,9 @@ for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Be
 step "the customer journey (customers.sh)"
 "$HERE/customers.sh" || fail "customer journey"
 
+step "storage profiles and archived sandboxes (archives.sh)"
+"$HERE/archives.sh" || fail "archives"
+
 step "node add is safe to run again"
 out=$(lb node-2 node add node-2 --cluster node-1 --json) || fail "re-run of node add failed"
 expect "re-run reports node-2" '.name == "node-2"' "$out"
