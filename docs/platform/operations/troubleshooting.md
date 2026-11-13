@@ -37,7 +37,7 @@ If `which` still finds nothing, check that the binary exists with `ls -l ~/.loca
 
 **``sudo -n true` failed``**: outside a terminal, `sudo` can't prompt for a password. Run `sudo -v` in a terminal first, or allow passwordless `sudo` for this user.
 
-**`ports … are in use`**: something else listens on 21212, 443 or 7000–7003. Ports held by this machine's own `sandboxd` (on a re-run) are fine.
+**`ports … are in use`**: something else listens on 21212, 443 or 7000–7003. Ports held by this machine's own `sandboxd` (on a re-run) are fine. Find the process with `sudo ss -ltnp 'sport = :443'` (or the port named). Lewbox can't bind 443 as a normal user, so for that port it looks in `/proc/net/tcp` for a listener; if it can't read that, it reports the port as in use.
 
 **`macOS isn't supported by lewbox install yet`**: use a Linux machine or VM for nodes. Only nodes need Linux and systemd.
 

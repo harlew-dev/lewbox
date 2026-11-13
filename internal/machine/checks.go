@@ -1,13 +1,17 @@
 package machine
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/harlew-dev/lewbox/internal/service"
@@ -15,8 +19,12 @@ import (
 
 // Env is the machine facts the install checks read. Tests replace them.
 type Env struct {
-	GOOS            string
-	Listen          func(network, address string) (net.Listener, error)
+	GOOS   string
+	Listen func(network, address string) (net.Listener, error)
+	// TCPListening reports whether anything listens on a TCP port. The
+	// ports check asks it when Listen is refused, which happens for every
+	// port below 1024 when the CLI runs as a normal user.
+	TCPListening    func(port int) (bool, error)
 	Stat            func(name string) (os.FileInfo, error)
 	Run             func(ctx context.Context, cmd Cmd) error
 	Terminal        bool
@@ -26,9 +34,10 @@ type Env struct {
 // DefaultEnv reads the real machine.
 func DefaultEnv() Env {
 	return Env{
-		GOOS:   runtime.GOOS,
-		Listen: net.Listen,
-		Stat:   os.Stat,
+		GOOS:         runtime.GOOS,
+		Listen:       net.Listen,
+		TCPListening: procTCPListening,
+		Stat:         os.Stat,
 		Run: func(ctx context.Context, cmd Cmd) error {
 			return (&ExecRunner{Stdout: io.Discard, Stderr: io.Discard}).Run(ctx, cmd)
 		},
@@ -164,6 +173,14 @@ func checkPorts(ctx context.Context, env Env, opts CheckOptions) service.Check {
 			_ = l.Close()
 			continue
 		}
+		if errors.Is(err, os.ErrPermission) && env.TCPListening != nil {
+			// Not allowed to bind (a privileged port, as a normal user):
+			// look for a listener instead. If that fails too, count the
+			// port as busy.
+			if listening, lerr := env.TCPListening(port); lerr == nil && !listening {
+				continue
+			}
+		}
 		if !ours && env.SandboxdRunning != nil && env.SandboxdRunning(ctx) {
 			ours = true
 		}
@@ -183,6 +200,63 @@ func checkPorts(ctx context.Context, env Env, opts CheckOptions) service.Check {
 		detail = "the ports are held by this machine's own sandboxd"
 	}
 	return service.Check{Name: "ports", OK: true, Detail: detail}
+}
+
+// procTCPListening reads /proc/net/tcp and /proc/net/tcp6, which any user
+// may read, for a socket in LISTEN state on port.
+func procTCPListening(port int) (bool, error) {
+	read := 0
+	for _, name := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		f, err := os.Open(name)
+		if errors.Is(err, os.ErrNotExist) && name == "/proc/net/tcp6" {
+			continue // IPv6 disabled
+		}
+		if err != nil {
+			return false, err
+		}
+		found, err := tcpTableListening(f, port)
+		f.Close()
+		if err != nil {
+			return false, fmt.Errorf("%s: %w", name, err)
+		}
+		if found {
+			return true, nil
+		}
+		read++
+	}
+	if read == 0 {
+		return false, errors.New("no TCP tables to read")
+	}
+	return false, nil
+}
+
+// tcpTableListening scans one /proc/net/tcp{,6} table. Each row's
+// local_address is HEXIP:HEXPORT, and state 0A is LISTEN.
+func tcpTableListening(r io.Reader, port int) (bool, error) {
+	sc := bufio.NewScanner(r)
+	header := true
+	for sc.Scan() {
+		if header {
+			header = false
+			continue
+		}
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		_, hexPort, ok := strings.Cut(fields[1], ":")
+		if !ok {
+			continue
+		}
+		p, err := strconv.ParseUint(hexPort, 16, 16)
+		if err != nil {
+			continue
+		}
+		if int(p) == port && fields[3] == "0A" {
+			return true, nil
+		}
+	}
+	return false, sc.Err()
 }
 
 func ints(values []int) []string {

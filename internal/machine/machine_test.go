@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -166,7 +167,13 @@ func testEnv() Env {
 func TestCheck(t *testing.T) {
 	busy := func(network, addr string) (net.Listener, error) {
 		if strings.HasSuffix(addr, ":7001") {
-			return nil, &net.OpError{Op: "listen", Err: os.ErrPermission}
+			return nil, &net.OpError{Op: "listen", Err: syscall.EADDRINUSE}
+		}
+		return stubListener{}, nil
+	}
+	refused443 := func(network, addr string) (net.Listener, error) {
+		if strings.HasSuffix(addr, ":443") {
+			return nil, &net.OpError{Op: "listen", Err: syscall.EACCES}
 		}
 		return stubListener{}, nil
 	}
@@ -221,6 +228,39 @@ func TestCheck(t *testing.T) {
 			name:   "busy port",
 			env:    func() Env { e := testEnv(); e.Listen = busy; return e }(),
 			opts:   CheckOptions{Mode: ModePublicHost, Runtime: "docker"},
+			failed: "ports",
+		},
+		{
+			// A normal user may not bind 443, but nothing listens on it.
+			name: "privileged port refused but free",
+			env: func() Env {
+				e := testEnv()
+				e.Listen = refused443
+				e.TCPListening = func(int) (bool, error) { return false, nil }
+				return e
+			}(),
+			opts: CheckOptions{Mode: ModeDomain, Runtime: "docker", Domain: "eu.example", DNSTokenStdin: true},
+		},
+		{
+			name: "privileged port refused and listening",
+			env: func() Env {
+				e := testEnv()
+				e.Listen = refused443
+				e.TCPListening = func(port int) (bool, error) { return port == 443, nil }
+				return e
+			}(),
+			opts:   CheckOptions{Mode: ModeDomain, Runtime: "docker", Domain: "eu.example", DNSTokenStdin: true},
+			failed: "ports",
+		},
+		{
+			name: "privileged port refused and unknown fails closed",
+			env: func() Env {
+				e := testEnv()
+				e.Listen = refused443
+				e.TCPListening = func(int) (bool, error) { return false, os.ErrNotExist }
+				return e
+			}(),
+			opts:   CheckOptions{Mode: ModeDomain, Runtime: "docker", Domain: "eu.example", DNSTokenStdin: true},
 			failed: "ports",
 		},
 		{
@@ -298,5 +338,41 @@ func TestCheckSudoPromptsOnlyOnATerminal(t *testing.T) {
 		if prompted != terminal {
 			t.Errorf("terminal=%v: ran %v", terminal, ran)
 		}
+	}
+}
+
+func TestTCPTableListening(t *testing.T) {
+	// Rows from a real /proc/net/tcp: 443 established (01), 21212 (52DC) listening (0A).
+	table := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:52DC 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:01BB 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 23456 1 0000000000000000 20 4 30 10 -1
+`
+	for port, want := range map[int]bool{21212: true, 443: false, 7000: false} {
+		got, err := tcpTableListening(strings.NewReader(table), port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("port %d: listening = %v, want %v", port, got, want)
+		}
+	}
+}
+
+func TestProcTCPListening(t *testing.T) {
+	if _, err := os.Stat("/proc/net/tcp"); err != nil {
+		t.Skip("no /proc/net/tcp")
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	got, err := procTCPListening(port)
+	if err != nil || !got {
+		t.Fatalf("while listening on %d: got %v, %v; want true", port, got, err)
+	}
+	l.Close()
+	if got, err := procTCPListening(port); err != nil || got {
+		t.Fatalf("after closing %d: got %v, %v; want false", port, got, err)
 	}
 }
