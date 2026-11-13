@@ -291,3 +291,33 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Other options.** A reusable invite code, or a public sign-up flow with operator approval. A reusable code loses the plan/region binding and the per-customer record; approval adds a manual step the link is meant to remove.
 
 **Caveats.** The link is bound to one plan and region; moving the workspace later is still an operator action. A claimed link whose account never creates a workspace stays `claimed` until it expires, and the token cannot be handed to someone else.
+
+## D34. DNS profiles: saved Cloudflare credentials, chosen per cluster (your call, 2026-11-13)
+
+**Chosen.** Instance admins save Cloudflare credentials once as a **DNS profile** (name, zone, API token, optional ACME email), sealed with the keyring and tested before saving. A cluster in domain mode names its profile. `lewbox install --dns-profile NAME` fetches the token from the orchestrator and passes it to AerolVM's installer for DNS-01. Lewbox also keeps the cluster's `<domain>` and `*.<domain>` A/AAAA records pointing at its live ingress nodes, unless the cluster's `dns_records` is `off`.
+
+**Why.** The token was typed on every install and never stored, and the operator made the DNS records by hand. Cloudflare only, because AerolVM v0.7.0's installer and Caddy build support only Cloudflare; other providers would need AerolVM changes.
+
+**Other options.** Per-workspace profiles (customers don't run nodes, so no). Keeping the token off nodes by relaying DNS-01 through Lewbox, as the old design planned (needs an AerolVM change).
+
+**Caveats.** The token still ends up on every node, in the installer's Caddy env file, and can edit the whole zone. Use a token scoped to the one zone. A new token reaches existing nodes only when `lewbox node configure` runs on each (they show as outdated until then).
+
+## D35. Storage profiles, and a registry on each node (your call, 2026-11-13)
+
+**Chosen.** Instance admins save S3-compatible storage (AWS S3, Cloudflare R2, MinIO, …) as a **storage profile**. A cluster with one runs CNCF Distribution on every node at `127.0.0.1:5000`, backed by the bucket under `clusters/<cluster id>/`, and AerolVM pushes every snapshot there (`SB_SNAPSHOT_PUSH_ENABLED`, `SB_MIRROR_PUSH_HOST`). Any node can then start a pushed snapshot. `node add` and `node configure` install and configure it; each node reports the profile versions it applied, so out-of-date nodes are flagged.
+
+**Why.** AerolVM pushes to an OCI registry, not to a bucket. A registry per node on a shared bucket has no single point of failure, and the legacy app ran exactly this on real AerolVM. The registry is loopback-only without auth, so the PAT AerolVM sends to it is a random placeholder, not the real one.
+
+**Other options.** One shared registry service (a single point of failure, and it needs TLS and auth). AerolVM's hosted registry (AOCR), which isn't self-hosted.
+
+**Caveats.** The bucket keys are on every node of the cluster; use a key scoped to the bucket. Nothing in AerolVM or Distribution garbage-collects the bucket; deleting an archive retires its manifest but blobs stay until a sweep, which isn't built yet. This reverses D23's "Other options" note that a registry on every cluster was too much to ask.
+
+## D36. Archive on stop, with a new ID on restore (your call, 2026-11-13)
+
+**Chosen.** A cluster's `stop_policy` is `keep` (default) or `archive`. On an archive cluster, Lewbox's sync loop notices every stopped customer sandbox, snapshots it with a short-lived team token, waits for the push to the bucket, and deletes the sandbox. The archive (snapshot name, registry ref, and the sandbox's name, tags, image and size) is recorded and kept until deleted. **Restore** creates a **new** sandbox from the snapshot, on any node, with the old name and tags plus `lewbox.restored_from=<old id>`. On such a cluster, stopped sandboxes don't persist.
+
+**Why.** Nodes have 70 GB of disk, and a stopped sandbox's disk stays on its node; only that node could start it. AerolVM v0.7.0 has no way to move a stopped sandbox and keep its ID (failover keeps the ID but loses the disk; snapshots move but start a new sandbox). Lewbox isn't in the request path, so it can't hide the new ID.
+
+**Other options.** Keep stopped sandboxes and delete them after N days (no restore). Ask AerolVM for archive-on-stop that keeps the ID ([aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)); when that lands, this setting maps onto it.
+
+**Caveats.** E2B `pause` then `connect(id)` gets 404 on an archive cluster. Snapshots keep no `env` values, so a restore needs them passed again. Running programs end on stop, as before. Each archive and restore adds an image layer, so a sandbox cycled about 100 times reaches overlayfs's layer limit. A start that races the archive is caught by a re-check before the delete, but a write between that check and the delete can be lost.

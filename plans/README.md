@@ -18,5 +18,7 @@ Lewbox's goal: **a self-hosted E2B.** An operator installs AerolVM on their own 
 | [DECISIONS.md](DECISIONS.md) | Every decision made while building, the alternatives, and the caveats |
 | [RELEASING.md](RELEASING.md) | How to release and put this on live servers |
 | [STATUS.md](STATUS.md) | What was built, what was verified, and what is left |
+| [aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md) | Request to AerolVM: archive a stopped sandbox to the registry and start it on any node with the same ID |
+| [missing.md](missing.md) | What the archived rebuild design had that isn't built here, and whether each fits |
 
 How the work was done: each phase was written as a brief, implemented by an OpenCode Go agent (DeepSeek) or a Claude sub-agent (UI), then reviewed and checked (`make test`, and `deploy/dev-cluster/e2e.sh` for cluster work) before the next phase started. Each phase is one or more commits.
