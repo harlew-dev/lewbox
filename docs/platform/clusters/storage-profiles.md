@@ -5,7 +5,7 @@ description: Save an S3-compatible bucket and access key once and test it, so a 
 
 A **storage profile** is a saved S3-compatible bucket, endpoint, region, path style and access key. Lewbox tests it when you save it, seals the secret access key with the instance keyring, and shows only its last four characters afterwards.
 
-A cluster with a storage profile is set up to archive stopped customer sandboxes to that bucket, so a node's small disk is not filled by sandboxes nobody is using. Every node of the cluster runs a registry in front of the bucket; `lewbox node add` and `lewbox node configure` install and configure it.
+A cluster with a storage profile and `stop_policy: archive` archives stopped customer sandboxes to that bucket, so a node's small disk is not filled by sandboxes nobody is using. A customer then restores one as a new sandbox, on any node. Every node of the cluster runs a registry in front of the bucket; `lewbox node add` and `lewbox node configure` install and configure it.
 
 Instance admins only. The secret is fetched back only by `lewbox storage-profile credentials` and `lewbox cluster node-settings`, which exist to configure a node.
 
@@ -113,6 +113,24 @@ node-a: storage profile archive is at version 2; this node has version 1; run `l
 
 Run `lewbox node configure` on each node to catch up. A profile change does not reach a running node by itself: its token and the bucket path are on the node.
 
+## Archive stopped sandboxes
+
+`stop_policy` is `keep` (the default: stopped sandboxes stay on their node) or `archive`, which needs a storage profile. On an `archive` cluster **every** stopped customer sandbox is archived; stopped sandboxes do not persist there, and the portal and the customer docs say so.
+
+The archiver runs beside the sync loop, at most two rows at once per cluster. For one sandbox:
+
+1. **Find** a stopped sandbox with no live archive and insert a `pending` row. A unique index on `(cluster_id, sandbox_id)` while the row is not `cancelled` or `deleted` stops two passes archiving one sandbox twice.
+2. **Snapshot** it as `archive-<sandbox id>` with a short-lived `runner` token bound to the workspace's team, after reading its name, tags, image, runtime and size. The status becomes `pushing`.
+3. **Wait** for the push to become `active`. A push error is retried by AerolVM; Lewbox waits up to 30 minutes, then marks the row `failed` and retries the whole archive after 10 minutes.
+4. **Check** the sandbox is still stopped and has not been started and stopped again since the snapshot. If it changed, the archive is **cancelled**: its snapshot and bucket repository are removed, and the next pass archives it afresh.
+5. **Delete** the sandbox and mark the row `archived`, with `archived_at` and the snapshot's `registry_ref`. If the sandbox vanished meanwhile, the archive still finishes.
+
+A sandbox that is started again before its archive finishes is left alone; one that is gone cancels with a reason. AerolVM hiccups hold a row back for a minute instead of failing it.
+
+What stays in the bucket: the pushed image's **blobs are never swept yet**. Deleting an archive removes its repository (the manifest links and its own keys) and marks the row `deleted`, but content-addressed blobs may still be shared with other snapshots, so only a future sweep that reads every link may remove them. Deleting also leaves pulled copies on nodes: `node configure` installs `lewbox-archive-cleanup.timer` (root, every 5 minutes), which removes the local image of each `archive-*` snapshot whose push is active and any pulled `127.0.0.1:5000/…/archive-*` image no container uses. Customers' own snapshots are left alone.
+
+Restore and delete are described in the customer book: [Archived sandboxes](../../consumer/sandboxes/archived-sandboxes.md).
+
 ## Deleting
 
 A profile a cluster uses cannot be deleted:
@@ -123,6 +141,14 @@ storage profile "archive" is used by 1 cluster(s); stop using it in those cluste
 
 Point the cluster at another profile first, then delete this one.
 
+Changing a profile's `endpoint`, `bucket` or `prefix` is refused while its clusters still hold archives, because their data would become unreachable:
+
+```text
+storage profile "archive" holds 3 archived sandbox(es); delete them before changing where it stores data
+```
+
+Renaming a profile and changing its credentials do not move any data, so they are allowed.
+
 ## Next
 
-Archiving stopped sandboxes is the next step: a stopped sandbox is snapshotted, pushed to the registry, and restored from any node as a new sandbox. See [What Lewbox changes](../reference/what-lewbox-changes.md#the-snapshot-registry) for what already runs on a node.
+Any node in the cluster can bring an archive back, and customers restore and delete them with `lewbox archive` or the console. [What Lewbox changes](../reference/what-lewbox-changes.md#the-snapshot-registry) lists what runs on each node.

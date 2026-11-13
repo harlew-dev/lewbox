@@ -378,6 +378,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newSandboxKeyCmd(a),
 		newSandboxCmd(a),
 		newSnapshotCmd(a),
+		newArchiveCmd(a),
 		newUsageCmd(a),
 		newLimitsCmd(a),
 		newRegionCmd(a),

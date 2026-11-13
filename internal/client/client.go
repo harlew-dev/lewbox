@@ -627,6 +627,42 @@ func (c *Client) DeleteSnapshot(ctx context.Context, name string, req service.Re
 	return out, err
 }
 
+// ListArchives lists archives, optionally filtered by region.
+func (c *Client) ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error) {
+	query := url.Values{}
+	if req.Region != "" {
+		query.Set("region", req.Region)
+	}
+	path := "/v0/archives"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.ArchiveList
+	err := c.doOrg(ctx, req.Org, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// GetArchive returns one archive by ID.
+func (c *Client) GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	var out service.Archive
+	err := c.doOrg(ctx, req.Org, http.MethodGet, "/v0/archives/"+url.PathEscape(id), nil, &out)
+	return out, err
+}
+
+// RestoreArchive creates a new sandbox from an archive.
+func (c *Client) RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error) {
+	var out service.RestoredArchive
+	err := c.request(ctx, http.MethodPost, "/v0/archives/"+url.PathEscape(id)+"/restore", req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
+// DeleteArchive removes an archive.
+func (c *Client) DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	var out service.Archive
+	err := c.request(ctx, http.MethodDelete, "/v0/archives/"+url.PathEscape(id), req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
 // Usage returns metered usage.
 func (c *Client) Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error) {
 	query := url.Values{}

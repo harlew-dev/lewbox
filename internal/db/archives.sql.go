@@ -42,6 +42,23 @@ func (q *Queries) CancelArchive(ctx context.Context, arg CancelArchiveParams) er
 	return err
 }
 
+const countLiveArchivesByStorageProfile = `-- name: CountLiveArchivesByStorageProfile :one
+SELECT COUNT(*)
+FROM archives
+JOIN clusters ON clusters.id = archives.cluster_id
+WHERE clusters.storage_profile_id = ?1
+  AND archives.status IN ('pending', 'pushing', 'archived', 'failed')
+`
+
+// How many archives a storage profile's clusters still hold. Their data is
+// in the bucket this profile names, so changing where it points strands it.
+func (q *Queries) CountLiveArchivesByStorageProfile(ctx context.Context, profileID sql.NullString) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countLiveArchivesByStorageProfile, profileID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deferArchive = `-- name: DeferArchive :exec
 UPDATE archives SET error = ?, next_attempt_at = ? WHERE id = ?
 `
@@ -203,6 +220,108 @@ func (q *Queries) ListArchivableSandboxes(ctx context.Context) ([]ListArchivable
 			&i.Cpu,
 			&i.MemoryMb,
 			&i.DiskGb,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArchives = `-- name: ListArchives :many
+SELECT archives.id, archives.org_id, archives.cluster_id, archives.sandbox_id,
+       archives.sandbox_name, archives.image, archives.runtime, archives.cpu,
+       archives.memory_mb, archives.disk_gb, archives.tags, archives.snapshot_name,
+       archives.registry_ref, archives.status, archives.error, archives.attempts,
+       archives.next_attempt_at, archives.pushing_since, archives.created_at,
+       archives.archived_at, archives.deleted_at, archives.last_restored_sandbox_id,
+       archives.last_restored_at, clusters.slug AS region, organizations.slug AS org
+FROM archives
+JOIN clusters ON clusters.id = archives.cluster_id
+JOIN organizations ON organizations.id = archives.org_id
+WHERE archives.status IN ('pending', 'pushing', 'archived', 'failed')
+  AND (?1 = '' OR archives.org_id = ?1)
+  AND (?2 = '' OR archives.cluster_id = ?2)
+ORDER BY archives.created_at DESC, archives.id DESC
+`
+
+type ListArchivesParams struct {
+	OrgID     interface{}
+	ClusterID interface{}
+}
+
+type ListArchivesRow struct {
+	ID                    string
+	OrgID                 string
+	ClusterID             string
+	SandboxID             string
+	SandboxName           string
+	Image                 string
+	Runtime               string
+	Cpu                   float64
+	MemoryMb              int64
+	DiskGb                int64
+	Tags                  string
+	SnapshotName          string
+	RegistryRef           string
+	Status                string
+	Error                 string
+	Attempts              int64
+	NextAttemptAt         sql.NullTime
+	PushingSince          sql.NullTime
+	CreatedAt             time.Time
+	ArchivedAt            sql.NullTime
+	DeletedAt             sql.NullTime
+	LastRestoredSandboxID string
+	LastRestoredAt        sql.NullTime
+	Region                string
+	Org                   string
+}
+
+// Every live archive, newest first, for one workspace and region, or every
+// workspace and region when org_id or cluster_id is empty. Cancelled and
+// deleted rows are not archives any more.
+func (q *Queries) ListArchives(ctx context.Context, arg ListArchivesParams) ([]ListArchivesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listArchives, arg.OrgID, arg.ClusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArchivesRow
+	for rows.Next() {
+		var i ListArchivesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ClusterID,
+			&i.SandboxID,
+			&i.SandboxName,
+			&i.Image,
+			&i.Runtime,
+			&i.Cpu,
+			&i.MemoryMb,
+			&i.DiskGb,
+			&i.Tags,
+			&i.SnapshotName,
+			&i.RegistryRef,
+			&i.Status,
+			&i.Error,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.PushingSince,
+			&i.CreatedAt,
+			&i.ArchivedAt,
+			&i.DeletedAt,
+			&i.LastRestoredSandboxID,
+			&i.LastRestoredAt,
+			&i.Region,
+			&i.Org,
 		); err != nil {
 			return nil, err
 		}

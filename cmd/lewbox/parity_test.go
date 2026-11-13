@@ -872,6 +872,165 @@ func TestSnapshots(t *testing.T) {
 	}
 }
 
+// TestArchives exercises listing, showing, restoring and deleting archived
+// sandboxes through the CLI and HTTP.
+func TestArchives(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_archive_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	out, errOut, code := e.cli("org", "create", "acme")
+	if code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	var org service.Organization
+	if err := json.Unmarshal([]byte(out), &org); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
+		t.Fatalf("subscription set: %s", errOut)
+	}
+
+	bucket := objstoretest.New(t)
+	bucket.AddBucket("assets")
+	profileOut, errOut, code := e.cliIn(bucket.SecretAccessKey+"\n", "storage-profile", "create", "archive",
+		"--endpoint", bucket.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--access-key-id", bucket.AccessKeyID, "--secret-access-key-stdin")
+	if code != 0 {
+		t.Fatalf("storage profile create: exit %d: %s", code, errOut)
+	}
+	var profile service.StorageProfile
+	if err := json.Unmarshal([]byte(profileOut), &profile); err != nil {
+		t.Fatal(err)
+	}
+	clusterOut, errOut, code := e.cli("cluster", "get", "eu-west")
+	if code != 0 {
+		t.Fatalf("cluster get: %s", errOut)
+	}
+	var cluster service.ClusterDetail
+	if err := json.Unmarshal([]byte(clusterOut), &cluster); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := db.Open(ctx, e.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE clusters SET stop_policy = 'archive', storage_profile_id = ? WHERE id = ?`,
+		profile.ID, cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		fake.AddSandbox(org.Team, aerolvm.Sandbox{
+			ID: sandboxID, Name: "box", Image: "ubuntu:22.04", Status: "stopped", Runtime: "docker",
+			CPU: 2, MemoryMB: 1024, DiskGB: 20, Tags: map[string]string{"app": "demo"},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	}
+
+	// Run the sync loop and the archiver through a second service on the
+	// same database, as TestSandboxesAndUsage does.
+	keyring, err := secrets.LoadOrCreate(filepath.Join(filepath.Dir(e.dbPath), "keyring.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(db.New(conn), service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
+	if err := svc.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ArchivePass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		ref := "127.0.0.1:5000/cluster/" + cluster.ID + "/snapshots/tenant-x/archive-" + sandboxID + ":latest"
+		fake.SetSnapshotPush(org.Team, "archive-"+sandboxID, "active", ref)
+	}
+	if err := svc.ArchivePass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := make(map[string]string)
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		var id string
+		if err := conn.QueryRowContext(ctx, `SELECT id FROM archives WHERE sandbox_id = ?`, sandboxID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids[sandboxID] = id
+	}
+
+	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
+	e.sameOrg("acme", []string{"archive", "list", "--region", "eu-west", "--org", "acme"},
+		"GET", "/v0/archives?region=eu-west", 200)
+	e.sameOrg("acme", []string{"archive", "show", ids["sb-1"], "--org", "acme"},
+		"GET", "/v0/archives/"+ids["sb-1"], 200)
+
+	// Restore both archives, one through each entry point.
+	restored, errOut, code := e.cli("archive", "restore", ids["sb-1"], "--org", "acme")
+	if code != 0 {
+		t.Fatalf("archive restore: exit %d: %s", code, errOut)
+	}
+	var first service.RestoredArchive
+	if err := json.Unmarshal([]byte(restored), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Sandbox.ID == "" || first.Sandbox.Name != "box" || first.Sandbox.Region != "eu-west" ||
+		first.Archive.SandboxID != "sb-1" || first.Archive.LastRestoredSandboxID != first.Sandbox.ID {
+		t.Errorf("restored = %+v", first)
+	}
+	if sandbox, ok := fake.Sandbox(first.Sandbox.ID); !ok || sandbox.Tags["lewbox.restored_from"] != "sb-1" {
+		t.Errorf("restored sandbox = %+v, %v", sandbox, ok)
+	}
+
+	status, body := e.httpOrg("acme", "POST", "/v0/archives/"+ids["sb-2"]+"/restore", "")
+	if status != http.StatusOK {
+		t.Fatalf("HTTP restore: status %d: %s", status, body)
+	}
+	var second service.RestoredArchive
+	if err := json.Unmarshal([]byte(body), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Sandbox.ID == "" || second.Sandbox.ID == first.Sandbox.ID || second.Archive.SandboxID != "sb-2" {
+		t.Errorf("HTTP restored = %+v", second)
+	}
+
+	// Delete both archives, one through each entry point.
+	deleted, errOut, code := e.cli("archive", "delete", ids["sb-1"], "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("archive delete: exit %d: %s", code, errOut)
+	}
+	var firstDeleted service.Archive
+	if err := json.Unmarshal([]byte(deleted), &firstDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if firstDeleted.ID != ids["sb-1"] || firstDeleted.Status != "deleted" {
+		t.Errorf("deleted = %+v", firstDeleted)
+	}
+
+	status, body = e.httpOrg("acme", "DELETE", "/v0/archives/"+ids["sb-2"], "")
+	if status != http.StatusOK {
+		t.Fatalf("HTTP delete: status %d: %s", status, body)
+	}
+	var secondDeleted service.Archive
+	if err := json.Unmarshal([]byte(body), &secondDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if secondDeleted.ID != ids["sb-2"] || secondDeleted.Status != "deleted" {
+		t.Errorf("HTTP deleted = %+v", secondDeleted)
+	}
+	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
+}
+
 func TestMonitoring(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)

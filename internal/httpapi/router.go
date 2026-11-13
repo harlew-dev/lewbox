@@ -670,6 +670,37 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// Archives are stopped sandboxes kept in a cluster's bucket. Their IDs
+	// are unique, so only the organization is chosen.
+	mux.HandleFunc("GET "+Prefix+"/archives", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListArchives(r.Context(), service.RegionScope{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/archives/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RestoreArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/usage", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.Usage(r.Context(), service.UsageRequest{
 			From:        r.URL.Query().Get("from"),

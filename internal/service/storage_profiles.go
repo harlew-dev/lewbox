@@ -283,6 +283,18 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 		pathStyle = endpoint != ""
 	}
 
+	// Moving the bucket would strand the data of every archive that already
+	// points at it, so those must be deleted first.
+	if endpoint != row.Endpoint || bucket != row.Bucket || prefix != row.Prefix {
+		n, err := s.q.CountLiveArchivesByStorageProfile(ctx, sql.NullString{String: row.ID, Valid: true})
+		if err != nil {
+			return StorageProfile{}, fmt.Errorf("count archives by storage profile: %w", err)
+		}
+		if n > 0 {
+			return StorageProfile{}, conflict("storage profile %q holds %d archived sandbox(es); delete them before changing where it stores data", row.Name, n)
+		}
+	}
+
 	changed := endpoint != row.Endpoint || region != row.Region || bucket != row.Bucket ||
 		prefix != row.Prefix || boolToInt(pathStyle) != row.PathStyle || accessKey != row.AccessKeyID
 	secret, err := s.keyring.Open(row.SecretKeyEnc)

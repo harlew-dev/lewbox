@@ -47,6 +47,34 @@ ORDER BY created_at, id;
 -- name: GetArchiveByID :one
 SELECT * FROM archives WHERE id = ?;
 
+-- name: ListArchives :many
+-- Every live archive, newest first, for one workspace and region, or every
+-- workspace and region when org_id or cluster_id is empty. Cancelled and
+-- deleted rows are not archives any more.
+SELECT archives.id, archives.org_id, archives.cluster_id, archives.sandbox_id,
+       archives.sandbox_name, archives.image, archives.runtime, archives.cpu,
+       archives.memory_mb, archives.disk_gb, archives.tags, archives.snapshot_name,
+       archives.registry_ref, archives.status, archives.error, archives.attempts,
+       archives.next_attempt_at, archives.pushing_since, archives.created_at,
+       archives.archived_at, archives.deleted_at, archives.last_restored_sandbox_id,
+       archives.last_restored_at, clusters.slug AS region, organizations.slug AS org
+FROM archives
+JOIN clusters ON clusters.id = archives.cluster_id
+JOIN organizations ON organizations.id = archives.org_id
+WHERE archives.status IN ('pending', 'pushing', 'archived', 'failed')
+  AND (sqlc.arg(org_id) = '' OR archives.org_id = sqlc.arg(org_id))
+  AND (sqlc.arg(cluster_id) = '' OR archives.cluster_id = sqlc.arg(cluster_id))
+ORDER BY archives.created_at DESC, archives.id DESC;
+
+-- name: CountLiveArchivesByStorageProfile :one
+-- How many archives a storage profile's clusters still hold. Their data is
+-- in the bucket this profile names, so changing where it points strands it.
+SELECT COUNT(*)
+FROM archives
+JOIN clusters ON clusters.id = archives.cluster_id
+WHERE clusters.storage_profile_id = sqlc.arg(profile_id)
+  AND archives.status IN ('pending', 'pushing', 'archived', 'failed');
+
 -- name: ListArchivesBySandbox :many
 SELECT * FROM archives WHERE cluster_id = ? AND sandbox_id = ? ORDER BY created_at DESC;
 

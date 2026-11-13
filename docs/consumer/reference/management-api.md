@@ -62,7 +62,11 @@ A key is refused while the workspace is pending or suspended. A region failure i
 | `POST /v0/sandboxes/{id}/stop` | owner, admin or member, its keys | Stop on the region, then update the mirror → Sandbox |
 | `DELETE /v0/sandboxes/{id}` | same | Delete on the region, then mark it gone → Sandbox |
 | `GET /v0/snapshots?region={slug}` | its members, its keys | `{data: [Snapshot], partial_nodes: [name]}`. Partial nodes are the machines that did not answer |
-| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, its keys | Delete on the region → Snapshot |
+| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, its keys | Delete on the region → Snapshot. An `archive-…` name is `400`: use the archive routes |
+| `GET /v0/archives?region={slug}` | its members, its keys | `{data: [Archive]}`, newest first: the sandboxes stopped on an archive region. Cancelled and deleted rows are not listed |
+| `GET /v0/archives/{id}` | its members, its keys | Archive. Another workspace's is `404` |
+| `POST /v0/archives/{id}/restore` | owner, admin or member, its keys | Create a new sandbox from the archive → `{archive, sandbox}`. The archive is kept |
+| `DELETE /v0/archives/{id}` | same | Delete the archive's snapshot and bucket data → Archive, with `status: "deleted"` |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day` | its members, its keys | Usage: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, its keys | LimitsReport: the workspace's region, its plan, effective limits, live use and quota |
 | `GET /v0/regions` | signed in, or a key | `{data: [Region]}`: the regions the workspace can use, with its `plan` and `limits` |
@@ -90,7 +94,9 @@ Another workspace's sandbox is always `404`, never `403`.
 
 `status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is `null` until the workspace has a plan.
 
-**Region**: `{slug, name, endpoint_url, runtime, status}` for a region the workspace can use. A subscribed region also has `plan` (`{slug, name}`) and `limits`.
+**Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a region the workspace can use. `stop_policy` is `keep` or `archive`: on an `archive` region a stopped sandbox is archived to storage. A subscribed region also has `plan` (`{slug, name}`) and `limits`.
+
+**Archive**: `{id, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `status` is `pending`, `pushing`, `archived` or `failed`; `registry_ref` is the image to restore it by. The restore response's `sandbox` is `{id, name, status, region}`, a new sandbox.
 
 **SandboxKey**: `{id, name, region, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `token_hint` is `avm_…` and the token's last four characters. **NewSandboxKey** adds the `token`, `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a Docker region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
 

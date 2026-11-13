@@ -544,3 +544,249 @@ func TestArchiveCancelsWhenSandboxRanAgainDuringThePush(t *testing.T) {
 		t.Fatalf("archives = %+v, want a new live one", rows)
 	}
 }
+
+// member adds an account to the fixture's workspace and returns its context.
+func (f *archiveFixture) member(t *testing.T, email, role string) context.Context {
+	t.Helper()
+	createUser(t, f.s, email, false)
+	if role != "" {
+		if _, err := f.s.AddMember(localCtx(), "acme", AddMemberRequest{Email: email, Role: role}); err != nil {
+			t.Fatalf("add %s: %v", email, err)
+		}
+	}
+	return userCtx(t, f.s, email)
+}
+
+// archiveStopped archives one stopped sandbox of another workspace.
+func (f *archiveFixture) archiveStopped(t *testing.T, org Organization, sandboxID string) db.Archive {
+	t.Helper()
+	f.fake.AddSandbox(org.Team, aerolvm.Sandbox{
+		ID: sandboxID, Name: "other-box", Image: "ubuntu:22.04", Status: "stopped",
+		Runtime: "docker", CPU: 1, MemoryMB: 512, DiskGB: 5,
+		CreatedAt: time.Date(2026, 11, 12, 11, 0, 0, 0, time.UTC),
+	})
+	f.sync(t)
+	f.pass(t)
+	f.fake.SetSnapshotPush(org.Team, "archive-"+sandboxID, "active", f.archiveRef("archive-"+sandboxID))
+	f.advance(5 * time.Second)
+	f.pass(t)
+	rows, err := f.s.q.ListArchivesBySandbox(context.Background(), db.ListArchivesBySandboxParams{
+		ClusterID: f.cluster.ID, SandboxID: sandboxID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) == 0 || rows[0].Status != archiveArchived {
+		t.Fatalf("archive for %q = %+v", sandboxID, rows)
+	}
+	return rows[0]
+}
+
+func TestListArchivesScoping(t *testing.T) {
+	f := newArchiveFixture(t)
+	acmeRow := f.archivedRow(t)
+
+	outsider := f.member(t, "outsider@example.com", "")
+	other, err := f.s.CreateOrganization(localCtx(), CreateOrganizationRequest{
+		Slug: "other", Name: "Other", Owner: "outsider@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.SetSubscription(localCtx(), other.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	otherRow := f.archiveStopped(t, other, "sb-2")
+	member := f.member(t, "member@example.com", roleMember)
+	viewer := f.member(t, "viewer@example.com", roleViewer)
+
+	for name, ctx := range map[string]context.Context{"member": member, "viewer": viewer} {
+		list, err := f.s.ListArchives(ctx, RegionScope{Org: "acme"})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(list.Data) != 1 || list.Data[0].ID != acmeRow.ID || list.Data[0].Org != nil {
+			t.Errorf("%s sees %+v", name, list.Data)
+		}
+	}
+
+	if _, err := f.s.ListArchives(outsider, RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodeNotFound)
+	}
+	list, err := f.s.ListArchives(outsider, RegionScope{Org: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].ID != otherRow.ID || list.Data[0].Org != nil {
+		t.Errorf("outsider sees %+v", list.Data)
+	}
+
+	// An instance admin with no workspace sees every workspace's archives,
+	// with the owner on each row.
+	list, err = f.s.ListArchives(localCtx(), RegionScope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := make(map[string]string)
+	for _, archive := range list.Data {
+		if archive.Org == nil {
+			t.Fatalf("fleet archive without an organization = %+v", archive)
+		}
+		owners[archive.ID] = *archive.Org
+	}
+	if len(owners) != 2 || owners[acmeRow.ID] != "acme" || owners[otherRow.ID] != "other" {
+		t.Errorf("fleet owners = %v", owners)
+	}
+	list, err = f.s.ListArchives(localCtx(), RegionScope{Region: "eu-west"})
+	if err != nil || len(list.Data) != 2 {
+		t.Errorf("filtered fleet list = %+v, %v", list.Data, err)
+	}
+	if _, err := f.s.ListArchives(localCtx(), RegionScope{Region: "missing"}); err != nil {
+		wantCode(t, err, CodeNotFound)
+	}
+}
+
+func TestGetArchive(t *testing.T) {
+	f := newArchiveFixture(t)
+	row := f.archivedRow(t)
+	outsider := f.member(t, "outsider@example.com", "")
+	if _, err := f.s.CreateOrganization(localCtx(), CreateOrganizationRequest{
+		Slug: "other", Name: "Other", Owner: "outsider@example.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	member := f.member(t, "member@example.com", roleMember)
+
+	got, err := f.s.GetArchive(member, row.ID, RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != row.ID || got.Region != "eu-west" || got.SandboxID != "sb-1" ||
+		got.SandboxName != "box" || got.Status != archiveArchived || got.RegistryRef != row.RegistryRef {
+		t.Errorf("archive = %+v", got)
+	}
+	if got.Tags["app"] != "demo" || got.ArchivedAt == nil {
+		t.Errorf("archive = %+v", got)
+	}
+	if _, err := f.s.GetArchive(outsider, row.ID, RegionScope{Org: "other"}); err != nil {
+		wantCode(t, err, CodeNotFound)
+	}
+	if _, err := f.s.GetArchive(member, "not-a-uuid", RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodeInvalid)
+	}
+}
+
+func TestRestoreArchiveAPI(t *testing.T) {
+	f := newArchiveFixture(t)
+	row := f.archivedRow(t)
+	member := f.member(t, "member@example.com", roleMember)
+	viewer := f.member(t, "viewer@example.com", roleViewer)
+
+	if _, err := f.s.RestoreArchive(viewer, row.ID, RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodeForbidden)
+	}
+	out, err := f.s.RestoreArchive(member, row.ID, RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Sandbox.ID == "" || out.Sandbox.Name != "box" || out.Sandbox.Region != "eu-west" ||
+		out.Sandbox.Status == "" {
+		t.Errorf("restored sandbox = %+v", out.Sandbox)
+	}
+	sandbox, ok := f.fake.Sandbox(out.Sandbox.ID)
+	if !ok || sandbox.Tags[archiveRestoredTag] != "sb-1" {
+		t.Errorf("fake sandbox = %+v, %v", sandbox, ok)
+	}
+	if out.Archive.LastRestoredSandboxID != out.Sandbox.ID || out.Archive.LastRestoredAt == nil {
+		t.Errorf("restored archive = %+v", out.Archive)
+	}
+
+	// A pending row is not archived yet.
+	f.addStopped(t, "sb-2")
+	f.pass(t)
+	pending := f.row(t, "sb-2")
+	if _, err := f.s.RestoreArchive(member, pending.ID, RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodePrecondition)
+	}
+
+	// A suspended workspace does not get new sandboxes.
+	status := orgSuspended
+	if _, err := f.s.UpdateOrganization(localCtx(), "acme", UpdateOrganizationRequest{Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.RestoreArchive(member, row.ID, RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodePrecondition)
+	}
+}
+
+func TestDeleteArchiveAPI(t *testing.T) {
+	f := newArchiveFixture(t)
+	row := f.archivedRow(t)
+	member := f.member(t, "member@example.com", roleMember)
+	viewer := f.member(t, "viewer@example.com", roleViewer)
+
+	if _, err := f.s.DeleteArchive(viewer, row.ID, RegionScope{Org: "acme"}); err != nil {
+		wantCode(t, err, CodeForbidden)
+	}
+	out, err := f.s.DeleteArchive(member, row.ID, RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID != row.ID || out.Status != archiveDeleted || out.RegistryRef != row.RegistryRef {
+		t.Errorf("deleted archive = %+v", out)
+	}
+	if snapshots := f.fake.Snapshots(f.org.Team); len(snapshots) != 0 {
+		t.Errorf("the snapshot survived: %+v", snapshots)
+	}
+	list, err := f.s.ListArchives(member, RegionScope{Org: "acme"})
+	if err != nil || len(list.Data) != 0 {
+		t.Errorf("list after delete = %+v, %v", list.Data, err)
+	}
+}
+
+func TestListArchivesOmitsCancelled(t *testing.T) {
+	f := newArchiveFixture(t)
+	f.archivedRow(t)
+	f.addStopped(t, "sb-2")
+	f.pass(t)
+	cancelled := f.row(t, "sb-2")
+	if err := f.s.q.CancelArchive(context.Background(), db.CancelArchiveParams{Error: "test", ID: cancelled.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := f.s.ListArchives(localCtx(), RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, archive := range list.Data {
+		if archive.Status == archiveCancelled || archive.Status == archiveDeleted {
+			t.Errorf("list included %+v", archive)
+		}
+	}
+	if len(list.Data) != 1 || list.Data[0].SandboxID != "sb-1" {
+		t.Errorf("list = %+v", list.Data)
+	}
+}
+
+func TestStorageProfileUpdateRefusesWhileArchivesExist(t *testing.T) {
+	f := newArchiveFixture(t)
+	row := f.archivedRow(t)
+
+	prefix := "moved"
+	_, err := f.s.UpdateStorageProfile(localCtx(), f.profile.Name, UpdateStorageProfileRequest{Prefix: &prefix})
+	wantCode(t, err, CodeConflict)
+
+	// A rename does not move the data, so it is allowed.
+	name := "renamed"
+	if _, err := f.s.UpdateStorageProfile(localCtx(), f.profile.Name, UpdateStorageProfileRequest{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Deleting the archive frees the profile.
+	if _, err := f.s.DeleteArchive(localCtx(), row.ID, RegionScope{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.UpdateStorageProfile(localCtx(), name, UpdateStorageProfileRequest{Prefix: &prefix}); err != nil {
+		t.Fatal(err)
+	}
+}

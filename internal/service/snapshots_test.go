@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -337,5 +338,29 @@ func TestTempTokenNameFitsAerolVM(t *testing.T) {
 	}
 	if old := fmt.Sprintf("lbx.view.%s.%d", id, now.UnixNano()); valid.MatchString(old) {
 		t.Errorf("the old name %q should be too long; the check above proves nothing", old)
+	}
+}
+
+func TestSnapshotsHideArchivedSandboxes(t *testing.T) {
+	f := newSandboxFixture(t)
+	pointAtFake(t, f)
+	f.fake.AddSnapshot(f.org.Team, testSnapshot("archive-sb-1"))
+	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
+
+	list, err := f.s.ListSnapshots(f.owner, RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].Name != "ckpt-a" {
+		t.Errorf("archives listed as snapshots: %+v", list.Data)
+	}
+
+	_, err = f.s.DeleteSnapshot(f.owner, "archive-sb-1", RegionScope{Org: "acme", Region: "eu-west"})
+	de := wantCode(t, err, CodeInvalid)
+	if !strings.Contains(de.Message, "archived sandbox") || !strings.Contains(de.Message, "archive API") {
+		t.Errorf("delete archive snapshot = %q", de.Message)
+	}
+	if snapshots := f.fake.Snapshots(f.org.Team); len(snapshots) != 2 {
+		t.Errorf("the refused delete removed a snapshot: %+v", snapshots)
 	}
 }

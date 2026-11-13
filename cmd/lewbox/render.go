@@ -70,6 +70,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderSandboxes(w, data.Data, now)
 	case service.SnapshotList:
 		return renderSnapshots(w, data, now)
+	case service.ArchiveList:
+		return renderArchives(w, data.Data, now)
+	case service.RestoredArchive:
+		return renderRestoredArchive(w, data)
 	case service.Usage:
 		return renderUsage(w, data)
 	case service.LimitsReport:
@@ -437,6 +441,64 @@ func renderSnapshots(w io.Writer, list service.SnapshotList, now time.Time) erro
 		fmt.Fprintf(w, "partial: %s did not answer\n", strings.Join(list.PartialNodes, ", "))
 	}
 	return nil
+}
+
+// renderArchives prints an archived sandbox table. An instance admin listing
+// every workspace also gets the owner column.
+func renderArchives(w io.Writer, archives []service.Archive, now time.Time) error {
+	fleet := false
+	for _, a := range archives {
+		if a.Org != nil {
+			fleet = true
+			break
+		}
+	}
+	tw := newTable(w)
+	if fleet {
+		fmt.Fprint(tw, "WORKSPACE\t")
+	}
+	fmt.Fprintln(tw, "ID\tSANDBOX\tREGION\tSTATUS\tARCHIVED\tSIZE\tRESTORED")
+	for _, a := range archives {
+		if fleet {
+			workspace := "-"
+			if a.Org != nil {
+				workspace = *a.Org
+			}
+			fmt.Fprintf(tw, "%s\t", workspace)
+		}
+		archived := "-"
+		if a.ArchivedAt != nil {
+			archived = relativeTime(*a.ArchivedAt, now)
+		}
+		name := a.SandboxName
+		if name == "" {
+			name = a.SandboxID
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			shortID(a.ID), name, a.Region, a.Status, archived, archiveSize(a), dash(a.LastRestoredSandboxID))
+	}
+	return tw.Flush()
+}
+
+// renderRestoredArchive prints what the restore created and where it came from.
+func renderRestoredArchive(w io.Writer, r service.RestoredArchive) error {
+	fmt.Fprintf(w, "id: %s\n", r.Sandbox.ID)
+	fmt.Fprintf(w, "name: %s\n", dash(r.Sandbox.Name))
+	fmt.Fprintf(w, "restored from %s\n", r.Archive.SandboxID)
+	return nil
+}
+
+// archiveSize is the archived sandbox's original size: "1 vCPU · 1 GiB · 10 GB".
+func archiveSize(a service.Archive) string {
+	return fmt.Sprintf("%g vCPU · %g GiB · %d GB", a.CPU, float64(a.MemoryMB)/1024, a.DiskGB)
+}
+
+// shortID shows the first 8 characters of an ID, enough to tell rows apart.
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }
 
 // renderUsage prints the totals and one row per bucket.

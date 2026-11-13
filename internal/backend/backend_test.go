@@ -3,6 +3,7 @@ package backend_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
@@ -37,6 +39,7 @@ type harness struct {
 	remote backend.Backend
 	fake   *aerolvmtest.Server
 	url    string
+	conn   *sql.DB
 }
 
 func newHarness(t *testing.T, opts ...service.Option) *harness {
@@ -91,6 +94,7 @@ func newHarness(t *testing.T, opts ...service.Option) *harness {
 		remote: client.New(srv.URL, login.Token, srv.Client()),
 		fake:   fake,
 		url:    srv.URL,
+		conn:   conn,
 	}
 }
 
@@ -723,6 +727,108 @@ func TestSnapshotBackendsAgree(t *testing.T) {
 		both("list snapshots after delete", listSnapshots),
 		both("missing snapshot", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.DeleteSnapshot(ctx, "missing", service.RegionScope{Org: "acme", Region: "eu-west"})
+		}),
+	})
+}
+
+func TestArchiveBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	org, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := h.local.GetCluster(ctx, "eu-west")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket := objstoretest.New(t)
+	bucket.AddBucket("assets")
+	profile, err := h.local.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+		Name: "archive", Endpoint: bucket.URL, Region: "us-east-1", Bucket: "assets",
+		AccessKeyID: bucket.AccessKeyID, SecretAccessKey: bucket.SecretAccessKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.conn.ExecContext(ctx,
+		`UPDATE clusters SET stop_policy = 'archive', storage_profile_id = ? WHERE id = ?`,
+		profile.ID, cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	archiveIDs := map[string]string{}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		id := uuid.NewV7().String()
+		archiveIDs[sandboxID] = id
+		ref := "127.0.0.1:5000/cluster/" + cluster.ID + "/snapshots/tenant-x/archive-" + sandboxID + ":latest"
+		if _, err := h.conn.ExecContext(ctx,
+			`INSERT INTO archives (id, org_id, cluster_id, sandbox_id, sandbox_name, image,
+			                       runtime, cpu, memory_mb, disk_gb, tags, snapshot_name,
+			                       registry_ref, status, created_at, archived_at)
+			 VALUES (?, ?, ?, ?, 'box', 'ubuntu:22.04', 'docker', 2, 1024, 20, '{"app":"demo"}',
+			         ?, ?, 'archived', ?, ?)`,
+			id, org.ID, cluster.ID, sandboxID,
+			"archive-"+sandboxID, ref, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listArchives := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListArchives(ctx, service.RegionScope{Org: "acme"})
+	}
+	runSteps(t, h, []step{
+		both("list archives", listArchives),
+		both("get archive", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+		}),
+		{
+			name: "restore archives",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RestoreArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RestoreArchive(ctx, archiveIDs["sb-2"], service.RegionScope{Org: "acme"})
+			},
+			check: func(t *testing.T, v any) {
+				restored, ok := v.(service.RestoredArchive)
+				if !ok || restored.Sandbox.ID == "" || restored.Sandbox.Region != "eu-west" ||
+					restored.Archive.LastRestoredSandboxID != restored.Sandbox.ID {
+					t.Errorf("restored archive = %+v", v)
+				}
+			},
+		},
+		both("list archives after restore", listArchives),
+		{
+			name: "delete archives",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteArchive(ctx, archiveIDs["sb-2"], service.RegionScope{Org: "acme"})
+			},
+			check: func(t *testing.T, v any) {
+				archive, ok := v.(service.Archive)
+				if !ok || archive.Status != "deleted" || archive.Region != "eu-west" {
+					t.Errorf("deleted archive = %+v", v)
+				}
+			},
+		},
+		both("list archives after delete", listArchives),
+		both("missing archive", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
 		}),
 	})
 }

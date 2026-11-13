@@ -141,6 +141,9 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	if name == "" {
 		return Snapshot{}, invalid("a snapshot name is required")
 	}
+	if isArchiveSnapshot(name) {
+		return Snapshot{}, invalid("%s is an archived sandbox: delete it with the archive API", name)
+	}
 	var org *db.Organization
 	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
 		c, err := s.orgFor(ctx, req.Org, accessUse)
@@ -386,7 +389,9 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 				return
 			}
 			for _, snapshot := range snapshots {
-				if seen[snapshot.Name] {
+				// Archives are listed and deleted through the archive API,
+				// not as customer snapshots.
+				if seen[snapshot.Name] || isArchiveSnapshot(snapshot.Name) {
 					continue
 				}
 				seen[snapshot.Name] = true
@@ -460,6 +465,12 @@ func (s *Service) teamToken(ctx context.Context, cluster db.Cluster, org db.Orga
 	}
 	s.snapshotMu.Unlock()
 	return minted, nil
+}
+
+// isArchiveSnapshot names the snapshots the archiver takes for stopped
+// sandboxes. They belong to the archive API, not to the customer's snapshots.
+func isArchiveSnapshot(name string) bool {
+	return strings.HasPrefix(name, "archive-")
 }
 
 // toSnapshot converts one node's snapshot. node is the member that holds it;

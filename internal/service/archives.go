@@ -49,6 +49,214 @@ const (
 	archiveRestoredTag = "lewbox.restored_from"
 )
 
+// Archive is a sandbox archived to a cluster's bucket (DECISIONS D36). Org is
+// only included when an instance admin lists every workspace's archives.
+type Archive struct {
+	ID           string            `json:"id"`
+	Org          *string           `json:"org,omitempty"`
+	Region       string            `json:"region"`
+	SandboxID    string            `json:"sandbox_id"`
+	SandboxName  string            `json:"sandbox_name"`
+	Image        string            `json:"image"`
+	Runtime      string            `json:"runtime"`
+	CPU          float64           `json:"cpu"`
+	MemoryMB     int64             `json:"memory_mb"`
+	DiskGB       int64             `json:"disk_gb"`
+	Tags         map[string]string `json:"tags"`
+	SnapshotName string            `json:"snapshot_name"`
+	RegistryRef  string            `json:"registry_ref"`
+	Status       string            `json:"status"`
+	Error        string            `json:"error"`
+	CreatedAt    time.Time         `json:"created_at"`
+	ArchivedAt   *time.Time        `json:"archived_at"`
+
+	LastRestoredSandboxID string     `json:"last_restored_sandbox_id"`
+	LastRestoredAt        *time.Time `json:"last_restored_at"`
+}
+
+// ArchiveList is returned by ListArchives. Data is never null.
+type ArchiveList struct {
+	Data []Archive `json:"data"`
+}
+
+// RestoredArchive is returned by RestoreArchive: the archive, kept so it can
+// be restored again, and the new sandbox.
+type RestoredArchive struct {
+	Archive Archive         `json:"archive"`
+	Sandbox RestoredSandbox `json:"sandbox"`
+}
+
+// RestoredSandbox is the sandbox a restore created. It has a new ID and the
+// archived sandbox's name.
+type RestoredSandbox struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Region string `json:"region"`
+}
+
+// ListArchives lists live archives, newest first. Any member of the workspace
+// can list its archives, viewers included; an instance admin with no
+// organization sees every workspace's, with Org set on each row.
+func (s *Service) ListArchives(ctx context.Context, req RegionScope) (ArchiveList, error) {
+	p, err := requirePrincipal(ctx)
+	if err != nil {
+		return ArchiveList{}, err
+	}
+	org, err := s.scopeOrg(ctx, req.Org)
+	if err != nil {
+		return ArchiveList{}, err
+	}
+	cluster, err := s.regionFilter(ctx, org, req.Region)
+	if err != nil {
+		return ArchiveList{}, err
+	}
+	orgID, clusterID := "", ""
+	if org != nil {
+		orgID = org.ID
+	}
+	if cluster != nil {
+		clusterID = cluster.ID
+	}
+	rows, err := s.q.ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: clusterID})
+	if err != nil {
+		return ArchiveList{}, fmt.Errorf("list archives: %w", err)
+	}
+	fleet := p.InstanceAdmin && org == nil
+	out := ArchiveList{Data: make([]Archive, 0, len(rows))}
+	for _, row := range rows {
+		archive := toArchive(db.Archive{
+			ID:                    row.ID,
+			OrgID:                 row.OrgID,
+			ClusterID:             row.ClusterID,
+			SandboxID:             row.SandboxID,
+			SandboxName:           row.SandboxName,
+			Image:                 row.Image,
+			Runtime:               row.Runtime,
+			Cpu:                   row.Cpu,
+			MemoryMb:              row.MemoryMb,
+			DiskGb:                row.DiskGb,
+			Tags:                  row.Tags,
+			SnapshotName:          row.SnapshotName,
+			RegistryRef:           row.RegistryRef,
+			Status:                row.Status,
+			Error:                 row.Error,
+			Attempts:              row.Attempts,
+			NextAttemptAt:         row.NextAttemptAt,
+			PushingSince:          row.PushingSince,
+			CreatedAt:             row.CreatedAt,
+			ArchivedAt:            row.ArchivedAt,
+			DeletedAt:             row.DeletedAt,
+			LastRestoredSandboxID: row.LastRestoredSandboxID,
+			LastRestoredAt:        row.LastRestoredAt,
+		}, row.Region)
+		if fleet {
+			slug := row.Org
+			archive.Org = &slug
+		}
+		out.Data = append(out.Data, archive)
+	}
+	return out, nil
+}
+
+// GetArchive returns one archive by ID. Another workspace's archive is
+// reported as not found, exactly like a missing one.
+func (s *Service) GetArchive(ctx context.Context, id string, req RegionScope) (Archive, error) {
+	row, cluster, _, err := s.findArchive(ctx, id, req, accessRead)
+	if err != nil {
+		return Archive{}, err
+	}
+	return toArchive(row, cluster.Slug), nil
+}
+
+// RestoreArchive creates a new sandbox from an archived one. The archive is
+// kept, so it can be restored again.
+func (s *Service) RestoreArchive(ctx context.Context, id string, req RegionScope) (RestoredArchive, error) {
+	row, cluster, org, err := s.findArchive(ctx, id, req, accessUse)
+	if err != nil {
+		return RestoredArchive{}, err
+	}
+	if err := sandboxOrgReady(org.Status); err != nil {
+		return RestoredArchive{}, err
+	}
+	if _, err := s.sandboxRegion(ctx, row.OrgID, row.ClusterID); err != nil {
+		return RestoredArchive{}, err
+	}
+	sandbox, err := s.restoreArchive(ctx, row)
+	if err != nil {
+		return RestoredArchive{}, err
+	}
+	updated, err := s.q.GetArchiveByID(ctx, row.ID)
+	if err != nil {
+		return RestoredArchive{}, fmt.Errorf("get restored archive: %w", err)
+	}
+	return RestoredArchive{
+		Archive: toArchive(updated, cluster.Slug),
+		Sandbox: RestoredSandbox{
+			ID:     sandbox.ID,
+			Name:   sandbox.Name,
+			Status: sandbox.Status,
+			Region: cluster.Slug,
+		},
+	}, nil
+}
+
+// DeleteArchive removes an archive's snapshot and its keys in the bucket, then
+// marks it deleted. It returns the archive as it was, with Status deleted.
+func (s *Service) DeleteArchive(ctx context.Context, id string, req RegionScope) (Archive, error) {
+	row, cluster, _, err := s.findArchive(ctx, id, req, accessUse)
+	if err != nil {
+		return Archive{}, err
+	}
+	if err := s.deleteArchive(ctx, row); err != nil {
+		return Archive{}, err
+	}
+	row.Status = archiveDeleted
+	return toArchive(row, cluster.Slug), nil
+}
+
+// findArchive reads one archive for the caller and checks that the
+// organization is theirs. A non-admin must name a workspace, except that an
+// admin key falls back to its own.
+func (s *Service) findArchive(ctx context.Context, id string, req RegionScope, need access) (db.Archive, db.Cluster, db.Organization, error) {
+	p, err := requirePrincipal(ctx)
+	if err != nil {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, err
+	}
+	id = strings.TrimSpace(id)
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, invalid("archive ID %q is not a UUID", id)
+	}
+	var scope *db.Organization
+	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
+		c, err := s.orgFor(ctx, req.Org, need)
+		if err != nil {
+			return db.Archive{}, db.Cluster{}, db.Organization{}, err
+		}
+		scope = &c.org
+	}
+	row, err := s.q.GetArchiveByID(ctx, parsed.String())
+	if errors.Is(err, sql.ErrNoRows) {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, notFound("archive %q not found", id)
+	}
+	if err != nil {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, fmt.Errorf("get archive: %w", err)
+	}
+	if scope != nil && row.OrgID != scope.ID {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, notFound("archive %q not found", id)
+	}
+	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	if err != nil {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, fmt.Errorf("get archive organization: %w", err)
+	}
+	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
+	if err != nil {
+		return db.Archive{}, db.Cluster{}, db.Organization{}, fmt.Errorf("get archive cluster: %w", err)
+	}
+	return row, cluster, org, nil
+}
+
 // ArchivePass discovers stopped sandboxes on archive clusters and advances
 // every due archive by one step. It is the archiver's background pass, so it
 // runs as the local principal when the caller has none.
@@ -544,6 +752,35 @@ func archiveRepo(registryRef, clusterID string) (string, error) {
 		return "", fmt.Errorf("registry ref %q is not an archive", registryRef)
 	}
 	return repo, nil
+}
+
+// toArchive turns one stored row into the API shape. Broken tags are no tags;
+// an archive is still worth showing.
+func toArchive(row db.Archive, region string) Archive {
+	tags, err := decodeTags(row.Tags)
+	if err != nil || tags == nil {
+		tags = map[string]string{}
+	}
+	return Archive{
+		ID:                    row.ID,
+		Region:                region,
+		SandboxID:             row.SandboxID,
+		SandboxName:           row.SandboxName,
+		Image:                 row.Image,
+		Runtime:               row.Runtime,
+		CPU:                   row.Cpu,
+		MemoryMB:              row.MemoryMb,
+		DiskGB:                row.DiskGb,
+		Tags:                  tags,
+		SnapshotName:          row.SnapshotName,
+		RegistryRef:           row.RegistryRef,
+		Status:                row.Status,
+		Error:                 row.Error,
+		CreatedAt:             row.CreatedAt.UTC().Truncate(time.Millisecond),
+		ArchivedAt:            nullTime(row.ArchivedAt),
+		LastRestoredSandboxID: row.LastRestoredSandboxID,
+		LastRestoredAt:        nullTime(row.LastRestoredAt),
+	}
 }
 
 // encodeTags stores a sandbox's tags as a JSON object.

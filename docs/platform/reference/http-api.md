@@ -211,7 +211,11 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 | `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
 | `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. Lists the workspace's snapshots on every node of each subscribed region; `partial_nodes` names nodes that did not answer. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
-| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot |
+| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot. An `archive-…` name is `400`: delete it through the archive routes |
+| `GET /v0/archives?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Archive]}`, newest first. Only `pending`, `pushing`, `archived` and `failed` rows; `cancelled` and `deleted` are gone. Without `org`, an instance admin gets every workspace's, with `org` set on each |
+| `GET /v0/archives/{id}` | its members, admins, its keys | Archive. Another workspace's is `404`, like a missing one; a non-UUID ID is `400` |
+| `POST /v0/archives/{id}/restore` | owner, admin or member, admins, its keys | Create a new sandbox from the archive's registry ref, with its name, tags and size, and the tag `lewbox.restored_from=<old sandbox id>` → `{archive, sandbox}`. The archive is kept. `412` if the workspace is suspended, has no subscription in that region, or the archive is not `archived` |
+| `DELETE /v0/archives/{id}` | same | Delete the snapshot and its keys in the bucket, then mark the row deleted → Archive, with `status: "deleted"` |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
 
@@ -317,7 +321,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 `status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is the workspace's single subscribed region, or `null` when it has none. `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
 
-**Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
+**Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a cluster customers can use. `stop_policy` is `keep` or `archive`. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 
 **Subscription**: `{region, plan, limits, overrides, created_at}`. `region` is a Region; `limits` are the effective limits (the plan's, with the override); `overrides` (`{sandboxes, vcpus, memory_mb}`) is only present for instance admins. A `null` limit is unlimited or, on an override, the plan's value.
 
@@ -346,3 +350,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 **JoinToken**: `{cluster_id, cluster, runtime, version, role, token_role, token, ca_cert_hash, join_urls, expires_at, command}`. `token` is single-use and is shown only in this response.
 
 **Snapshot**: `{name, region, organization?, node?, source_sandbox_id, image, created_at, cpu, memory_mb, disk_gb, push_state}`. `organization` (`{slug, name}`) and `node` (the member that holds it) are only included for instance admins. `push_state` describes a push to an image registry. AerolVM reports no owner and no size, so a snapshot is attributed to its workspace's team and is not billed.
+
+**Archive**: `{id, org?, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `org` is the workspace slug, only on an instance admin's fleet list. `region` is the cluster slug; `status` is `pending`, `pushing`, `archived` or `failed` (a `GET` may show `cancelled` or `deleted`); `registry_ref` is empty until the push is active. `tags` is always an object. `archived_at` and `last_restored_at` are `null` when they do not apply.
+
+**RestoredArchive**: `{archive, sandbox}`. `sandbox` is `{id, name, status, region}`: a **new** sandbox, with the archive's name (plus a short suffix when that name is taken) and `region` (the cluster slug).
