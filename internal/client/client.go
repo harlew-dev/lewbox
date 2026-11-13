@@ -22,6 +22,9 @@ const (
 	defaultTimeout = 30 * time.Second
 	// longTimeout bounds the calls that talk to AerolVM.
 	longTimeout = 120 * time.Second
+	// lifecycleTimeout bounds a stop, delete or restore, which the server
+	// gives five minutes (a Firecracker stop writes the VM's memory to disk).
+	lifecycleTimeout = 6 * time.Minute
 )
 
 // Client calls a Lewbox server. It implements backend.Backend.
@@ -609,14 +612,14 @@ func (c *Client) ListSandboxes(ctx context.Context, req service.ListSandboxesReq
 // StopSandbox stops a sandbox on its cluster.
 func (c *Client) StopSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error) {
 	var out service.Sandbox
-	err := c.doOrg(ctx, req.Org, http.MethodPost, sandboxActionPath(id, "stop", req.Region), nil, &out)
+	err := c.request(ctx, http.MethodPost, sandboxActionPath(id, "stop", req.Region), req.Org, nil, &out, lifecycleTimeout)
 	return out, err
 }
 
 // DeleteSandbox deletes a sandbox on its cluster.
 func (c *Client) DeleteSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error) {
 	var out service.Sandbox
-	err := c.doOrg(ctx, req.Org, http.MethodDelete, sandboxActionPath(id, "", req.Region), nil, &out)
+	err := c.request(ctx, http.MethodDelete, sandboxActionPath(id, "", req.Region), req.Org, nil, &out, lifecycleTimeout)
 	return out, err
 }
 
@@ -682,7 +685,7 @@ func (c *Client) GetArchive(ctx context.Context, id string, req service.RegionSc
 // RestoreArchive creates a new sandbox from an archive.
 func (c *Client) RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error) {
 	var out service.RestoredArchive
-	err := c.request(ctx, http.MethodPost, "/v0/archives/"+url.PathEscape(id)+"/restore", req.Org, nil, &out, longTimeout)
+	err := c.request(ctx, http.MethodPost, "/v0/archives/"+url.PathEscape(id)+"/restore", req.Org, nil, &out, lifecycleTimeout)
 	return out, err
 }
 

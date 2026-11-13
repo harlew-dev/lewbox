@@ -40,6 +40,7 @@ type Server struct {
 	deleted     []string
 	revoked     []string
 	failures    map[string]*failure
+	delays      map[string]time.Duration
 	tokenTTLCap time.Duration
 	certExpiry  time.Time
 	nextID      int
@@ -72,6 +73,7 @@ func New(t testing.TB) *Server {
 		ClusterID:    "01a00000-0000-7000-8000-000000000001",
 		tokenByVal:   make(map[string]aerolvm.Token),
 		failures:     make(map[string]*failure),
+		delays:       make(map[string]time.Duration),
 		sandboxTeams: make(map[string]string),
 		sandboxNodes: make(map[string]string),
 		snapshots:    make(map[string][]aerolvm.Snapshot),
@@ -280,6 +282,19 @@ func (s *Server) FailNext(path string, status int, body string, n int) {
 	s.failures[path] = &failure{status: status, body: body, n: n}
 }
 
+// Delay makes every request to path wait d before it is handled. A request
+// cancelled while it waits is dropped without being handled, as AerolVM
+// abandons a stop whose caller went away. Zero removes the delay.
+func (s *Server) Delay(path string, d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if d <= 0 {
+		delete(s.delays, path)
+		return
+	}
+	s.delays[path] = d
+}
+
 // Tokens returns the tokens created through POST /v1/tokens.
 func (s *Server) Tokens() []aerolvm.Token {
 	s.mu.Lock()
@@ -346,6 +361,16 @@ func (s *Server) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.injected(w, r) {
 			return
+		}
+		s.mu.Lock()
+		delay := s.delays[r.URL.Path]
+		s.mu.Unlock()
+		if delay > 0 {
+			select {
+			case <-time.After(delay):
+			case <-r.Context().Done():
+				return
+			}
 		}
 		if r.URL.Path != "/health" && !s.authorized(r) {
 			s.writeError(w, http.StatusUnauthorized, "unauthorized")

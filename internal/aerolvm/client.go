@@ -16,6 +16,10 @@ import (
 )
 
 const (
+	// defaultCallTimeout bounds one attempt when the caller's context has no
+	// deadline. A caller that sets one gets it in full: a Firecracker stop
+	// writes the VM's memory to disk and can take minutes.
+	defaultCallTimeout = 30 * time.Second
 	defaultRetryBudget = 60 * time.Second
 	initialRetryWait   = 250 * time.Millisecond
 	maxRetryWait       = 5 * time.Second
@@ -29,6 +33,8 @@ type Client struct {
 	http    *http.Client
 	retry   time.Duration
 	sleep   func(time.Duration)
+	// callTimeout bounds one attempt when the caller set no deadline.
+	callTimeout time.Duration
 }
 
 // Option changes a Client built by New.
@@ -37,6 +43,12 @@ type Option func(*Client)
 // WithHTTPClient uses h for requests.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
+}
+
+// WithCallTimeout sets how long one attempt may take when the caller's
+// context has no deadline (default 30 s).
+func WithCallTimeout(d time.Duration) Option {
+	return func(c *Client) { c.callTimeout = d }
 }
 
 // WithRetry sets the total time spent retrying one request. Zero disables
@@ -63,11 +75,12 @@ func WithSleep(sleep func(time.Duration)) Option {
 // token on every route except /health.
 func New(baseURL, token string, opts ...Option) *Client {
 	c := &Client{
-		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		token:   token,
-		http:    &http.Client{Timeout: 30 * time.Second},
-		retry:   defaultRetryBudget,
-		sleep:   time.Sleep,
+		baseURL:     strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		token:       token,
+		http:        &http.Client{},
+		callTimeout: defaultCallTimeout,
+		retry:       defaultRetryBudget,
+		sleep:       time.Sleep,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -380,6 +393,11 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 }
 
 func (c *Client) doOnce(ctx context.Context, method, path string, body []byte, out any, auth bool) (http.Header, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.callTimeout)
+		defer cancel()
+	}
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("aerolvm %s %s: %w", method, path, err)

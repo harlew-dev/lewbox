@@ -489,3 +489,27 @@ func TestSandboxRegionIsScopedToSubscriptions(t *testing.T) {
 	_, err = f.s.ListSandboxes(localCtx(), ListSandboxesRequest{Org: "acme", Region: "us-east"})
 	wantCode(t, err, CodeNotFound)
 }
+
+// A Firecracker stop writes the VM's memory to disk, and AerolVM abandons it
+// when Lewbox's request is cancelled. So a stop keeps going after the caller
+// goes away, instead of leaving the sandbox running.
+func TestStopSandboxOutlivesItsCaller(t *testing.T) {
+	f := newSyncFixture(t)
+	f.fake.AddSandbox(f.org.Team, startedSandbox("sb-1", 1, 512))
+	f.clock.advance(15 * time.Second)
+	f.sync(t)
+
+	f.fake.Delay("/v1/sandboxes/sb-1/stop", 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(localCtx(), 50*time.Millisecond)
+	defer cancel()
+	stopped, err := f.s.StopSandbox(ctx, "sb-1", RegionScope{Org: "acme"})
+	if err != nil {
+		t.Fatalf("stop with a caller that gave up: %v", err)
+	}
+	if stopped.Status != "stopped" {
+		t.Errorf("stopped = %+v", stopped)
+	}
+	if sb, _ := f.fake.Sandbox("sb-1"); sb.Status != "stopped" {
+		t.Errorf("status on the cluster = %q, want stopped", sb.Status)
+	}
+}

@@ -355,3 +355,28 @@ func TestTransportErrorIsWrapped(t *testing.T) {
 		t.Errorf("error mentions the token: %v", err)
 	}
 }
+
+// A Firecracker stop writes the VM's memory to disk and can take longer than
+// the default call timeout, so a caller's own deadline replaces it.
+func TestCallTimeoutDefaultsOnlyWithoutDeadline(t *testing.T) {
+	fake := newFake(t)
+	fake.AddSandbox("t1", aerolvm.Sandbox{ID: "sb-1", Status: "started"})
+	fake.Delay("/v1/sandboxes/sb-1/stop", 300*time.Millisecond)
+	client := aerolvm.New(fake.URL(), adminToken, aerolvm.WithRetry(0), aerolvm.WithCallTimeout(50*time.Millisecond))
+
+	if err := client.StopSandbox(context.Background(), "sb-1"); err == nil {
+		t.Fatal("a slow call with no deadline was not cut at the default timeout")
+	}
+	if sb, _ := fake.Sandbox("sb-1"); sb.Status != "started" {
+		t.Fatalf("the abandoned stop was applied: status %q", sb.Status)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.StopSandbox(ctx, "sb-1"); err != nil {
+		t.Fatalf("a slow call within the caller's deadline failed: %v", err)
+	}
+	if sb, _ := fake.Sandbox("sb-1"); sb.Status != "stopped" {
+		t.Fatalf("status after the stop = %q, want stopped", sb.Status)
+	}
+}

@@ -36,6 +36,10 @@ const (
 	// archiveStepTimeout bounds one archive step: the calls one pass makes
 	// for one row.
 	archiveStepTimeout = 30 * time.Second
+	// archiveSnapshotTimeout bounds the snapshot call, which exports the
+	// whole disk of a Firecracker sandbox (about 15 s per GB, per AerolVM)
+	// and is abandoned by AerolVM if the call is cancelled.
+	archiveSnapshotTimeout = 15 * time.Minute
 	// archivePushTimeout is how long a snapshot push may stay unfinished
 	// before the row is marked failed and retried later.
 	archivePushTimeout = 30 * time.Minute
@@ -421,7 +425,14 @@ func (s *Service) archivePending(ctx context.Context, cluster db.Cluster, row db
 		return s.cancelArchive(ctx, cluster, row, "started again before it was archived")
 	}
 
-	if _, err := client.CreateSnapshot(ctx, row.SandboxID, row.SnapshotName); err != nil {
+	// The snapshot gets its own deadline, and the step's bookkeeping a fresh
+	// one after it: the step's own may have passed while the disk exported.
+	snapCtx, cancelSnap := context.WithTimeout(context.WithoutCancel(ctx), archiveSnapshotTimeout)
+	_, err = client.CreateSnapshot(snapCtx, row.SandboxID, row.SnapshotName)
+	cancelSnap()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), archiveStepTimeout)
+	defer cancel()
+	if err != nil {
 		switch {
 		case isStatus(err, http.StatusConflict):
 			// A step was interrupted after the snapshot was taken.
@@ -625,12 +636,12 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 		Runtime:  row.Runtime,
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	callCtx, cancel := lifecycleContext(ctx)
 	sandbox, err := client.CreateSandbox(callCtx, req)
 	cancel()
 	if err != nil && req.Name != "" && isStatus(err, http.StatusConflict) {
 		req.Name = req.Name + "-" + randomHex(2)
-		callCtx, cancel = context.WithTimeout(ctx, requestCallTimeout)
+		callCtx, cancel = lifecycleContext(ctx)
 		sandbox, err = client.CreateSandbox(callCtx, req)
 		cancel()
 	}
@@ -643,7 +654,8 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 	}
 
 	now := s.now()
-	if err := s.q.RecordArchiveRestore(ctx, db.RecordArchiveRestoreParams{
+	// The sandbox exists now: record it even if the caller went away.
+	if err := s.q.RecordArchiveRestore(context.WithoutCancel(ctx), db.RecordArchiveRestoreParams{
 		LastRestoredSandboxID: sandbox.ID,
 		LastRestoredAt:        sql.NullTime{Time: now, Valid: true},
 		ID:                    row.ID,

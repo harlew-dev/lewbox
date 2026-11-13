@@ -18,6 +18,19 @@ import (
 // requestCallTimeout bounds one AerolVM call made while serving a request.
 const requestCallTimeout = 10 * time.Second
 
+// lifecycleCallTimeout bounds a stop, delete or create that may be slow on
+// Firecracker: a stop writes the VM's memory to disk (13 s for 512 MB on the
+// dev cluster), and a create from a snapshot pulls and builds its disk.
+// AerolVM abandons the operation when Lewbox's request is cancelled, so these
+// calls also outlive a caller that disconnects (lifecycleContext).
+const lifecycleCallTimeout = 5 * time.Minute
+
+// lifecycleContext is a context for a lifecycle call: detached from the
+// caller's cancellation, bounded by lifecycleCallTimeout.
+func lifecycleContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), lifecycleCallTimeout)
+}
+
 // Service is the shared implementation behind the HTTP API and the CLI.
 type Service struct {
 	q   *db.Queries

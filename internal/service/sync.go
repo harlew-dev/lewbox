@@ -425,7 +425,7 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 		}
 		client, err := s.clusterClient(cluster)
 		if err == nil {
-			callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+			callCtx, cancel := lifecycleContext(ctx)
 			err = client.StopSandbox(callCtx, row.Sandbox.ID)
 			cancel()
 		}

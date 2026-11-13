@@ -217,13 +217,16 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 	if err != nil {
 		return Sandbox{}, err
 	}
-	callCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	// callCtx outlives the caller, for the call and for recording what it
+	// did: a stop that finished on the cluster is recorded even if the
+	// caller went away.
+	callCtx, cancel := lifecycleContext(ctx)
 	defer cancel()
 	if remove {
 		if err := client.DeleteSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.q.MarkSandboxGone(ctx, db.MarkSandboxGoneParams{
+		if err := s.q.MarkSandboxGone(callCtx, db.MarkSandboxGoneParams{
 			GoneAt:    sql.NullTime{Time: s.now(), Valid: true},
 			ClusterID: home.ID,
 			ID:        id,
@@ -235,7 +238,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 		if err := client.StopSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+		if err := s.q.UpdateSandboxStatus(callCtx, db.UpdateSandboxStatusParams{
 			Status:    "stopped",
 			ClusterID: home.ID,
 			ID:        id,
