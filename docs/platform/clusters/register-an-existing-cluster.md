@@ -7,18 +7,46 @@ If you already run an AerolVM cluster, you don't need `lewbox install`. Give Lew
 
 ## 1. Prepare the cluster
 
-On **every** node, AerolVM needs these two settings. They're the same ones `lewbox node add` would apply:
+On **every** node, AerolVM needs these two settings. They're the same ones `lewbox node add` would apply. On each node:
 
-```bash
-sudo tee /etc/sandboxd/lewbox.env >/dev/null <<'EOF'
-SB_IDENTITY_ENABLED=true
-SB_TOKEN_MAX_TTL=876000h
-EOF
-sudo chmod 600 /etc/sandboxd/lewbox.env
-sudo mkdir -p /etc/systemd/system/sandboxd.service.d
-printf '[Service]\nEnvironmentFile=/etc/sandboxd/lewbox.env\n' | sudo tee /etc/systemd/system/sandboxd.service.d/lewbox.conf >/dev/null
-sudo systemctl daemon-reload && sudo systemctl restart sandboxd
-```
+1. Write the settings to Lewbox's own file. Copy all four lines; they are one command:
+
+   ```bash
+   sudo tee /etc/sandboxd/lewbox.env >/dev/null <<'EOF'
+   SB_IDENTITY_ENABLED=true
+   SB_TOKEN_MAX_TTL=876000h
+   EOF
+   ```
+
+2. Make the file readable by root only:
+
+   ```bash
+   sudo chmod 600 /etc/sandboxd/lewbox.env
+   ```
+
+3. Make the folder for a systemd drop-in:
+
+   ```bash
+   sudo mkdir -p /etc/systemd/system/sandboxd.service.d
+   ```
+
+4. Add the drop-in that loads the file into AerolVM's service:
+
+   ```bash
+   printf '[Service]\nEnvironmentFile=/etc/sandboxd/lewbox.env\n' | sudo tee /etc/systemd/system/sandboxd.service.d/lewbox.conf >/dev/null
+   ```
+
+5. Make systemd read the drop-in:
+
+   ```bash
+   sudo systemctl daemon-reload
+   ```
+
+6. Restart AerolVM with the new settings:
+
+   ```bash
+   sudo systemctl restart sandboxd
+   ```
 
 Restart one node at a time, and wait for each to be healthy again before the next. Without identity mode, a node rejects every token, including Lewbox's.
 

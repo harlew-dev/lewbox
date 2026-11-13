@@ -7,14 +7,21 @@ description: Keep the orchestrator running as a systemd service behind TLS, and 
 
 ## Run it as a service
 
-Create a system account for the service, with its data folder. It has no password, no login shell and no `sudo`. Keep it separate from the `lewbox` login user you work as ([Install the CLI](install-the-cli.md#first-a-normal-user-with-sudo)):
+Create a system account for the service, with its data folder. It has no password, no login shell and no `sudo`. Keep it separate from the `lewbox` login user you work as ([Install the CLI](install-the-cli.md#first-a-normal-user-with-sudo)).
 
-```bash
-sudo useradd --system --create-home --home-dir /var/lib/lewbox --shell /usr/sbin/nologin lewbox-server
-sudo install -m 0755 lewbox /usr/local/bin/lewbox
-```
+1. Create the `lewbox-server` account, with `/var/lib/lewbox` as its home and data folder:
 
-Then `/etc/systemd/system/lewbox.service`:
+   ```bash
+   sudo useradd --system --create-home --home-dir /var/lib/lewbox --shell /usr/sbin/nologin lewbox-server
+   ```
+
+2. Copy the `lewbox` binary where the service can run it:
+
+   ```bash
+   sudo install -m 0755 lewbox /usr/local/bin/lewbox
+   ```
+
+3. Write the service unit to `/etc/systemd/system/lewbox.service`:
 
 ```ini
 [Unit]
@@ -34,13 +41,29 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now lewbox
-journalctl -u lewbox -f            # logs are JSON lines
-```
+4. Make systemd read the new unit:
 
-To create the first admin, run `sudo -u lewbox-server LEWBOX_DB=/var/lib/lewbox/lewbox.db LEWBOX_KEYRING_FILE=/var/lib/lewbox/keyring.key lewbox user create you@example.com --instance-admin`. Or use the bootstrap variables from [Run the orchestrator](run-the-orchestrator.md#create-the-first-admin).
+   ```bash
+   sudo systemctl daemon-reload
+   ```
+
+5. Start the service now and at every boot:
+
+   ```bash
+   sudo systemctl enable --now lewbox
+   ```
+
+6. Watch its logs, which are JSON lines. Press Ctrl+C to stop watching:
+
+   ```bash
+   journalctl -u lewbox -f
+   ```
+
+7. Create the first admin. Or use the bootstrap variables from [Run the orchestrator](run-the-orchestrator.md#create-the-first-admin):
+
+   ```bash
+   sudo -u lewbox-server LEWBOX_DB=/var/lib/lewbox/lewbox.db LEWBOX_KEYRING_FILE=/var/lib/lewbox/keyring.key lewbox user create you@example.com --instance-admin
+   ```
 
 > [!NOTE]
 > `lewbox orchestrator enable` will write this unit for you; it's planned, not built yet.

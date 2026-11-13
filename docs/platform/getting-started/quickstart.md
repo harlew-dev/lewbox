@@ -9,23 +9,55 @@ You need a Linux machine with systemd (a VM is fine), and a **normal user that c
 
 ## 1. Install the CLI
 
-Download the latest release, check it against the release's checksums and put it in `~/.local/bin`:
+Download the latest release, check it against the release's checksums and put it in `~/.local/bin`. Run these in one terminal, in order:
 
-```bash
-ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-URL=https://github.com/harlew-dev/lewbox/releases/latest/download
-cd "$(mktemp -d)" &&
-  curl -fsSL -O "$URL/lewbox_linux_$ARCH" -O "$URL/checksums.txt" &&
-  sha256sum --check --ignore-missing checksums.txt &&
-  install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox &&
-  cd - >/dev/null
-LINE='export PATH="$HOME/.local/bin:$PATH"'
-for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
-export PATH="$HOME/.local/bin:$PATH"
-lewbox version
-```
+1. Go to an empty temporary folder:
 
-The `for` line keeps `lewbox` on your `PATH` after you log out and back in; the `export` puts it there now.
+   ```bash
+   cd "$(mktemp -d)"
+   ```
+
+2. Find this machine's architecture, `amd64` or `arm64`:
+
+   ```bash
+   ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+   ```
+
+3. Download the binary and the release's checksums:
+
+   ```bash
+   curl -fsSL -O "https://github.com/harlew-dev/lewbox/releases/latest/download/lewbox_linux_$ARCH" -O https://github.com/harlew-dev/lewbox/releases/latest/download/checksums.txt
+   ```
+
+4. Check the binary. It must print `lewbox_linux_…: OK`; if it doesn't, stop:
+
+   ```bash
+   sha256sum --check --ignore-missing checksums.txt
+   ```
+
+5. Install it into `~/.local/bin`:
+
+   ```bash
+   install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox
+   ```
+
+6. Keep `~/.local/bin` on your `PATH` after you log out and back in:
+
+   ```bash
+   for f in ~/.profile ~/.bashrc; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$f" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$f"; done
+   ```
+
+7. Put it on the `PATH` of this shell too:
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   ```
+
+8. Check that it runs:
+
+   ```bash
+   lewbox version
+   ```
 
 The release includes the web console, which this machine needs because it runs the orchestrator. Install it the same way on every node. `go install` also works on nodes, but only with Go 1.21 or later, which Ubuntu 22.04's `golang-go` isn't (see [Install the CLI](../setup/install-the-cli.md#with-go)).
 
