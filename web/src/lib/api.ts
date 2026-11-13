@@ -429,6 +429,29 @@ export interface MemberList {
   data: Member[]
 }
 
+// An account's own token for the Lewbox API (lbp_…). It acts as the
+// account, with the account's rights.
+export interface AccessToken {
+  id: string
+  user_id: string
+  name: string
+  prefix: string
+  last4: string
+  status: 'active' | 'expired' | 'revoked'
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  revoked_at?: string
+}
+
+export interface NewAccessToken extends AccessToken {
+  token: string
+}
+
+export interface AccessTokenList {
+  data: AccessToken[]
+}
+
 export interface AdminKey {
   id: string
   organization_id: string
@@ -792,6 +815,20 @@ export function setMemberRole(org: string, memberRef: string, role: Role): Promi
 
 export function removeMember(org: string, memberRef: string): Promise<Member> {
   return request<Member>(`/v0/members/${ref(memberRef)}`, { method: 'DELETE', org })
+}
+
+export function listAccessTokens(): Promise<AccessTokenList> {
+  return request<AccessTokenList>('/v0/access-tokens')
+}
+
+// A token that never expires is sent with an empty expires_in.
+export function createAccessToken(input: { name: string; expires_in: KeyLifetime }): Promise<NewAccessToken> {
+  const body = { ...input, expires_in: input.expires_in === 'never' ? '' : input.expires_in }
+  return request<NewAccessToken>('/v0/access-tokens', { method: 'POST', body })
+}
+
+export function revokeAccessToken(tokenRef: string): Promise<AccessToken> {
+  return request<AccessToken>(`/v0/access-tokens/${ref(tokenRef)}`, { method: 'DELETE' })
 }
 
 export function listAdminKeys(org: string): Promise<AdminKeyList> {
