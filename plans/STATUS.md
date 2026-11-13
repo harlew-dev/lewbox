@@ -1,4 +1,4 @@
-# Status (2026-11-12)
+# Status (2026-11-13)
 
 ## What exists now
 
@@ -36,6 +36,52 @@ Lewbox is a self-hosted E2B: you run AerolVM clusters, and Lewbox is the account
 - Per-member limits (D29; built, then reverted).
 - Email, invitation links, webhooks.
 - A CPU-utilisation agent on nodes (D11).
+
+## Phase 8: DNS profiles, storage profiles, archiving (2026-11-13)
+
+Branch `feat/dns-storage-archive`. Plan: [08-dns-storage-archive.md](08-dns-storage-archive.md); decisions D34–D36.
+
+**Built:**
+- **DNS profiles** (Cloudflare): saved, sealed, tested before saving (find the zone, then write and delete a TXT record).
+  - `lewbox install --dns-profile`.
+  - Clusters record their domain and profile.
+  - The cluster check keeps `<domain>` and `*.<domain>` A/AAAA records pointing at live ingress nodes, and deletes only records Lewbox made.
+- **Storage profiles** (S3, R2, MinIO and other S3-compatible stores): saved, sealed, tested (write, read, list, delete), with a standard-library SigV4 client.
+- **Node settings:**
+  - `lewbox node configure` (also run by `node add`) installs the pinned CNCF Distribution registry on the bucket, AerolVM's snapshot push settings and the archive cleanup timer.
+  - It re-runs the installer when a DNS token changed.
+  - Nodes report what they applied, and outdated nodes are flagged on the cluster.
+- **Archiving:**
+  - On a cluster with `stop_policy: archive`, every stopped customer sandbox is snapshotted, pushed to the bucket, checked unchanged, and deleted.
+  - Restore makes a **new** sandbox (new ID) from the registry ref, on any node.
+  - Delete removes the snapshot and its repository from the bucket.
+  - API, CLI (`lewbox archive`), and portal and console tabs.
+- **Web:**
+  - Profile tabs in Settings.
+  - Start cluster and Add node as two steps (Configure, then Install commands).
+  - A cluster Settings card and outdated badges.
+  - Archived tabs in the portal and on the fleet Snapshots page.
+
+**Verified:**
+- `make test` passes: Go, and 32 web test files with 122 tests.
+- The S3 client against a real S3-compatible server (RustFS), and against AWS's published SigV4 example.
+- The AerolVM behaviour archiving depends on, tested by hand on real v0.7.0 ([docs/design/snapshot-archive.md](../docs/design/snapshot-archive.md)):
+  - push to a loopback registry on a bucket;
+  - restore by registry ref on another node;
+  - other teams refused;
+  - what's left on nodes and in the bucket;
+  - `updated_at` unchanged by a snapshot.
+- The new console screens, in a browser.
+
+**Not verified yet:**
+- `deploy/dev-cluster/archives.sh` (registry install on real nodes, archive, restore, cleanup, delete) hasn't run end to end. The host's disk was full (3.5 GB free), and AerolVM's preflight refused to start.
+- Domain mode with a real Cloudflare zone hasn't been run.
+
+**Gaps:**
+- Blobs in the bucket are never swept (only an archive's repository is deleted).
+- Restores get a new ID (the AerolVM change that would fix it: [aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)).
+- Archiving is only for Docker clusters.
+- Bucket keys and the DNS token live on every node.
 
 ## What was verified, and how
 

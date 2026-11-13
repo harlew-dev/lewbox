@@ -15,6 +15,7 @@ Lewbox's goal: **a self-hosted E2B.** An operator installs AerolVM on their own 
 | [05-billing.md](05-billing.md) | ~~Phase 5. Prices, credits, automatic suspension~~ Dropped (D24) |
 | [06-web.md](06-web.md) | Phase 6. Customer portal and operator console (UI) |
 | [07-review-and-release.md](07-review-and-release.md) | Phase 7. Review for bloat, docs, e2e, release packaging |
+| [08-dns-storage-archive.md](08-dns-storage-archive.md) | Phase 8. DNS and storage profiles, the registry on nodes, archiving stopped sandboxes |
 | [DECISIONS.md](DECISIONS.md) | Every decision made while building, the alternatives, and the caveats |
 | [RELEASING.md](RELEASING.md) | How to release and put this on live servers |
 | [STATUS.md](STATUS.md) | What was built, what was verified, and what is left |
