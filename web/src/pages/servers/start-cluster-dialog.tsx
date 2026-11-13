@@ -93,10 +93,9 @@ function StartCluster({ onClose }: { onClose: () => void }) {
   const storageList = storageProfiles.data?.data ?? []
   const selectedDNS = dnsList.find((profile) => profile.name === dnsProfile)
 
-  // Local mode can't run Firecracker; archive needs storage and Docker.
+  // Local mode can't run Firecracker; archive needs storage.
   const effectiveRuntime: Runtime = access === 'local' ? 'docker' : runtime
-  const archiveBlocked =
-    storageProfile === '' ? 'Choose a storage profile first.' : effectiveRuntime !== 'docker' ? 'Archiving needs the Docker runtime.' : ''
+  const archiveBlocked = storageProfile === '' ? 'Choose a storage profile first.' : ''
   const effectivePolicy: StopPolicy = archiveBlocked ? 'keep' : stopPolicy
 
   const slugProblem = slug !== '' && !validLabel(slug)

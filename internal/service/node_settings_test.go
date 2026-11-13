@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 )
@@ -109,12 +110,18 @@ func TestClusterStorageValidation(t *testing.T) {
 		t.Errorf("archive without a profile: %v", err)
 	}
 
-	firecracker := clusterRequest(fake, "archive-fc")
+	// AerolVM pushes Firecracker snapshots since v0.6.11, so Firecracker
+	// clusters archive too.
+	fcFake := newClusterFake(t)
+	fcFake.SetMembers([]aerolvm.Member{testMember(fcFake, "node-fc", "firecracker", true)})
+	firecracker := clusterRequest(fcFake, "archive-fc")
 	firecracker.Runtime = "firecracker"
 	firecracker.StorageProfile = "s3-main"
 	firecracker.StopPolicy = "archive"
-	if _, err := s.AddCluster(localCtx(), firecracker); err == nil || !strings.Contains(err.Error(), "only tested on Docker") {
+	if detail, err := s.AddCluster(localCtx(), firecracker); err != nil {
 		t.Errorf("archive on firecracker: %v", err)
+	} else if detail.StopPolicy != "archive" {
+		t.Errorf("firecracker stop policy = %q, want archive", detail.StopPolicy)
 	}
 
 	badPolicy := clusterRequest(fake, "bad-policy")

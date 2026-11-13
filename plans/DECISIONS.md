@@ -320,7 +320,7 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 
 **Other options.** Keep stopped sandboxes and delete them after N days (no restore). Ask AerolVM for archive-on-stop that keeps the ID ([aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)); when that lands, this setting maps onto it.
 
-**Caveats.** E2B `pause` then `connect(id)` gets 404 on an archive cluster. Snapshots keep no `env` values, so a restore needs them passed again. Running programs end on stop, as before. Each archive and restore adds an image layer, so a sandbox cycled about 100 times reaches overlayfs's layer limit. A start that races the archive is caught by a re-check before the delete, but a write between that check and the delete can be lost.
+**Caveats.** E2B `pause` then `connect(id)` gets 404 on an archive cluster. Snapshots keep no `env` values, so a restore needs them passed again. Running programs end on stop, as before. Each archive and restore adds an image layer, so a sandbox cycled about 100 times reaches overlayfs's layer limit. A start that races the archive is caught by a re-check before the delete, but a write between that check and the delete can be lost. Firecracker clusters can archive too (AerolVM v0.6.11 pushes Firecracker snapshots, [microvm#785](https://github.com/aerol-ai/microvm/discussions/785)); there an archive also drops the VM memory a plain stop keeps, and nodes need a `registries.conf.d` drop-in so skopeo pulls from the plain-HTTP node registry (`node configure` writes it).
 
 ## D37. Local copy retention and archive snapshot names, per cluster (your call, 2026-11-13)
 

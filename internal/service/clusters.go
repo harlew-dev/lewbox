@@ -202,7 +202,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	if err != nil {
 		return ClusterDetail{}, err
 	}
-	if err := checkStopPolicy(stopPolicy, storageProfile != nil, runtime); err != nil {
+	if err := checkStopPolicy(stopPolicy, storageProfile != nil); err != nil {
 		return ClusterDetail{}, err
 	}
 	retention, err := clusterArchiveRetention(req.ArchiveLocalRetention)
@@ -399,7 +399,7 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 			return ClusterDetail{}, err
 		}
 	}
-	if err := checkStopPolicy(stopPolicy, storageID.Valid, row.Runtime); err != nil {
+	if err := checkStopPolicy(stopPolicy, storageID.Valid); err != nil {
 		return ClusterDetail{}, err
 	}
 	retention := row.ArchiveLocalRetention
@@ -1379,16 +1379,11 @@ func clusterStopPolicy(raw string) (string, error) {
 }
 
 // checkStopPolicy refuses a stop policy the cluster can't honour: archiving
-// needs a bucket and is only tested on Docker.
-func checkStopPolicy(policy string, hasStorage bool, runtime string) error {
-	if policy != "archive" {
-		return nil
-	}
-	if !hasStorage {
+// needs a bucket. Both runtimes can archive: AerolVM pushes Firecracker
+// snapshots since v0.6.11.
+func checkStopPolicy(policy string, hasStorage bool) error {
+	if policy == "archive" && !hasStorage {
 		return invalid("stop_policy archive needs a storage profile")
-	}
-	if runtime != "docker" {
-		return invalid("archiving is only tested on Docker clusters")
 	}
 	return nil
 }

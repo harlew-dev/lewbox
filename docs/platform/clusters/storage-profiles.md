@@ -89,7 +89,7 @@ lewbox cluster set lab --storage-profile archive --stop-policy archive
 lewbox node configure      # on each node
 ```
 
-`--stop-policy keep` (the default) leaves stopped sandboxes on their node; `archive` hands them to the bucket. Archiving needs a storage profile and the Docker runtime. Clearing the profile while `--stop-policy archive` is set is refused, so change the policy first.
+`--stop-policy keep` (the default) leaves stopped sandboxes on their node; `archive` hands them to the bucket. Archiving needs a storage profile and works on both runtimes (see [Firecracker clusters](#firecracker-clusters)). Clearing the profile while `--stop-policy archive` is set is refused, so change the policy first.
 
 `lewbox cluster node-settings lab` shows exactly what each node must apply, including the bucket path: `<prefix>/clusters/<cluster id>/`.
 
@@ -128,6 +128,15 @@ The archiver runs beside the sync loop, at most two rows at once per cluster. Fo
 A sandbox that is started again before its archive finishes is left alone; one that is gone cancels with a reason. AerolVM hiccups hold a row back for a minute instead of failing it.
 
 What stays in the bucket: the pushed image's **blobs are never swept yet**. Deleting an archive removes its repository (the manifest links and its own keys) and marks the row `deleted`, but content-addressed blobs may still be shared with other snapshots, so only a future sweep that reads every link may remove them. Deleting also leaves pulled copies on nodes: the cleanup timer removes those, as below.
+
+### Firecracker clusters
+
+AerolVM pushes Firecracker snapshots to the registry like container snapshots (since v0.6.11), and any node starts them as Firecracker VMs, so archiving works the same way. AerolVM builds a VM's disk from the registry with skopeo, which needs to be told the node registry is plain HTTP: `node configure` writes `/etc/containers/registries.conf.d/50-lewbox-registry.conf` for that, beside the registry, and removes it with the registry.
+
+What differs:
+
+- **Memory.** On Firecracker a plain stop keeps the VM's memory, and a start resumes running programs. A snapshot saves only the disk, so on an `archive` cluster a stopped Firecracker sandbox loses its running programs, and a restore boots a fresh VM (a few seconds).
+- **Extra disks.** A snapshot saves the root disk only. Nodes Lewbox installs give a Firecracker VM no other disk; if you turn one on in AerolVM's own settings (such as `SB_FIRECRACKER_OVERLAY_ENABLED`), archiving loses what is on it.
 
 ### Local copies of archives
 

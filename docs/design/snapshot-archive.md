@@ -59,4 +59,17 @@
   2. Lewbox deletes the repository's keys from the bucket itself (`<prefix>/clusters/<cluster id>/docker/registry/v2/repositories/<repo>/`), because AerolVM doesn't (finding 11).
 
   Blobs no repository links any more stay until a bucket sweep, which isn't built yet. Blobs are shared between snapshots, so only a sweep that reads every link may delete them.
-- **Docker only** for now: these tests are all `docker` runtime. A Firecracker snapshot is a disk image, and its push and pull weren't tested.
+- **Firecracker:** these tests are all `docker` runtime. AerolVM v0.6.11 added Firecracker snapshot push and cross-node starts ([aerol-ai/microvm#785](https://github.com/aerol-ai/microvm/discussions/785)), so Lewbox allows `archive` on Firecracker clusters too. A Firecracker snapshot saves the disk only: not memory, which a plain Firecracker stop keeps.
+
+## Firecracker (v0.7.0, dev cluster, 2026-11-13)
+
+Two Firecracker nodes in privileged Docker containers with the host's `/dev/kvm` (`./dev.sh cluster --runtime firecracker`), then `archives.sh`.
+
+| # | What | Result |
+|---|---|---|
+| F1 | Snapshot a stopped Firecracker sandbox | `201`. A helper VM exports the disk; the snapshot is a Docker image `aerolvm-snapshot/<hash>:latest` (one flat layer), pushed like a container's. The cleanup timer's `docker image rm` frees it |
+| F2 | Restore by registry ref with `runtime: firecracker`, before any change | **Fails**: AerolVM builds the VM's disk with `skopeo copy docker://127.0.0.1:5000/…`, which tries HTTPS: `server gave HTTP response to HTTPS client`. Docker trusts a loopback registry by itself; skopeo doesn't |
+| F3 | The same, with a containers `registries.conf.d` drop-in marking `127.0.0.1:5000` `insecure = true` | `201`, files intact. `node configure` now writes it |
+| F4 | What a Firecracker restore leaves behind | Nothing outside the sandbox's own run dir (`/srv/jailer/firecracker/<id>`, removed with it): skopeo's work dir is cleaned, and no image is left in Docker |
+| F5 | Extra disks | In v0.7.0 a VM has `rootfs.ext4` only, plus `export.ext4` on the export helper. `SB_FIRECRACKER_OVERLAY_ENABLED` exists but neither the installer nor Lewbox sets it |
+| F6 | Stop a 512 MB Firecracker sandbox through Lewbox | Took 13 s: a Firecracker stop writes the VM's memory to disk. Lewbox's 10 s call timeout cancelled the request, and AerolVM then **abandoned the stop** (`PUT /snapshot/create: context canceled`), leaving the sandbox running. Stops, deletes and restores now get 5 minutes and don't depend on the caller staying connected; the archiver's snapshot gets 15 minutes. This affects every Firecracker cluster, archiving or not, including the stops a workspace suspension makes |

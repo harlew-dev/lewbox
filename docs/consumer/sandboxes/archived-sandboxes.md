@@ -34,7 +34,7 @@ Restoring creates a **new** sandbox:
 
 The new sandbox starts as usual and runs in the same region. The archive is kept, so you can restore it again later.
 
-Environment variables are **not** kept: a snapshot records the disk, not what you passed at start. Pass them again when you create the sandbox. Running programs end when a sandbox stops, archived or not; they are not running in the archive.
+Environment variables are **not** kept: a snapshot records the disk, not what you passed at start. Pass them again when you create the sandbox. Running programs are not kept either: the archive holds the disk only, and a restored sandbox boots afresh. On a **Firecracker** region this is a change from a plain stop, which keeps the VM's memory so programs resume; a restore boots a new VM, which takes a few seconds.
 
 ## Restoring with the SDK
 
@@ -44,7 +44,7 @@ The portal shows the archive's **registry reference**; `lewbox archive show <id>
 const sandbox = await sb.create({ image: "<registry ref>" })
 ```
 
-Add the tags and size you need, and pass your environment variables again. The region keeps the reference scoped to your workspace, so only your team can restore it.
+On a Firecracker region, add `runtime: "firecracker"` as for any create there. Add the tags and size you need, and pass your environment variables again. The region keeps the reference scoped to your workspace, so only your team can restore it.
 
 ## E2B pause and connect
 

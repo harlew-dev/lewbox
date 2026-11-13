@@ -160,7 +160,7 @@ lewbox node add eu-1 --url https://eu-1:8443   # only record a node by URL; chan
 | `--admin-url URL` | this machine's AerolVM URL | Where the orchestrator reaches the new cluster |
 | `--endpoint-url URL` | `--admin-url` | What customers use |
 | `--storage-profile NAME` | | New cluster only: the storage profile for snapshots |
-| `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` and the Docker runtime |
+| `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` |
 | `--archive-local-retention instant\|1h\|1d\|7d\|never` | `instant` | New cluster only: how long nodes keep local copies of archived sandboxes |
 | `--archive-snapshot-name id\|name` | `id` | New cluster only: name archive snapshots `archive-<id>` or `archive-<name>-<id>` |
 | `--url URL` | | Record a node by URL only |
@@ -237,7 +237,7 @@ Runs every check now and syncs the node list. See [Health and checks](../cluster
 
 ### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off] [--storage-profile NAME|none] [--stop-policy keep|archive] [--archive-local-retention instant|1h|1d|7d|never] [--archive-snapshot-name id|name]`
 
-Changes the cluster's DNS and storage settings. `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile, refuses the Firecracker runtime, and refuses to be set while the profile is being cleared. `--archive-local-retention` sets how long nodes keep their local copies of archived sandboxes (`instant` by default; `never` installs no cleanup timer), and `--archive-snapshot-name name` names new archive snapshots `archive-<name>-<id>` instead of `archive-<id>`. The next check reconciles the DNS records, and `lewbox node configure` applies the profiles on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+Changes the cluster's DNS and storage settings. `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile and refuses to be set while the profile is being cleared. `--archive-local-retention` sets how long nodes keep their local copies of archived sandboxes (`instant` by default; `never` installs no cleanup timer), and `--archive-snapshot-name name` names new archive snapshots `archive-<name>-<id>` instead of `archive-<id>`. The next check reconciles the DNS records, and `lewbox node configure` applies the profiles on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
 
 ### `lewbox cluster node-settings ID|SLUG`
 

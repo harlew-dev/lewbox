@@ -183,12 +183,7 @@ function SettingsForm({
   const dnsProfiles = useLoad(() => api.listDNSProfiles(), [])
   const storageProfiles = useLoad(() => api.listStorageProfiles(), [])
 
-  const blocked =
-    storageProfile === ''
-      ? 'Choose a storage profile first.'
-      : cluster.runtime === 'firecracker'
-        ? 'Archiving needs the Docker runtime; this cluster uses Firecracker.'
-        : ''
+  const blocked = storageProfile === '' ? 'Choose a storage profile first.' : ''
   const policy = blocked ? 'keep' : stopPolicy
 
   const changes: api.ClusterUpdate = {}
