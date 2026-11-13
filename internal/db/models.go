@@ -119,15 +119,20 @@ type Membership struct {
 }
 
 type Node struct {
-	ID         string
-	Name       string
-	URL        string
-	CreatedAt  time.Time
-	ClusterID  sql.NullString
-	Role       string
-	Version    string
-	Alive      sql.NullInt64
-	LastSeenAt sql.NullTime
+	ID                       string
+	Name                     string
+	URL                      string
+	CreatedAt                time.Time
+	ClusterID                sql.NullString
+	Role                     string
+	Version                  string
+	Alive                    sql.NullInt64
+	LastSeenAt               sql.NullTime
+	SettingsAppliedAt        sql.NullTime
+	SettingsStorageProfileID sql.NullString
+	SettingsStorageVersion   sql.NullInt64
+	SettingsDnsProfileID     sql.NullString
+	SettingsDnsVersion       sql.NullInt64
 }
 
 type NodeSample struct {

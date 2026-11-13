@@ -15,13 +15,15 @@ import (
 
 // nodeAddOptions describe both forms of `lewbox node add`.
 type nodeAddOptions struct {
-	url         string
-	cluster     string
-	newCluster  string
-	role        string
-	advertise   string
-	adminURL    string
-	endpointURL string
+	url            string
+	cluster        string
+	newCluster     string
+	role           string
+	advertise      string
+	adminURL       string
+	endpointURL    string
+	storageProfile string
+	stopPolicy     string
 }
 
 // newAddNodeCmd registers a node by URL, or starts or joins a cluster on this
@@ -44,8 +46,9 @@ func newAddNodeCmd(a *app) *cobra.Command {
 				if len(args) != 1 {
 					return usagef("node add <name> --url <url>")
 				}
-				if o.cluster != "" || o.newCluster != "" || o.advertise != "" || o.adminURL != "" || o.endpointURL != "" {
-					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url or --endpoint-url")
+				if o.cluster != "" || o.newCluster != "" || o.advertise != "" || o.adminURL != "" || o.endpointURL != "" ||
+					o.storageProfile != "" || o.stopPolicy != "" {
+					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url, --endpoint-url, --storage-profile or --stop-policy")
 				}
 				return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 					return b.AddNode(ctx, service.AddNodeRequest{Name: args[0], URL: o.url})
@@ -61,6 +64,8 @@ func newAddNodeCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&o.advertise, "advertise", "", "the IP this node advertises to the cluster")
 	cmd.Flags().StringVar(&o.adminURL, "admin-url", "", "the cluster's admin URL (default: this machine's AerolVM URL)")
 	cmd.Flags().StringVar(&o.endpointURL, "endpoint-url", "", "the endpoint customers use (default: admin-url)")
+	cmd.Flags().StringVar(&o.storageProfile, "storage-profile", "", "the storage profile for a new cluster, by name")
+	cmd.Flags().StringVar(&o.stopPolicy, "stop-policy", "", "what happens to a stopped sandbox in a new cluster: keep or archive")
 	return cmd
 }
 
@@ -70,6 +75,9 @@ func (a *app) runNodeAdd(ctx context.Context, args []string, o *nodeAddOptions) 
 	}
 	if o.cluster != "" && o.newCluster != "" {
 		return usagef("--cluster and --new-cluster cannot be used together")
+	}
+	if o.cluster != "" && (o.storageProfile != "" || o.stopPolicy != "") {
+		return usagef("--storage-profile and --stop-policy only apply to a new cluster: change them with lewbox cluster set")
 	}
 	state, err := a.loadState()
 	if err != nil {
@@ -127,7 +135,7 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		a.say("Local mode: registering this machine as a one-node cluster")
 	}
 
-	if err := a.applySettings(ctx, a.host().runner); err != nil {
+	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
 		return err
 	}
 	if _, err := b.GetCluster(ctx, slug); err == nil {
@@ -144,6 +152,9 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 			return err
 		}
 		a.say("  ✓ cluster %q is already registered", slug)
+		if _, err := a.configureNode(ctx, b, &state, false); err != nil {
+			return err
+		}
 		return a.write(detail)
 	}
 	token, err := a.mintAdminToken(ctx, a.host().runner, "lewbox-"+slug)
@@ -160,13 +171,15 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		endpointURL = adminURL
 	}
 	detail, err := b.AddCluster(ctx, service.AddClusterRequest{
-		Slug:        slug,
-		AdminURL:    adminURL,
-		EndpointURL: endpointURL,
-		Runtime:     state.Runtime,
-		Domain:      clusterDomainOf(state),
-		DNSProfile:  state.DNSProfile,
-		AdminToken:  token,
+		Slug:           slug,
+		AdminURL:       adminURL,
+		EndpointURL:    endpointURL,
+		Runtime:        state.Runtime,
+		Domain:         clusterDomainOf(state),
+		DNSProfile:     state.DNSProfile,
+		StorageProfile: o.storageProfile,
+		StopPolicy:     o.stopPolicy,
+		AdminToken:     token,
 	})
 	if err != nil {
 		if se, ok := errors.AsType[*service.Error](err); ok && se.Code == service.CodeConflict {
@@ -180,6 +193,9 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 	state.Cluster = detail.Slug
 	state.Name = name
 	if err := state.Save(); err != nil {
+		return err
+	}
+	if _, err := a.configureNode(ctx, b, &state, false); err != nil {
 		return err
 	}
 	a.say("  ✓ cluster %q registered, node %q added", detail.Slug, name)
@@ -259,7 +275,7 @@ func (a *app) joinNode(ctx context.Context, b backend.Backend, state machine.Sta
 	if err := a.runInstaller(ctx, a.host().runner, run, false); err != nil {
 		return err
 	}
-	if err := a.applySettings(ctx, a.host().runner); err != nil {
+	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
 		return err
 	}
 
@@ -271,6 +287,9 @@ func (a *app) joinNode(ctx context.Context, b backend.Backend, state machine.Sta
 	state.Name = name
 	state.AerolVMVersion = join.Version
 	if err := state.Save(); err != nil {
+		return err
+	}
+	if _, err := a.configureNode(ctx, b, &state, false); err != nil {
 		return err
 	}
 	a.say("  ✓ node %q joined cluster %q", name, resolved.Slug)

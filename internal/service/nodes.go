@@ -29,6 +29,9 @@ type Node struct {
 	Version    string     `json:"version,omitempty"`
 	Alive      *bool      `json:"alive,omitempty"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// Settings is what the node reported it applied, and whether that is
+	// behind its cluster's profiles. Null for a node in no cluster.
+	Settings *NodeSettingsState `json:"settings"`
 }
 
 // NodeList is returned by ListNodes. Data is never null.
@@ -115,13 +118,19 @@ func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList
 	if err != nil {
 		return NodeList{}, fmt.Errorf("list nodes: %w", err)
 	}
-	slugs, err := s.clusterSlugs(ctx)
+	clusters, err := s.clustersByID(ctx)
 	if err != nil {
 		return NodeList{}, err
 	}
 	out := NodeList{Data: make([]Node, 0, len(rows))}
 	for _, r := range rows {
-		out.Data = append(out.Data, toNodeWithSlug(r, slugs))
+		n := toNodeWithSlug(r, clusters)
+		if cluster, ok := clusters[r.ClusterID.String]; ok && r.ClusterID.Valid {
+			if err := s.applyNodeOutdated(ctx, &n, r, cluster); err != nil {
+				return NodeList{}, err
+			}
+		}
+		out.Data = append(out.Data, n)
 	}
 	sort.SliceStable(out.Data, func(i, j int) bool {
 		a, b := out.Data[i], out.Data[j]
@@ -260,20 +269,10 @@ func (s *Service) decorateNode(ctx context.Context, r db.Node) (Node, error) {
 		return Node{}, fmt.Errorf("get cluster: %w", err)
 	}
 	n.Cluster = cluster.Slug
+	if err := s.applyNodeOutdated(ctx, &n, r, cluster); err != nil {
+		return Node{}, err
+	}
 	return n, nil
-}
-
-// clusterSlugs maps cluster IDs to slugs for node lists.
-func (s *Service) clusterSlugs(ctx context.Context) (map[string]string, error) {
-	clusters, err := s.q.ListClusters(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list clusters: %w", err)
-	}
-	slugs := make(map[string]string, len(clusters))
-	for _, c := range clusters {
-		slugs[c.ID] = c.Slug
-	}
-	return slugs, nil
 }
 
 // normalizeURL requires an absolute http(s) URL with a host and no query or
@@ -315,13 +314,14 @@ func toNode(r db.Node) Node {
 		last := r.LastSeenAt.Time.UTC()
 		n.LastSeenAt = &last
 	}
+	n.Settings = nodeSettingsState(r)
 	return n
 }
 
-func toNodeWithSlug(r db.Node, slugs map[string]string) Node {
+func toNodeWithSlug(r db.Node, clusters map[string]db.Cluster) Node {
 	n := toNode(r)
 	if r.ClusterID.Valid {
-		n.Cluster = slugs[r.ClusterID.String]
+		n.Cluster = clusters[r.ClusterID.String].Slug
 	}
 	return n
 }

@@ -279,6 +279,13 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// What a cluster's nodes must apply. The response carries the profiles'
+	// secrets, so it is admin-only.
+	mux.HandleFunc("GET "+Prefix+"/clusters/{ref}/node-settings", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ClusterNodeSettings(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/clusters/{ref}/health", func(w http.ResponseWriter, r *http.Request) {
 		days := 0
 		if raw := r.URL.Query().Get("days"); raw != "" {
@@ -343,6 +350,17 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		resp, err := svc.RemoveNode(r.Context(), r.PathValue("ref"), service.RemoveNodeRequest{
 			Force: force,
 		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// A node reports the profile versions it applied.
+	mux.HandleFunc("PUT "+Prefix+"/nodes/{ref}/settings", func(w http.ResponseWriter, r *http.Request) {
+		var req service.ReportNodeSettingsRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.ReportNodeSettings(r.Context(), r.PathValue("ref"), req)
 		respond(w, log, http.StatusOK, resp, err)
 	})
 

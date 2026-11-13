@@ -50,6 +50,8 @@ type Cluster struct {
 	Domain          string     `json:"domain"`
 	DNSProfile      *string    `json:"dns_profile"`
 	DNSRecords      string     `json:"dns_records"`
+	StorageProfile  *string    `json:"storage_profile"`
+	StopPolicy      string     `json:"stop_policy"`
 	AdminTokenLast4 string     `json:"admin_token_last4"`
 	Status          string     `json:"status"`
 	StatusDetail    string     `json:"status_detail,omitempty"`
@@ -81,15 +83,20 @@ type AddClusterRequest struct {
 	Domain      string `json:"domain"`
 	DNSProfile  string `json:"dns_profile"` // an ID or name; empty for none
 	DNSRecords  string `json:"dns_records"` // auto or off; default auto
-	AdminToken  string `json:"admin_token"`
+	// StorageProfile is an ID or name; empty for none.
+	StorageProfile string `json:"storage_profile"`
+	StopPolicy     string `json:"stop_policy"` // keep or archive; default keep
+	AdminToken     string `json:"admin_token"`
 }
 
-// UpdateClusterRequest changes a cluster's DNS settings. A DNSProfile of ""
-// or "none" clears the profile.
+// UpdateClusterRequest changes a cluster's DNS and storage settings. A
+// DNSProfile or StorageProfile of "" or "none" clears that profile.
 type UpdateClusterRequest struct {
-	Domain     *string `json:"domain,omitempty"`
-	DNSProfile *string `json:"dns_profile,omitempty"`
-	DNSRecords *string `json:"dns_records,omitempty"`
+	Domain         *string `json:"domain,omitempty"`
+	DNSProfile     *string `json:"dns_profile,omitempty"`
+	DNSRecords     *string `json:"dns_records,omitempty"`
+	StorageProfile *string `json:"storage_profile,omitempty"`
+	StopPolicy     *string `json:"stop_policy,omitempty"`
 }
 
 // JoinTokenRequest is the input to CreateJoinToken.
@@ -173,6 +180,17 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	if err := checkDomainProfile(domain, profile); err != nil {
 		return ClusterDetail{}, err
 	}
+	storageProfile, err := s.optionalStorageProfile(ctx, req.StorageProfile)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	stopPolicy, err := clusterStopPolicy(req.StopPolicy)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	if err := checkStopPolicy(stopPolicy, storageProfile != nil, runtime); err != nil {
+		return ClusterDetail{}, err
+	}
 
 	if _, err := s.q.GetClusterBySlug(ctx, slug); err == nil {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -198,24 +216,26 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	}
 	now := s.now()
 	row, err := s.q.CreateCluster(ctx, db.CreateClusterParams{
-		ID:              uuid.NewV7().String(),
-		Slug:            slug,
-		Name:            name,
-		AdminURL:        adminURL,
-		EndpointURL:     endpointURL,
-		Runtime:         runtime,
-		AdminTokenEnc:   sealed,
-		AdminTokenID:    result.principalID,
-		AdminTokenLast4: last4(token),
-		Status:          status,
-		StatusDetail:    detail,
-		Version:         result.version,
-		Domain:          domain,
-		DnsProfileID:    nullProfileID(profile),
-		DnsRecords:      dnsRecords,
-		Checks:          encodeChecks(checks),
-		CheckedAt:       sql.NullTime{Time: now, Valid: true},
-		CreatedAt:       now,
+		ID:               uuid.NewV7().String(),
+		Slug:             slug,
+		Name:             name,
+		AdminURL:         adminURL,
+		EndpointURL:      endpointURL,
+		Runtime:          runtime,
+		AdminTokenEnc:    sealed,
+		AdminTokenID:     result.principalID,
+		AdminTokenLast4:  last4(token),
+		Status:           status,
+		StatusDetail:     detail,
+		Version:          result.version,
+		Domain:           domain,
+		DnsProfileID:     nullProfileID(profile),
+		DnsRecords:       dnsRecords,
+		StorageProfileID: nullStorageProfileID(storageProfile),
+		StopPolicy:       stopPolicy,
+		Checks:           encodeChecks(checks),
+		CheckedAt:        sql.NullTime{Time: now, Valid: true},
+		CreatedAt:        now,
 	})
 	if db.IsUniqueViolation(err) {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -257,9 +277,13 @@ func (s *Service) ListClusters(ctx context.Context) (ClusterList, error) {
 	if err != nil {
 		return ClusterList{}, err
 	}
+	storageNames, err := s.storageProfileNames(ctx)
+	if err != nil {
+		return ClusterList{}, err
+	}
 	out := ClusterList{Data: make([]Cluster, 0, len(rows))}
 	for _, r := range rows {
-		out.Data = append(out.Data, toCluster(r, counts[r.ID], profileNameAt(names, r.DnsProfileID)))
+		out.Data = append(out.Data, toCluster(r, counts[r.ID], profileNameAt(names, r.DnsProfileID), profileNameAt(storageNames, r.StorageProfileID)))
 	}
 	return out, nil
 }
@@ -282,8 +306,9 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 	if _, err := requireAdmin(ctx); err != nil {
 		return ClusterDetail{}, err
 	}
-	if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil {
-		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile or dns_records")
+	if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
+		req.StorageProfile == nil && req.StopPolicy == nil {
+		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile, dns_records, storage_profile or stop_policy")
 	}
 	row, err := s.findCluster(ctx, ref)
 	if err != nil {
@@ -329,11 +354,36 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 		return ClusterDetail{}, err
 	}
 
+	storageID := row.StorageProfileID
+	switch {
+	case req.StorageProfile == nil:
+	case clearsDNSProfile(*req.StorageProfile):
+		storageID = sql.NullString{}
+	default:
+		found, err := s.findStorageProfile(ctx, *req.StorageProfile)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+		storageID = sql.NullString{String: found.ID, Valid: true}
+	}
+	stopPolicy := row.StopPolicy
+	if req.StopPolicy != nil {
+		stopPolicy, err = clusterStopPolicy(*req.StopPolicy)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+	}
+	if err := checkStopPolicy(stopPolicy, storageID.Valid, row.Runtime); err != nil {
+		return ClusterDetail{}, err
+	}
+
 	updated, err := s.q.UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
-		Domain:       domain,
-		DnsProfileID: profileID,
-		DnsRecords:   records,
-		ID:           row.ID,
+		Domain:           domain,
+		DnsProfileID:     profileID,
+		DnsRecords:       records,
+		StorageProfileID: storageID,
+		StopPolicy:       stopPolicy,
+		ID:               row.ID,
 	})
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("update cluster: %w", err)
@@ -395,6 +445,15 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 			status = "unreachable"
 		}
 	}
+	if check, err := s.nodeSettingsCheck(ctx, row); err != nil {
+		return ClusterDetail{}, err
+	} else if check.Name != "" {
+		checks = append(checks, check)
+		status, detail = summarizeChecks(checks)
+		if healthFailed(checks) {
+			status = "unreachable"
+		}
+	}
 	if err := s.storeCheck(ctx, row.ID, status, detail, version, checks); err != nil {
 		return ClusterDetail{}, err
 	}
@@ -451,6 +510,10 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if err != nil {
 		return Cluster{}, err
 	}
+	storage, err := s.storageProfileName(ctx, row.StorageProfileID)
+	if err != nil {
+		return Cluster{}, err
+	}
 	n, err := s.q.DeleteCluster(ctx, row.ID)
 	if err != nil {
 		return Cluster{}, fmt.Errorf("delete cluster: %w", err)
@@ -458,7 +521,7 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if n == 0 {
 		return Cluster{}, notFound("cluster %q not found", ref)
 	}
-	return toCluster(row, len(nodes), name), nil
+	return toCluster(row, len(nodes), name, storage), nil
 }
 
 func sandboxKeysNotRevoked(n int, slug string) error {
@@ -967,13 +1030,20 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 	for _, r := range rows {
 		n := toNode(r)
 		n.Cluster = row.Slug
+		if err := s.applyNodeOutdated(ctx, &n, r, row); err != nil {
+			return ClusterDetail{}, err
+		}
 		nodes = append(nodes, n)
 	}
 	profile, err := s.dnsProfileName(ctx, row.DnsProfileID)
 	if err != nil {
 		return ClusterDetail{}, err
 	}
-	return ClusterDetail{Cluster: toCluster(row, len(nodes), profile), Checks: checks, NodeList: nodes}, nil
+	storage, err := s.storageProfileName(ctx, row.StorageProfileID)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	return ClusterDetail{Cluster: toCluster(row, len(nodes), profile, storage), Checks: checks, NodeList: nodes}, nil
 }
 
 func (s *Service) findCluster(ctx context.Context, ref string) (db.Cluster, error) {
@@ -1072,7 +1142,11 @@ func (s *Service) clusterWithCount(ctx context.Context, row db.Cluster) (Cluster
 	if err != nil {
 		return Cluster{}, err
 	}
-	return toCluster(row, len(rows), profile), nil
+	storage, err := s.storageProfileName(ctx, row.StorageProfileID)
+	if err != nil {
+		return Cluster{}, err
+	}
+	return toCluster(row, len(rows), profile, storage), nil
 }
 
 func (s *Service) clusterToken(row db.Cluster) (string, error) {
@@ -1190,7 +1264,7 @@ func encodeChecks(checks []Check) string {
 	return string(data)
 }
 
-func toCluster(r db.Cluster, nodes int, profile *string) Cluster {
+func toCluster(r db.Cluster, nodes int, profile, storage *string) Cluster {
 	c := Cluster{
 		ID:              r.ID,
 		Slug:            r.Slug,
@@ -1201,6 +1275,8 @@ func toCluster(r db.Cluster, nodes int, profile *string) Cluster {
 		Domain:          r.Domain,
 		DNSProfile:      profile,
 		DNSRecords:      r.DnsRecords,
+		StorageProfile:  storage,
+		StopPolicy:      r.StopPolicy,
 		AdminTokenLast4: r.AdminTokenLast4,
 		Status:          r.Status,
 		StatusDetail:    r.StatusDetail,
@@ -1245,6 +1321,47 @@ func clearsDNSProfile(raw string) bool {
 	return value == "" || strings.EqualFold(value, "none")
 }
 
+// clusterStopPolicy checks what happens to a stopped sandbox: keep it on its
+// node (keep) or archive it to the cluster's bucket (archive).
+func clusterStopPolicy(raw string) (string, error) {
+	policy := strings.ToLower(strings.TrimSpace(raw))
+	if policy == "" {
+		policy = "keep"
+	}
+	if policy != "keep" && policy != "archive" {
+		return "", invalid("stop_policy must be keep or archive")
+	}
+	return policy, nil
+}
+
+// checkStopPolicy refuses a stop policy the cluster can't honour: archiving
+// needs a bucket and is only tested on Docker.
+func checkStopPolicy(policy string, hasStorage bool, runtime string) error {
+	if policy != "archive" {
+		return nil
+	}
+	if !hasStorage {
+		return invalid("stop_policy archive needs a storage profile")
+	}
+	if runtime != "docker" {
+		return invalid("archiving is only tested on Docker clusters")
+	}
+	return nil
+}
+
+// optionalStorageProfile looks up a profile by ID or name, or returns nil for
+// an empty value.
+func (s *Service) optionalStorageProfile(ctx context.Context, raw string) (*db.StorageProfile, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	row, err := s.findStorageProfile(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 // DomainInZone reports whether domain is the zone itself or a name under it.
 func DomainInZone(domain, zone string) bool {
 	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
@@ -1269,6 +1386,14 @@ func checkDomainProfile(domain string, profile *db.DnsProfile) error {
 
 // nullProfileID is the SQL value for an optional DNS profile.
 func nullProfileID(profile *db.DnsProfile) sql.NullString {
+	if profile == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: profile.ID, Valid: true}
+}
+
+// nullStorageProfileID is the SQL value for an optional storage profile.
+func nullStorageProfileID(profile *db.StorageProfile) sql.NullString {
 	if profile == nil {
 		return sql.NullString{}
 	}
@@ -1313,6 +1438,34 @@ func profileNameAt(names map[string]string, id sql.NullString) *string {
 		return nil
 	}
 	return &name
+}
+
+// storageProfileName is the name of the profile a cluster uses, or nil.
+func (s *Service) storageProfileName(ctx context.Context, id sql.NullString) (*string, error) {
+	if !id.Valid {
+		return nil, nil
+	}
+	row, err := s.q.GetStorageProfileByID(ctx, id.String)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get storage profile: %w", err)
+	}
+	return &row.Name, nil
+}
+
+// storageProfileNames maps storage profile IDs to names.
+func (s *Service) storageProfileNames(ctx context.Context) (map[string]string, error) {
+	rows, err := s.q.ListStorageProfiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list storage profiles: %w", err)
+	}
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		names[row.ID] = row.Name
+	}
+	return names, nil
 }
 
 func memberName(m aerolvm.Member) string {

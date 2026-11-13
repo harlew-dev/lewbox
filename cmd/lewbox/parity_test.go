@@ -1301,6 +1301,69 @@ func TestStorageProfiles(t *testing.T) {
 	}
 }
 
+func TestClusterStorageSettingsAndNodeSettings(t *testing.T) {
+	storage := objstoretest.New(t)
+	storage.AddBucket("assets")
+	const secret = "objstore_node_settings_parity_secret"
+	e := newEnv(t)
+
+	if _, errOut, code := e.cliIn(secret+"\n", "storage-profile", "create", "s3-main",
+		"--endpoint", storage.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--prefix", "lewbox", "--access-key-id", storage.AccessKeyID, "--secret-access-key-stdin"); code != 0 {
+		t.Fatalf("storage-profile create: exit %d: %s", code, errOut)
+	}
+
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_storage_parity_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	})
+	out, errOut, code := e.cliIn(token+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin")
+	if code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	var added service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.StorageProfile != nil || added.StopPolicy != "keep" {
+		t.Errorf("new cluster = %+v", added.Cluster)
+	}
+
+	updated := e.same([]string{"cluster", "set", "lab", "--storage-profile", "s3-main", "--stop-policy", "archive"},
+		"PATCH", "/v0/clusters/lab", `{"storage_profile":"s3-main","stop_policy":"archive"}`, 200)
+	if !strings.Contains(updated, `"storage_profile":"s3-main"`) || !strings.Contains(updated, `"stop_policy":"archive"`) {
+		t.Errorf("cluster set = %s", updated)
+	}
+	e.same([]string{"cluster", "get", "lab"}, "GET", "/v0/clusters/lab", "", 200)
+	e.same([]string{"cluster", "set", "lab", "--stop-policy", "keep"},
+		"PATCH", "/v0/clusters/lab", `{"stop_policy":"keep"}`, 200)
+
+	// The node settings carry the bucket secret and the cluster's prefix.
+	settings := e.same([]string{"cluster", "node-settings", "lab"}, "GET", "/v0/clusters/lab/node-settings", "", 200)
+	for _, want := range []string{
+		`"cluster":"lab"`, `"stop_policy":"keep"`, `"profile":"s3-main"`,
+		`"root_directory":"/lewbox/clusters/` + added.ID + `"`, secret,
+	} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("node settings %s is missing %q", settings, want)
+		}
+	}
+	if !strings.Contains(settings, `"dns":null`) {
+		t.Errorf("node settings have DNS without a profile: %s", settings)
+	}
+
+	// Clearing the profile gives a cluster with none.
+	cleared := e.same([]string{"cluster", "set", "lab", "--storage-profile", "none"},
+		"PATCH", "/v0/clusters/lab", `{"storage_profile":"none"}`, 200)
+	if !strings.Contains(cleared, `"storage_profile":null`) {
+		t.Errorf("cleared cluster = %s", cleared)
+	}
+	e.same([]string{"cluster", "node-settings", "lab"}, "GET", "/v0/clusters/lab/node-settings", "", 200)
+}
+
 func TestLoginWithAdminKey(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

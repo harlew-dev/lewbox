@@ -97,6 +97,9 @@ type RegistrySource struct {
 	CacheDir string
 	Arch     string
 	Client   *http.Client
+	// PinnedSHA256 replaces the release's pinned hash. Tests set it to the
+	// hash of a fake archive; it is never set otherwise.
+	PinnedSHA256 string
 }
 
 // NewRegistrySource returns a RegistrySource with the release's defaults. An
@@ -120,6 +123,9 @@ func (s *RegistrySource) Binary(ctx context.Context) ([]byte, error) {
 		arch = runtime.GOARCH
 	}
 	want, ok := registrySHA256[arch]
+	if s.PinnedSHA256 != "" {
+		want, ok = s.PinnedSHA256, true
+	}
 	if !ok {
 		return nil, fmt.Errorf("no pinned registry release for %s", arch)
 	}

@@ -1,8 +1,9 @@
 -- name: CreateCluster :one
 INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc,
                       admin_token_id, admin_token_last4, status, status_detail, version,
-                      domain, dns_profile_id, dns_records, checks, checked_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      domain, dns_profile_id, dns_records, storage_profile_id, stop_policy,
+                      checks, checked_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetClusterByID :one
@@ -16,7 +17,7 @@ SELECT * FROM clusters ORDER BY slug;
 
 -- name: UpdateClusterSettings :one
 UPDATE clusters
-SET domain = ?, dns_profile_id = ?, dns_records = ?
+SET domain = ?, dns_profile_id = ?, dns_records = ?, storage_profile_id = ?, stop_policy = ?
 WHERE id = ?
 RETURNING *;
 

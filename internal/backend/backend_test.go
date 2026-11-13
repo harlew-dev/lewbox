@@ -1090,6 +1090,90 @@ func TestStorageProfileBackendsAgree(t *testing.T) {
 	})
 }
 
+func TestNodeSettingsBackendsAgree(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_node_settings_secret"
+	h := newHarness(t)
+	ctx := context.Background()
+
+	if _, err := h.local.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+		Name: "s3-main", Endpoint: fake.URL, Region: "us-east-1", Bucket: "assets",
+		Prefix: "lewbox", AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:           "eu-west",
+		AdminURL:       h.fake.URL(),
+		EndpointURL:    h.fake.URL(),
+		Runtime:        "docker",
+		StorageProfile: "s3-main",
+		StopPolicy:     "archive",
+		AdminToken:     clusterToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeSettings := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ClusterNodeSettings(ctx, "eu-west")
+	}
+	report := func(ctx context.Context, b backend.Backend) (any, error) {
+		name := "s3-main"
+		return b.ReportNodeSettings(ctx, "node-a", service.ReportNodeSettingsRequest{
+			StorageProfile: &name, StorageVersion: 1,
+		})
+	}
+	getNode := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetNode(ctx, "node-a")
+	}
+
+	runSteps(t, h, []step{
+		both("cluster node settings", nodeSettings),
+		{
+			name: "node settings carry the bucket secret",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.ClusterNodeSettings(ctx, "eu-west")
+			},
+			remote:  nodeSettings,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				settings, ok := v.(service.NodeSettings)
+				if !ok || settings.Storage == nil || settings.DNS != nil {
+					t.Fatalf("settings = %+v", v)
+				}
+				st := settings.Storage
+				if st.Profile != "s3-main" || st.Version != 1 || st.SecretAccessKey != secret ||
+					st.RootDirectory != "/lewbox/clusters/"+detail.ID || !st.PathStyle {
+					t.Errorf("storage = %+v", st)
+				}
+			},
+		},
+		{
+			name:    "report node settings",
+			local:   report,
+			remote:  getNode,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				node, ok := v.(service.Node)
+				if !ok || node.Settings == nil || node.Settings.AppliedAt == nil || node.Settings.Outdated {
+					t.Fatalf("node = %+v", v)
+				}
+			},
+		},
+		both("list nodes after a report", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListNodes(ctx, service.ListNodesRequest{Cluster: "eu-west"})
+		}),
+		both("get cluster with storage", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetCluster(ctx, "eu-west")
+		}),
+		both("node settings without a cluster", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ClusterNodeSettings(ctx, "missing")
+		}),
+	})
+}
+
 func TestLocalAuthHasNoSession(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

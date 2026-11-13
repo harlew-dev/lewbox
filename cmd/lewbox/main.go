@@ -453,7 +453,7 @@ func newNodeCmd(a *app) *cobra.Command {
 	}
 	remove.Flags().BoolVar(&force, "force", false, "delete it even if it still owns sandboxes")
 
-	node.AddCommand(add, list, get, remove)
+	node.AddCommand(add, list, get, remove, newConfigureNodeCmd(a), newCleanupNodeCmd(a))
 	return node
 }
 
@@ -560,14 +560,16 @@ func newClusterCmd(a *app) *cobra.Command {
 	joinCommand.Flags().StringVar(&joinRole, "role", "mixed", "role for the new node: worker, ingress, server or mixed")
 	joinCommand.Flags().StringVar(&joinTTL, "ttl", "15m", "how long the token is valid")
 
-	var setDomain, setDNSProfile, setDNSRecords string
+	var setDomain, setDNSProfile, setDNSRecords, setStorageProfile, setStopPolicy string
 	set := &cobra.Command{
 		Use:   "set <id|slug>",
-		Short: "Change a cluster's DNS settings (PATCH /v0/clusters/{id|slug})",
-		Long: "Set the cluster's domain and DNS profile, or turn the records Lewbox\n" +
-			"keeps on or off. The next cluster check reconciles the records.",
+		Short: "Change a cluster's DNS and storage settings (PATCH /v0/clusters/{id|slug})",
+		Long: "Set the cluster's domain and profiles, or turn the records Lewbox\n" +
+			"keeps on or off. The next cluster check reconciles the records, and\n" +
+			"`lewbox node configure` applies the profiles on each node.",
 		Example: "  lewbox cluster set eu-west --domain eu.example.com --dns-profile cf-prod\n" +
-			"  lewbox cluster set eu-west --dns-records off",
+			"  lewbox cluster set eu-west --dns-records off\n" +
+			"  lewbox cluster set lab --storage-profile s3-main --stop-policy archive",
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateClusterRequest{}
@@ -580,8 +582,15 @@ func newClusterCmd(a *app) *cobra.Command {
 			if cmd.Flags().Changed("dns-records") {
 				req.DNSRecords = &setDNSRecords
 			}
-			if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil {
-				return usagef("nothing to change: pass --domain, --dns-profile or --dns-records")
+			if cmd.Flags().Changed("storage-profile") {
+				req.StorageProfile = &setStorageProfile
+			}
+			if cmd.Flags().Changed("stop-policy") {
+				req.StopPolicy = &setStopPolicy
+			}
+			if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
+				req.StorageProfile == nil && req.StopPolicy == nil {
+				return usagef("nothing to change: pass --domain, --dns-profile, --dns-records, --storage-profile or --stop-policy")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 				return b.UpdateCluster(ctx, args[0], req)
@@ -591,6 +600,17 @@ func newClusterCmd(a *app) *cobra.Command {
 	set.Flags().StringVar(&setDomain, "domain", "", "the cluster's domain, such as eu.example.com (empty clears it)")
 	set.Flags().StringVar(&setDNSProfile, "dns-profile", "", "the DNS profile for TLS and records (none clears it)")
 	set.Flags().StringVar(&setDNSRecords, "dns-records", "", "keep the domain's records: auto or off")
+	set.Flags().StringVar(&setStorageProfile, "storage-profile", "", "the storage profile for snapshots (none clears it)")
+	set.Flags().StringVar(&setStopPolicy, "stop-policy", "", "what happens to a stopped sandbox: keep or archive")
+
+	nodeSettings := &cobra.Command{
+		Use:   "node-settings <id|slug>",
+		Short: "Show what a cluster's nodes must apply (GET /v0/clusters/{id|slug}/node-settings)",
+		Args:  usageArgs(cobra.ExactArgs(1)),
+		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
+			return b.ClusterNodeSettings(ctx, args[0])
+		}),
+	}
 
 	var healthDays int
 	health := &cobra.Command{
@@ -614,7 +634,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	}
 	metrics.Flags().StringVar(&metricsRange, "range", "24h", "24h, 7d or 30d")
 
-	cluster.AddCommand(add, list, get, check, set, health, metrics, remove, joinCommand)
+	cluster.AddCommand(add, list, get, check, set, health, metrics, remove, joinCommand, nodeSettings)
 	return cluster
 }
 

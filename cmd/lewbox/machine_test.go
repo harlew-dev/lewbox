@@ -1,6 +1,9 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +23,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/machine"
 	"github.com/harlew-dev/lewbox/internal/machine/machinetest"
+	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
 
@@ -108,6 +112,9 @@ func newHarness(t *testing.T, localURL string) *harness {
 			return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 		},
 		hostname: func() (string, error) { return "node-1", nil },
+		waitRegistry: func(context.Context) error {
+			return nil
+		},
 	}
 	return h
 }
@@ -125,8 +132,28 @@ func (h *harness) run(_ context.Context, cmd machine.Cmd) error {
 		if cmd.Stdin != nil {
 			b, _ := io.ReadAll(cmd.Stdin)
 			content = string(b)
+		} else if len(cmd.Args) >= 2 {
+			// A copy such as `install -D -m 0755 -o root -g root <exe> <dest>`.
+			if data, err := os.ReadFile(cmd.Args[len(cmd.Args)-2]); err == nil {
+				content = string(data)
+			}
 		}
 		h.files[path] = content
+		return nil
+	}
+	if cmd.Name == "rm" {
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "-") {
+				continue
+			}
+			delete(h.files, arg)
+			prefix := strings.TrimRight(arg, "/") + "/"
+			for path := range h.files {
+				if strings.HasPrefix(path, prefix) {
+					delete(h.files, path)
+				}
+			}
+		}
 		return nil
 	}
 	if cmd.Name == "systemctl" && len(cmd.Args) > 0 && cmd.Args[0] == "restart" {
@@ -146,6 +173,21 @@ func (h *harness) output(_ context.Context, cmd machine.Cmd) ([]byte, error) {
 			return []byte(content), nil
 		}
 		return nil, os.ErrNotExist
+	case "sha256sum":
+		path := cmd.Args[0]
+		if content, ok := h.files[path]; ok {
+			return []byte(sumHex([]byte(content)) + "  " + path + "\n"), nil
+		}
+		return nil, os.ErrNotExist
+	case "test":
+		if _, ok := h.files[cmd.Args[len(cmd.Args)-1]]; ok {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("missing")
+	case "id":
+		return []byte("999\n"), nil
+	case "docker":
+		return []byte(""), nil
 	case "systemctl":
 		if len(cmd.Args) > 0 && cmd.Args[0] == "is-active" {
 			if h.active {
@@ -203,6 +245,37 @@ func writeMirror(t *testing.T, version, script string) string {
 		}
 	}
 	return filepath.Dir(dir)
+}
+
+// writeRegistryMirror writes the fake registry release the mirror serves at
+// <from>/registry/<archive>, and pins its hash.
+func writeRegistryMirror(t *testing.T, from string) {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	data := []byte("fake registry binary")
+	if err := tw.WriteHeader(&tar.Header{Name: "registry", Mode: 0o755, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(from, "registry")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, machine.RegistryArchive(runtime.GOARCH)), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	registryPin = sumHex(buf.Bytes())
+	t.Cleanup(func() { registryPin = "" })
 }
 
 func saveState(t *testing.T, state machine.State) {
@@ -991,5 +1064,274 @@ func TestUpdateAerolVMOnlySingleNodeMode(t *testing.T) {
 	saveState(t, machine.State{Name: "n", Mode: machine.ModeLocal, Runtime: "docker", AerolVMVersion: "v0.6.13", From: from})
 	if _, errOut, code := h.runCLI("", "update", "--aerolvm-only", "--aerolvm-version", "v0.7.1", "--yes"); code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
+	}
+}
+
+// storageEnv creates a storage profile and a cluster that uses it, with
+// node-1 as its only member. It returns the cluster's ID.
+func storageEnv(t *testing.T, e *env, fake *aerolvmtest.Server) string {
+	t.Helper()
+	storage := objstoretest.New(t)
+	storage.AddBucket("assets")
+	if _, errOut, code := e.cliIn("objstore-secret\n", "storage-profile", "create", "s3-main",
+		"--endpoint", storage.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--prefix", "lewbox", "--access-key-id", storage.AccessKeyID, "--secret-access-key-stdin"); code != 0 {
+		t.Fatalf("storage-profile create: exit %d: %s", code, errOut)
+	}
+	fake.AdminToken = "avm_cluster_token"
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	out, errOut, code := e.cliIn(fake.AdminToken+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin")
+	if code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("cluster", "set", "lab",
+		"--storage-profile", "s3-main", "--stop-policy", "archive"); code != 0 {
+		t.Fatalf("cluster set: exit %d: %s", code, errOut)
+	}
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	return detail.ID
+}
+
+func TestNodeConfigureStorage(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	clusterID := storageEnv(t, e, fake)
+	from := writeMirror(t, "v0.7.0", testScript)
+	writeRegistryMirror(t, from)
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab", From: from,
+	})
+
+	out, errOut, code := e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+	var got configureOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Node != "node-1" || got.Cluster != "lab" || got.Storage != "applied" ||
+		!got.RegistryChanged || !got.EnvChanged || got.DNS != "none" || !got.CleanupTimer {
+		t.Errorf("configure = %+v", got)
+	}
+
+	wantEnv := machine.EnvFileContent + machine.PushEnv(clusterID)
+	if h.files[machine.EnvironmentFile] != wantEnv {
+		t.Errorf("%s = %q, want %q", machine.EnvironmentFile, h.files[machine.EnvironmentFile], wantEnv)
+	}
+	config := h.files[machine.RegistryConfigFile]
+	for _, want := range []string{
+		`bucket: "assets"`,
+		`rootdirectory: "/lewbox/clusters/` + clusterID + `"`,
+		`secretkey: "objstore-secret"`,
+	} {
+		if !strings.Contains(config, want) {
+			t.Errorf("registry config is missing %q:\n%s", want, config)
+		}
+	}
+	if h.files[machine.RegistryUnitFile] != machine.RegistryUnit {
+		t.Error("registry unit not written")
+	}
+	if h.files[machine.CleanupService] != machine.CleanupServiceUnit {
+		t.Error("cleanup service not written")
+	}
+	if h.files[machine.CleanupTimer] != machine.CleanupTimerUnit {
+		t.Error("cleanup timer not written")
+	}
+	if h.files[machine.CleanupBinary] != "old binary" {
+		t.Errorf("cleanup binary = %q, want a copy of the running binary", h.files[machine.CleanupBinary])
+	}
+	if !h.runner.Ran("systemctl", "enable", "--now", machine.CleanupTimerName) {
+		t.Error("the cleanup timer was not enabled")
+	}
+	for _, line := range h.runner.Displays() {
+		if strings.Contains(line, "objstore-secret") {
+			t.Errorf("a command shows the bucket secret: %s", line)
+		}
+	}
+
+	// The node reported what it applied.
+	nodeOut, errOut, code := e.cli("node", "get", "node-1")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"outdated":false`) || !strings.Contains(nodeOut, `"applied_at":"`) {
+		t.Errorf("node settings = %s", nodeOut)
+	}
+
+	// A second run changes nothing.
+	h.runner.Reset()
+	out, errOut, code = e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("second node configure: exit %d: %s", code, errOut)
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Storage != "applied" || got.RegistryChanged || got.EnvChanged || got.CleanupTimer {
+		t.Errorf("second configure = %+v", got)
+	}
+	if h.runner.Ran("systemctl", "restart", "lewbox-registry") {
+		t.Error("an unchanged registry was restarted")
+	}
+}
+
+func TestNodeConfigureRemovesStorage(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	storageEnv(t, e, fake)
+	from := writeMirror(t, "v0.7.0", testScript)
+	writeRegistryMirror(t, from)
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab", From: from,
+	})
+
+	if _, errOut, code := e.cliWith(h, "", "node", "configure"); code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("cluster", "set", "lab", "--storage-profile", "none", "--stop-policy", "keep"); code != 0 {
+		t.Fatalf("cluster set: exit %d: %s", code, errOut)
+	}
+
+	h.runner.Reset()
+	out, errOut, code := e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("node configure after clearing: exit %d: %s", code, errOut)
+	}
+	var got configureOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Storage != "removed" || !got.RegistryChanged || !got.EnvChanged || !got.CleanupTimer {
+		t.Errorf("configure = %+v", got)
+	}
+	if h.files[machine.EnvironmentFile] != machine.EnvFileContent {
+		t.Errorf("%s = %q", machine.EnvironmentFile, h.files[machine.EnvironmentFile])
+	}
+	for _, path := range []string{machine.RegistryUnitFile, machine.RegistryConfigFile, machine.CleanupService, machine.CleanupTimer, machine.CleanupBinary} {
+		if _, ok := h.files[path]; ok {
+			t.Errorf("%s was not removed", path)
+		}
+	}
+	if !h.runner.Ran("systemctl", "disable", "--now", machine.CleanupTimerName) {
+		t.Error("the cleanup timer was not disabled")
+	}
+}
+
+func TestNodeConfigureDNSVersion(t *testing.T) {
+	cf := cloudflaretest.New(t)
+	cf.AddZone("example.com")
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", cf.URL)
+	e := newEnvWith(t, service.WithCloudflareURL(cf.URL))
+	if _, errOut, code := e.cliIn(cf.Token+"\n", "dns-profile", "create", "cf-prod",
+		"--zone", "example.com", "--api-token-stdin"); code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "avm_cluster_token"
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(fake.AdminToken+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("cluster", "set", "lab", "--domain", "eu.example.com", "--dns-profile", "cf-prod"); code != 0 {
+		t.Fatalf("cluster set: exit %d: %s", code, errOut)
+	}
+	// A new token bumps the profile to version 2.
+	if _, errOut, code := e.cliIn(cf.Token+"\n", "dns-profile", "update", "cf-prod", "--api-token-stdin"); code != 0 {
+		t.Fatalf("dns-profile update: exit %d: %s", code, errOut)
+	}
+
+	from := writeMirror(t, "v0.7.0", testScript)
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModeDomain, Domain: "eu.example.com",
+		DNSProfile: "cf-prod", DNSProfileVersion: 1,
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab", From: from,
+	})
+
+	out, errOut, code := e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+	var got configureOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DNS != "updated" {
+		t.Errorf("configure = %+v", got)
+	}
+	installer := ""
+	for _, line := range h.runner.Displays() {
+		if strings.Contains(line, "bash ") {
+			installer = line
+		}
+		if strings.Contains(line, " init ") || strings.Contains(line, " join ") {
+			t.Errorf("configure passed a word to the installer: %s", line)
+		}
+	}
+	for _, want := range []string{"--version v0.7.0", "--dns-provider cloudflare", "--dns-api-token ******"} {
+		if !strings.Contains(installer, want) {
+			t.Errorf("installer command is missing %q: %s", want, installer)
+		}
+	}
+	if strings.Contains(out+errOut, cf.Token) {
+		t.Errorf("the DNS token leaked:\n%s\n%s", out, errOut)
+	}
+	if state := loadState(t); state.DNSProfileVersion != 2 || state.DNSProfile != "cf-prod" {
+		t.Errorf("state = %+v", state)
+	}
+	nodeOut, _, code := e.cli("node", "get", "node-1")
+	if code != 0 || !strings.Contains(nodeOut, `"outdated":false`) {
+		t.Errorf("node settings = %s", nodeOut)
+	}
+}
+
+func TestNodeCleanupAsRootUsesNoSudo(t *testing.T) {
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "avm_local_pat"
+	fake.AddSnapshot("t1", aerolvm.Snapshot{
+		Name: "archive-sb-1", Image: "aerolvm-snapshot/aaa:latest",
+		PushState: "active", ImageRegistryRef: "127.0.0.1:5000/cluster/c1/snapshots/t1/archive-sb-1:latest",
+	})
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	h.hd.euid = func() int { return 0 }
+
+	out, errOut, code := h.runCLI("", "node", "cleanup")
+	if code != 0 {
+		t.Fatalf("node cleanup: exit %d: %s", code, errOut)
+	}
+	var got machine.CleanupResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Removed) != 1 || got.Removed[0] != "aerolvm-snapshot/aaa:latest" {
+		t.Errorf("removed = %v", got.Removed)
+	}
+	for _, cmd := range h.runner.Commands() {
+		if cmd.Sudo {
+			t.Errorf("ran %s with sudo as root", cmd.Display())
+		}
+	}
+	if strings.Contains(errOut, "sudo") {
+		t.Errorf("stderr shows sudo as root: %s", errOut)
 	}
 }

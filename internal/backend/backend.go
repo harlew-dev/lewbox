@@ -34,11 +34,13 @@ type Backend interface {
 	RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error)
 	ResolveCluster(ctx context.Context, ref string) (service.Cluster, error)
 	CreateJoinToken(ctx context.Context, ref string, req service.JoinTokenRequest) (service.JoinToken, error)
+	ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error)
 
 	AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error)
 	ListNodes(ctx context.Context, req service.ListNodesRequest) (service.NodeList, error)
 	GetNode(ctx context.Context, ref string) (service.Node, error)
 	RemoveNode(ctx context.Context, ref string, req service.RemoveNodeRequest) (service.Node, error)
+	ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error)
 
 	// org is an organization ID or slug; "" means an admin key's own.
 	ListOrganizations(ctx context.Context, req service.ListOrganizationsRequest) (service.OrganizationList, error)
@@ -216,6 +218,12 @@ func (l Local) CreateJoinToken(ctx context.Context, ref string, req service.Join
 	return l.Svc.CreateJoinToken(l.withPrincipal(ctx), ref, req)
 }
 
+// ClusterNodeSettings returns what a cluster's nodes must apply, with the
+// profiles' secrets.
+func (l Local) ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error) {
+	return l.Svc.ClusterNodeSettings(l.withPrincipal(ctx), ref)
+}
+
 // AddNode registers a node.
 func (l Local) AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error) {
 	return l.Svc.AddNode(l.withPrincipal(ctx), req)
@@ -234,6 +242,11 @@ func (l Local) GetNode(ctx context.Context, ref string) (service.Node, error) {
 // RemoveNode removes a node.
 func (l Local) RemoveNode(ctx context.Context, ref string, req service.RemoveNodeRequest) (service.Node, error) {
 	return l.Svc.RemoveNode(l.withPrincipal(ctx), ref, req)
+}
+
+// ReportNodeSettings records the profile versions a node applied.
+func (l Local) ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error) {
+	return l.Svc.ReportNodeSettings(l.withPrincipal(ctx), ref, req)
 }
 
 // ListOrganizations returns organizations.

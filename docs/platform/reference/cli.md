@@ -151,9 +151,11 @@ lewbox node add eu-1 --url https://eu-1:8443   # only record a node by URL; chan
 | `--advertise IP` | the public host's IP | The address other nodes use for this one |
 | `--admin-url URL` | this machine's AerolVM URL | Where the orchestrator reaches the new cluster |
 | `--endpoint-url URL` | `--admin-url` | What customers use |
+| `--storage-profile NAME` | | New cluster only: the storage profile for snapshots |
+| `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` and the Docker runtime |
 | `--url URL` | | Record a node by URL only |
 
-`NAME` defaults to the name given to `install`. Both forms register things with the orchestrator, so when signed in they need an instance admin. Running it again is safe. See [Start a cluster](../clusters/start-a-cluster.md) and [Add nodes](../clusters/add-nodes.md).
+`NAME` defaults to the name given to `install`. Both forms register things with the orchestrator, so when signed in they need an instance admin. Running it again is safe. After it registers the node, `node add` applies the cluster's node settings, the same steps as `lewbox node configure`. See [Start a cluster](../clusters/start-a-cluster.md) and [Add nodes](../clusters/add-nodes.md).
 
 ### `lewbox update`
 
@@ -223,9 +225,13 @@ One cluster: its fields, the last check results, and its nodes. Doesn't contact 
 
 Runs every check now and syncs the node list. See [Health and checks](../clusters/health-and-checks.md).
 
-### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off]`
+### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off] [--storage-profile NAME|none] [--stop-policy keep|archive]`
 
-Changes the cluster's DNS settings. `--domain ""` clears the domain; `--dns-profile none` clears the profile. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. The next check reconciles the records. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps).
+Changes the cluster's DNS and storage settings. `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile, refuses the Firecracker runtime, and refuses to be set while the profile is being cleared. The next check reconciles the DNS records, and `lewbox node configure` applies the profiles on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+
+### `lewbox cluster node-settings ID|SLUG`
+
+Prints what every node of the cluster must apply: the cluster ID, stop policy, the storage profile's bucket and registry root, and the DNS profile's zone, domain and token. It is mostly for debugging. The text form masks the bucket secret and the DNS token with `******`; `--json` shows them. Instance admins only, because it returns secrets.
 
 ### `lewbox cluster health ID|SLUG [--days 30]`
 
@@ -267,6 +273,14 @@ One node.
 ### `lewbox node remove ID|NAME`
 
 Drains the node, removes it from its cluster in AerolVM, and forgets it. Asks to confirm. `--force` removes a node that still owns sandboxes. Refuses a cluster's last node and the node behind its admin URL. See [Remove nodes and clusters](../clusters/remove-nodes-and-clusters.md).
+
+### `lewbox node configure [--dry-run]`
+
+Run on a node. Fetches the cluster's node settings and applies them here: installs or removes the snapshot registry and its archive cleanup timer, writes `/etc/sandboxd/lewbox.env` (with the snapshot push lines when the cluster has storage), and re-runs the verified installer with a changed DNS profile's token. Then it reports the versions it applied, so an out-of-date node stops being flagged. Run it on every node whose cluster changed a profile. It refuses to run as root. `--dry-run` prints what would change, changing nothing. See [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+
+### `lewbox node cleanup`
+
+Removes this node's local copies of snapshots already archived in the cluster's bucket. The `lewbox-archive-cleanup.timer` runs the same command as root every five minutes on a cluster with storage. It needs no orchestrator; it talks to this machine's AerolVM over `127.0.0.1` with the operator token. As root it runs its commands without `sudo`; as another user it uses `sudo`.
 
 ***
 

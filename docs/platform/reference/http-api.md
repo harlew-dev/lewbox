@@ -143,11 +143,12 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | Route | Who | |
 |---|---|---|
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
-| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, admin_token}` → `201` ClusterDetail. `domain`, `dns_profile` (an ID or name) and `dns_records` are optional. A failed required check → `412` with the checks in `details` |
-| `PATCH /v0/clusters/{ref}` | admin | `{domain, dns_profile, dns_records}`: change the DNS settings; `dns_profile` `""` or `"none"` clears it, `dns_records` is `auto` or `off`. An empty body, a domain outside the profile's zone or a bad record mode → `400`. → ClusterDetail |
+| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, admin_token}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `stop_policy` is `keep` or `archive`. A failed required check → `412` with the checks in `details`; `archive` without a storage profile or on Firecracker, or a bad policy, → `400` |
+| `PATCH /v0/clusters/{ref}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. An empty body, a domain outside the profile's zone, a bad record mode or policy, `archive` without a profile, or clearing the profile while `archive` is set → `400`. → ClusterDetail |
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
+| `GET /v0/clusters/{ref}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, stop_policy, storage, dns}`. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
 | `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
 | `GET /v0/clusters/{ref}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
 | `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
@@ -162,6 +163,7 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | `GET /v0/nodes/{ref}` | admin | Node |
 | `DELETE /v0/nodes/{ref}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
+| `PUT /v0/nodes/{ref}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version}`: the versions a node applied, a name or `null` for each profile. A version below 1 with a profile → `400`; a node in no cluster → `412`. → the Node |
 
 ### Accounts
 
@@ -255,6 +257,8 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "domain": "eu.api.example.com",
   "dns_profile": "cf-prod",
   "dns_records": "auto",
+  "storage_profile": "s3-main",
+  "stop_policy": "archive",
   "admin_token_last4": "9f3a",
   "status": "ready",
   "version": "v0.7.0",
@@ -264,7 +268,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned. `domain` is `""` when the cluster has none, `dns_profile` is the profile's **name** or `null`, and `dns_records` is `auto` or `off`.
+`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned. `domain` is `""` when the cluster has none, `dns_profile` and `storage_profile` are the profiles' **names** or `null`, `dns_records` is `auto` or `off`, and `stop_policy` is `keep` or `archive`.
 
 **ClusterDetail** is a Cluster plus `checks` (a list of `{name, ok, fatal, detail}`) and `node_list` (a list of Nodes).
 
@@ -281,9 +285,16 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "version": "v0.7.0",
   "alive": true,
   "last_seen_at": "2026-11-11T15:22:51.1Z",
-  "created_at": "2026-11-11T15:22:51.1Z"
+  "created_at": "2026-11-11T15:22:51.1Z",
+  "settings": {
+    "applied_at": "2026-11-13T09:15:04.2Z",
+    "outdated": true,
+    "reasons": ["storage profile s3-main is at version 3; this node has version 2"]
+  }
 }
 ```
+
+`settings` is `null` for a node in no cluster. Otherwise `applied_at` is the last report (`null` when it never reported), `outdated` says its applied profile versions are behind its cluster's, and `reasons` (never `null`) lists why.
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 

@@ -517,7 +517,8 @@ func (s *Service) deleteArchiveFromBucket(ctx context.Context, cluster db.Cluste
 	if err != nil {
 		return err
 	}
-	prefix := registryRoot(profile.Prefix, cluster.ID) + "/docker/registry/v2/repositories/" + repo + "/"
+	// Object keys never start with a slash; the registry's root directory does.
+	prefix := strings.TrimPrefix(registryRoot(profile.Prefix, cluster.ID), "/") + "/docker/registry/v2/repositories/" + repo + "/"
 	if _, err := client.DeletePrefix(ctx, prefix); err != nil {
 		return fmt.Errorf("delete archive %q from the bucket: %w", registryRef, err)
 	}
@@ -543,18 +544,6 @@ func archiveRepo(registryRef, clusterID string) (string, error) {
 		return "", fmt.Errorf("registry ref %q is not an archive", registryRef)
 	}
 	return repo, nil
-}
-
-// registryRoot is the bucket path a cluster's registry stores under. It
-// matches machine.RegistryRoot, without the leading slash object keys never
-// have.
-func registryRoot(prefix, clusterID string) string {
-	parts := make([]string, 0, 3)
-	if p := strings.Trim(prefix, "/"); p != "" {
-		parts = append(parts, p)
-	}
-	parts = append(parts, "clusters", strings.ToLower(clusterID))
-	return strings.Join(parts, "/")
 }
 
 // encodeTags stores a sandbox's tags as a JSON object.

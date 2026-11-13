@@ -78,6 +78,8 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderClusterHealth(w, data)
 	case service.ClusterMetrics:
 		return renderClusterMetrics(w, data)
+	case service.NodeSettings:
+		return renderNodeSettings(w, data, now)
 	case service.Overview:
 		return renderOverview(w, data)
 	case contextList:
@@ -513,6 +515,23 @@ func renderFirewall(w io.Writer, f firewallOutput) error {
 		fmt.Fprintf(w, "kept: %s\n", strings.Join(f.Kept, ", "))
 	}
 	return nil
+}
+
+// renderNodeSettings prints what a cluster's nodes must apply. The text form
+// masks the bucket secret and the DNS token; --json shows them.
+func renderNodeSettings(w io.Writer, s service.NodeSettings, now time.Time) error {
+	masked := s
+	if s.Storage != nil {
+		storage := *s.Storage
+		storage.SecretAccessKey = "******"
+		masked.Storage = &storage
+	}
+	if s.DNS != nil {
+		dns := *s.DNS
+		dns.APIToken = "******"
+		masked.DNS = &dns
+	}
+	return renderObject(w, masked, now)
 }
 
 // renderObject prints any JSON object as aligned key: value lines. Nested

@@ -34,6 +34,7 @@ type hostDeps struct {
 	hostname       func() (string, error)
 	releaseURL     string
 	interfaceAddrs func() ([]netip.Prefix, error)
+	waitRegistry   func(ctx context.Context) error
 }
 
 // defaultHostDeps wires the commands to the real machine.
@@ -137,6 +138,11 @@ func (a *app) host() *hostDeps {
 	if hd.interfaceAddrs == nil {
 		hd.interfaceAddrs = base.interfaceAddrs
 	}
+	if hd.waitRegistry == nil {
+		hd.waitRegistry = func(ctx context.Context) error {
+			return machine.WaitRegistry(ctx, hd.sleep)
+		}
+	}
 	return hd
 }
 
@@ -206,6 +212,20 @@ func newInstallerSource(from string) *machine.Source {
 // of their fake installer; it is never set otherwise.
 var installerPin string
 
+// newRegistrySource resolves a registry source, with the environment as the
+// fallback for --from.
+func newRegistrySource(from string) *machine.RegistrySource {
+	s := machine.NewRegistrySource(from)
+	if registryPin != "" {
+		s.PinnedSHA256 = registryPin
+	}
+	return s
+}
+
+// registryPin replaces the pinned registry archive hash. Tests set it to the
+// hash of their fake archive; it is never set otherwise.
+var registryPin string
+
 // loadState loads this machine's State. A missing file is a precondition with
 // the fix the user needs.
 func (a *app) loadState() (machine.State, error) {
@@ -248,14 +268,15 @@ func installerCommand(env machine.Env, path string, args []string, secrets ...st
 	}
 }
 
-// applySettings writes Lewbox's files on this node and waits for health.
-func (a *app) applySettings(ctx context.Context, runner machine.Runner) error {
+// applySettings writes Lewbox's files on this node and waits for health. It
+// reports whether the env file or the drop-in changed.
+func (a *app) applySettings(ctx context.Context, runner machine.Runner, envContent string) (bool, error) {
 	a.say("Lewbox settings")
 	changed, err := machine.ApplySettings(ctx, runner, a.host().localAPIURL, a.host().sleep, func(cmd machine.Cmd) {
 		a.say("  → %s", cmd.Display())
-	})
+	}, envContent)
 	if err != nil {
-		return err
+		return changed, err
 	}
 	if changed {
 		a.say("  ✓ wrote %s and %s, restarted sandboxd", machine.EnvironmentFile, machine.DropInFile)
@@ -263,7 +284,7 @@ func (a *app) applySettings(ctx context.Context, runner machine.Runner) error {
 		a.say("  ✓ %s and %s already in place", machine.EnvironmentFile, machine.DropInFile)
 	}
 	a.say("  ✓ sandboxd healthy at %s/health", a.host().localAPIURL)
-	return nil
+	return changed, nil
 }
 
 // mintAdminToken reads the PAT and mints the cluster's admin token over

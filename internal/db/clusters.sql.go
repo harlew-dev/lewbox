@@ -46,30 +46,33 @@ func (q *Queries) CountNodesByCluster(ctx context.Context) ([]CountNodesByCluste
 const createCluster = `-- name: CreateCluster :one
 INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc,
                       admin_token_id, admin_token_last4, status, status_detail, version,
-                      domain, dns_profile_id, dns_records, checks, checked_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      domain, dns_profile_id, dns_records, storage_profile_id, stop_policy,
+                      checks, checked_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy
 `
 
 type CreateClusterParams struct {
-	ID              string
-	Slug            string
-	Name            string
-	AdminURL        string
-	EndpointURL     string
-	Runtime         string
-	AdminTokenEnc   []byte
-	AdminTokenID    string
-	AdminTokenLast4 string
-	Status          string
-	StatusDetail    string
-	Version         string
-	Domain          string
-	DnsProfileID    sql.NullString
-	DnsRecords      string
-	Checks          string
-	CheckedAt       sql.NullTime
-	CreatedAt       time.Time
+	ID               string
+	Slug             string
+	Name             string
+	AdminURL         string
+	EndpointURL      string
+	Runtime          string
+	AdminTokenEnc    []byte
+	AdminTokenID     string
+	AdminTokenLast4  string
+	Status           string
+	StatusDetail     string
+	Version          string
+	Domain           string
+	DnsProfileID     sql.NullString
+	DnsRecords       string
+	StorageProfileID sql.NullString
+	StopPolicy       string
+	Checks           string
+	CheckedAt        sql.NullTime
+	CreatedAt        time.Time
 }
 
 func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error) {
@@ -89,6 +92,8 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		arg.Domain,
 		arg.DnsProfileID,
 		arg.DnsRecords,
+		arg.StorageProfileID,
+		arg.StopPolicy,
 		arg.Checks,
 		arg.CheckedAt,
 		arg.CreatedAt,
@@ -308,16 +313,18 @@ func (q *Queries) UpdateClusterCheck(ctx context.Context, arg UpdateClusterCheck
 
 const updateClusterSettings = `-- name: UpdateClusterSettings :one
 UPDATE clusters
-SET domain = ?, dns_profile_id = ?, dns_records = ?
+SET domain = ?, dns_profile_id = ?, dns_records = ?, storage_profile_id = ?, stop_policy = ?
 WHERE id = ?
 RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy
 `
 
 type UpdateClusterSettingsParams struct {
-	Domain       string
-	DnsProfileID sql.NullString
-	DnsRecords   string
-	ID           string
+	Domain           string
+	DnsProfileID     sql.NullString
+	DnsRecords       string
+	StorageProfileID sql.NullString
+	StopPolicy       string
+	ID               string
 }
 
 func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSettingsParams) (Cluster, error) {
@@ -325,6 +332,8 @@ func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSe
 		arg.Domain,
 		arg.DnsProfileID,
 		arg.DnsRecords,
+		arg.StorageProfileID,
+		arg.StopPolicy,
 		arg.ID,
 	)
 	var i Cluster

@@ -197,6 +197,14 @@ func (c *Client) CreateJoinToken(ctx context.Context, ref string, req service.Jo
 	return out, err
 }
 
+// ClusterNodeSettings returns what a cluster's nodes must apply, with the
+// profiles' secrets.
+func (c *Client) ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error) {
+	var out service.NodeSettings
+	err := c.do(ctx, http.MethodGet, "/v0/clusters/"+url.PathEscape(ref)+"/node-settings", nil, &out, defaultTimeout)
+	return out, err
+}
+
 // AddNode registers a node.
 func (c *Client) AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error) {
 	var out service.Node
@@ -227,6 +235,13 @@ func (c *Client) RemoveNode(ctx context.Context, ref string, req service.RemoveN
 	path := "/v0/nodes/" + url.PathEscape(ref) + "?force=" + strconv.FormatBool(req.Force)
 	var out service.Node
 	err := c.do(ctx, http.MethodDelete, path, nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ReportNodeSettings records the profile versions a node applied.
+func (c *Client) ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error) {
+	var out service.Node
+	err := c.do(ctx, http.MethodPut, "/v0/nodes/"+url.PathEscape(ref)+"/settings", req, &out, defaultTimeout)
 	return out, err
 }
 
