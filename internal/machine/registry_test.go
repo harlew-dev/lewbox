@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
@@ -215,7 +216,7 @@ func TestCleanupArchives(t *testing.T) {
 		}
 		return nil
 	}
-	got, err := machine.CleanupArchives(context.Background(), runner, aerolvm.New(fake.URL(), fake.AdminToken), false)
+	got, err := machine.CleanupArchives(context.Background(), runner, aerolvm.New(fake.URL(), fake.AdminToken), false, 0, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +231,54 @@ func TestCleanupArchives(t *testing.T) {
 		if cmd.Sudo {
 			t.Errorf("ran %s with sudo as root", cmd.Display())
 		}
+	}
+}
+
+func TestCleanupArchivesOlderThan(t *testing.T) {
+	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "avm_pat_over_loopback"
+	ref := func(name string) string { return "127.0.0.1:5000/cluster/c1/snapshots/tenant-aa/" + name + ":latest" }
+	fake.AddSnapshot("t1", aerolvm.Snapshot{Name: "archive-sb-old", Image: "aerolvm-snapshot/old:latest", PushState: "active",
+		ImageRegistryRef: ref("archive-sb-old"), CreatedAt: now.Add(-25 * time.Hour)})
+	fake.AddSnapshot("t1", aerolvm.Snapshot{Name: "archive-sb-new", Image: "aerolvm-snapshot/new:latest", PushState: "active",
+		ImageRegistryRef: ref("archive-sb-new"), CreatedAt: now.Add(-time.Hour)})
+
+	pulledOld, pulledNew, pulledUnknown := ref("archive-sb-7"), ref("archive-sb-8"), ref("archive-sb-9")
+	runner := machinetest.New()
+	runner.OutputFn = func(_ context.Context, cmd machine.Cmd) ([]byte, error) {
+		if cmd.Args[0] == "images" {
+			return []byte(strings.Join([]string{pulledOld, pulledNew, pulledUnknown}, "\n")), nil
+		}
+		// docker image inspect: the image was built long ago; the tag (the
+		// pull) decides its age.
+		switch cmd.Args[len(cmd.Args)-1] {
+		case pulledOld:
+			return []byte(`"2026-11-01T00:00:00Z" "2026-11-12T10:00:00.5Z"` + "\n"), nil
+		case pulledNew:
+			return []byte(`"2026-11-01T00:00:00Z" "2026-11-13T11:00:00Z"` + "\n"), nil
+		}
+		return nil, errors.New("no such image")
+	}
+	got, err := machine.CleanupArchives(context.Background(), runner, aerolvm.New(fake.URL(), fake.AdminToken), false, 24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"aerolvm-snapshot/old:latest", pulledOld}; strings.Join(sorted(got.Removed), ",") != strings.Join(sorted(want), ",") {
+		t.Errorf("removed = %v, want %v", got.Removed, want)
+	}
+	// An image whose age can't be read is kept.
+	if want := []string{"aerolvm-snapshot/new:latest", pulledNew, pulledUnknown}; strings.Join(sorted(got.Young), ",") != strings.Join(sorted(want), ",") {
+		t.Errorf("young = %v, want %v", got.Young, want)
+	}
+}
+
+func TestCleanupServiceUnit(t *testing.T) {
+	if unit := machine.CleanupServiceUnit(0); !strings.Contains(unit, "ExecStart="+machine.CleanupBinary+" node cleanup --json\n") {
+		t.Errorf("instant unit:\n%s", unit)
+	}
+	if unit := machine.CleanupServiceUnit(24 * time.Hour); !strings.Contains(unit, " node cleanup --json --older-than 24h0m0s\n") {
+		t.Errorf("1d unit:\n%s", unit)
 	}
 }
 

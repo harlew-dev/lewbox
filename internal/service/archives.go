@@ -345,10 +345,11 @@ func (s *Service) discoverArchives(ctx context.Context, now time.Time) error {
 	for _, candidate := range candidates {
 		id := uuid.NewV7().String()
 		inserted, err := s.q.InsertArchive(ctx, db.InsertArchiveParams{
-			ArchiveID: id,
-			CreatedAt: now,
-			ClusterID: candidate.ClusterID,
-			SandboxID: candidate.SandboxID,
+			ArchiveID:    id,
+			SnapshotName: archiveSnapshotName(candidate.ArchiveSnapshotName, candidate.SandboxID, candidate.Name),
+			CreatedAt:    now,
+			ClusterID:    candidate.ClusterID,
+			SandboxID:    candidate.SandboxID,
 		})
 		if err != nil {
 			return fmt.Errorf("discover archive for sandbox %q: %w", candidate.SandboxID, err)

@@ -52,10 +52,10 @@ On a cluster with a storage profile, `lewbox node add` and `lewbox node configur
 | `/etc/systemd/system/lewbox-registry.service` | Runs the registry as the `lewbox-registry` user, listening on `127.0.0.1:5000` only |
 | `/etc/sandboxd/lewbox-registry.token` (root, `0600`) | Random bytes, never the operator token: the registry has no auth, and AerolVM needs a password to send |
 | `/usr/local/lib/lewbox/lewbox` (root, `0755`) | A root-owned copy of the running binary, so the timer never runs a user's file |
-| `/etc/systemd/system/lewbox-archive-cleanup.service` | Runs `lewbox node cleanup --json` as root |
+| `/etc/systemd/system/lewbox-archive-cleanup.service` | Runs `lewbox node cleanup --json` as root, with `--older-than` when the cluster's `archive_local_retention` is `1h`, `1d` or `7d` |
 | `/etc/systemd/system/lewbox-archive-cleanup.timer` | Runs that service every five minutes |
 
-`lewbox-registry` is enabled and restarted when anything changed, then Lewbox waits for `http://127.0.0.1:5000/v2/` to answer. The cleanup timer is enabled with `sudo systemctl enable --now lewbox-archive-cleanup.timer`.
+`lewbox-registry` is enabled and restarted when anything changed, then Lewbox waits for `http://127.0.0.1:5000/v2/` to answer. The cleanup timer is enabled with `sudo systemctl enable --now lewbox-archive-cleanup.timer`. When the cluster's `archive_local_retention` is `never`, the registry stays but the cleanup service, timer and binary copy are removed instead.
 
 When the cluster no longer has a storage profile, the same commands stop and remove the registry, its config and token, and the cleanup service, timer and binary copy. The push lines leave `/etc/sandboxd/lewbox.env`, and sandboxd restarts.
 

@@ -3,7 +3,7 @@
 -- that has no live archive yet.
 SELECT sandboxes.cluster_id, sandboxes.id AS sandbox_id, sandboxes.org_id,
        sandboxes.name, sandboxes.image, sandboxes.runtime, sandboxes.cpu,
-       sandboxes.memory_mb, sandboxes.disk_gb
+       sandboxes.memory_mb, sandboxes.disk_gb, clusters.archive_snapshot_name
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.status = 'stopped'
@@ -20,13 +20,14 @@ WHERE sandboxes.status = 'stopped'
 
 -- name: InsertArchive :execrows
 -- One statement that cannot double-insert: the partial unique index plus
--- INSERT OR IGNORE. The sandbox must still be stopped and orphan-free.
+-- INSERT OR IGNORE. The sandbox must still be stopped and orphan-free. The
+-- caller builds the snapshot name (archive-<id> or archive-<name>-<id>).
 INSERT OR IGNORE INTO archives (id, org_id, cluster_id, sandbox_id, sandbox_name, image,
                                 runtime, cpu, memory_mb, disk_gb, tags, snapshot_name,
                                 status, created_at)
 SELECT sqlc.arg(archive_id), sandboxes.org_id, sandboxes.cluster_id, sandboxes.id, sandboxes.name,
        sandboxes.image, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb,
-       sandboxes.disk_gb, '{}', 'archive-' || sandboxes.id, 'pending', sqlc.arg(created_at)
+       sandboxes.disk_gb, '{}', sqlc.arg(snapshot_name), 'pending', sqlc.arg(created_at)
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.cluster_id = sqlc.arg(cluster_id)

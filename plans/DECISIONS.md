@@ -321,3 +321,13 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Other options.** Keep stopped sandboxes and delete them after N days (no restore). Ask AerolVM for archive-on-stop that keeps the ID ([aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)); when that lands, this setting maps onto it.
 
 **Caveats.** E2B `pause` then `connect(id)` gets 404 on an archive cluster. Snapshots keep no `env` values, so a restore needs them passed again. Running programs end on stop, as before. Each archive and restore adds an image layer, so a sandbox cycled about 100 times reaches overlayfs's layer limit. A start that races the archive is caught by a re-check before the delete, but a write between that check and the delete can be lost.
+
+## D37. Local copy retention and archive snapshot names, per cluster (your call, 2026-11-13)
+
+**Chosen.** Two cluster settings beside `stop_policy`. `archive_local_retention` (`instant` default, `1h`, `1d`, `7d`, `never`) sets how long nodes keep their local copies of archived sandboxes before the cleanup timer removes them; `never` installs no timer. Each node reports the retention it applied, so a change flags nodes outdated until `node configure`. `archive_snapshot_name` (`id` default, `name`) names archive snapshots `archive-<id>` or `archive-<name>-<id>`.
+
+**Why.** Cleanup was forced to "at once". A kept local copy makes a restore on that node faster at the cost of disk, and that trade-off is the operator's. Names make AerolVM's own snapshot lists readable.
+
+**Other options.** A free-form name template: refused, because the `archive-` prefix (node cleanup, bucket delete guard, hiding archives from customers' snapshot lists) and the sandbox ID (names repeat; a restored sandbox keeps its name, and a name collision would make the archiver take a 409 for a finished snapshot) must both stay. A per-workspace retention: the copies are on the operator's disks.
+
+**Caveats.** A snapshot's copy is aged from the snapshot; a pulled copy from the pull (Docker's last tag time), falling back to the image's creation. A copy whose age can't be read is kept. `never` lets disks fill. A name change applies to sandboxes archived afterwards.

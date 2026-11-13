@@ -14,7 +14,7 @@ import (
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (id, name, url, created_at)
 VALUES (?, ?, ?, ?)
-RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version
+RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention
 `
 
 type CreateNodeParams struct {
@@ -47,6 +47,7 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.SettingsStorageVersion,
 		&i.SettingsDnsProfileID,
 		&i.SettingsDnsVersion,
+		&i.SettingsArchiveRetention,
 	)
 	return i, err
 }
@@ -64,7 +65,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id string) (int64, error) {
 }
 
 const getNodeByID = `-- name: GetNodeByID :one
-SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version FROM nodes WHERE id = ?
+SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention FROM nodes WHERE id = ?
 `
 
 func (q *Queries) GetNodeByID(ctx context.Context, id string) (Node, error) {
@@ -85,12 +86,13 @@ func (q *Queries) GetNodeByID(ctx context.Context, id string) (Node, error) {
 		&i.SettingsStorageVersion,
 		&i.SettingsDnsProfileID,
 		&i.SettingsDnsVersion,
+		&i.SettingsArchiveRetention,
 	)
 	return i, err
 }
 
 const getNodeByName = `-- name: GetNodeByName :one
-SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version FROM nodes WHERE name = ?
+SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention FROM nodes WHERE name = ?
 `
 
 func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) {
@@ -111,12 +113,13 @@ func (q *Queries) GetNodeByName(ctx context.Context, name string) (Node, error) 
 		&i.SettingsStorageVersion,
 		&i.SettingsDnsProfileID,
 		&i.SettingsDnsVersion,
+		&i.SettingsArchiveRetention,
 	)
 	return i, err
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version FROM nodes ORDER BY name
+SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention FROM nodes ORDER BY name
 `
 
 func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
@@ -143,6 +146,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 			&i.SettingsStorageVersion,
 			&i.SettingsDnsProfileID,
 			&i.SettingsDnsVersion,
+			&i.SettingsArchiveRetention,
 		); err != nil {
 			return nil, err
 		}
@@ -158,7 +162,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]Node, error) {
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version FROM nodes WHERE cluster_id = ? ORDER BY name
+SELECT id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention FROM nodes WHERE cluster_id = ? ORDER BY name
 `
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID sql.NullString) ([]Node, error) {
@@ -185,6 +189,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID sql.NullStri
 			&i.SettingsStorageVersion,
 			&i.SettingsDnsProfileID,
 			&i.SettingsDnsVersion,
+			&i.SettingsArchiveRetention,
 		); err != nil {
 			return nil, err
 		}
@@ -214,9 +219,10 @@ SET settings_applied_at = ?,
     settings_storage_profile_id = ?,
     settings_storage_version = ?,
     settings_dns_profile_id = ?,
-    settings_dns_version = ?
+    settings_dns_version = ?,
+    settings_archive_retention = ?
 WHERE id = ?
-RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version
+RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention
 `
 
 type ReportNodeSettingsParams struct {
@@ -225,6 +231,7 @@ type ReportNodeSettingsParams struct {
 	SettingsStorageVersion   sql.NullInt64
 	SettingsDnsProfileID     sql.NullString
 	SettingsDnsVersion       sql.NullInt64
+	SettingsArchiveRetention sql.NullString
 	ID                       string
 }
 
@@ -235,6 +242,7 @@ func (q *Queries) ReportNodeSettings(ctx context.Context, arg ReportNodeSettings
 		arg.SettingsStorageVersion,
 		arg.SettingsDnsProfileID,
 		arg.SettingsDnsVersion,
+		arg.SettingsArchiveRetention,
 		arg.ID,
 	)
 	var i Node
@@ -253,6 +261,7 @@ func (q *Queries) ReportNodeSettings(ctx context.Context, arg ReportNodeSettings
 		&i.SettingsStorageVersion,
 		&i.SettingsDnsProfileID,
 		&i.SettingsDnsVersion,
+		&i.SettingsArchiveRetention,
 	)
 	return i, err
 }
@@ -267,7 +276,7 @@ ON CONFLICT(name) DO UPDATE SET
     version = excluded.version,
     alive = excluded.alive,
     last_seen_at = excluded.last_seen_at
-RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version
+RETURNING id, name, url, created_at, cluster_id, role, version, alive, last_seen_at, settings_applied_at, settings_storage_profile_id, settings_storage_version, settings_dns_profile_id, settings_dns_version, settings_archive_retention
 `
 
 type UpsertClusterNodeParams struct {
@@ -310,6 +319,7 @@ func (q *Queries) UpsertClusterNode(ctx context.Context, arg UpsertClusterNodePa
 		&i.SettingsStorageVersion,
 		&i.SettingsDnsProfileID,
 		&i.SettingsDnsVersion,
+		&i.SettingsArchiveRetention,
 	)
 	return i, err
 }

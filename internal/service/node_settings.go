@@ -16,11 +16,15 @@ import (
 // It is the only response besides the profiles' own credentials that carries
 // secrets. Instance admins only.
 type NodeSettings struct {
-	ClusterID  string               `json:"cluster_id"`
-	Cluster    string               `json:"cluster"` // slug
-	StopPolicy string               `json:"stop_policy"`
-	Storage    *NodeStorageSettings `json:"storage"` // null: no storage profile
-	DNS        *NodeDNSSettings     `json:"dns"`     // null: no domain or no DNS profile
+	ClusterID  string `json:"cluster_id"`
+	Cluster    string `json:"cluster"` // slug
+	StopPolicy string `json:"stop_policy"`
+	// ArchiveLocalRetention is how long the node keeps local copies of
+	// archived sandboxes before its cleanup timer removes them: instant, 1h,
+	// 1d, 7d or never (no cleanup timer).
+	ArchiveLocalRetention string               `json:"archive_local_retention"`
+	Storage               *NodeStorageSettings `json:"storage"` // null: no storage profile
+	DNS                   *NodeDNSSettings     `json:"dns"`     // null: no domain or no DNS profile
 }
 
 // NodeStorageSettings is the bucket a node's registry stores snapshots in.
@@ -54,6 +58,9 @@ type ReportNodeSettingsRequest struct {
 	StorageVersion int64   `json:"storage_version"`
 	DNSProfile     *string `json:"dns_profile"`
 	DNSVersion     int64   `json:"dns_version"`
+	// ArchiveRetention is the archive_local_retention the node applied with
+	// its storage settings; null with no storage profile.
+	ArchiveRetention *string `json:"archive_retention"`
 }
 
 // NodeSettingsState is what a node last reported. Reasons is never null.
@@ -87,7 +94,12 @@ func (s *Service) ClusterNodeSettings(ctx context.Context, ref string) (NodeSett
 	if err != nil {
 		return NodeSettings{}, err
 	}
-	out := NodeSettings{ClusterID: row.ID, Cluster: row.Slug, StopPolicy: row.StopPolicy}
+	out := NodeSettings{
+		ClusterID:             row.ID,
+		Cluster:               row.Slug,
+		StopPolicy:            row.StopPolicy,
+		ArchiveLocalRetention: row.ArchiveLocalRetention,
+	}
 
 	if row.StorageProfileID.Valid {
 		profile, err := s.q.GetStorageProfileByID(ctx, row.StorageProfileID.String)
@@ -153,12 +165,21 @@ func (s *Service) ReportNodeSettings(ctx context.Context, ref string, req Report
 	if err != nil {
 		return Node{}, err
 	}
+	var retention sql.NullString
+	if req.ArchiveRetention != nil && storageID.Valid {
+		value, err := clusterArchiveRetention(*req.ArchiveRetention)
+		if err != nil {
+			return Node{}, err
+		}
+		retention = sql.NullString{String: value, Valid: true}
+	}
 	updated, err := s.q.ReportNodeSettings(ctx, db.ReportNodeSettingsParams{
 		SettingsAppliedAt:        sql.NullTime{Time: s.now(), Valid: true},
 		SettingsStorageProfileID: storageID,
 		SettingsStorageVersion:   storageVersion,
 		SettingsDnsProfileID:     dnsID,
 		SettingsDnsVersion:       dnsVersion,
+		SettingsArchiveRetention: retention,
 		ID:                       row.ID,
 	})
 	if err != nil {
@@ -255,6 +276,17 @@ func (s *Service) applyNodeOutdated(ctx context.Context, n *Node, r db.Node, clu
 		reasons = append(reasons, fmt.Sprintf("storage profile %s is at version %d; this node has version %d", storageName, storageVersion, r.SettingsStorageVersion.Int64))
 	case !hasStorage && r.SettingsStorageProfileID.Valid:
 		reasons = append(reasons, fmt.Sprintf("the cluster no longer uses storage profile %s", nodeStorage))
+	}
+	// A node that applied storage before this setting existed reported no
+	// retention: it removes local copies at once, as instant does.
+	if hasStorage && r.SettingsStorageProfileID.Valid {
+		applied := RetentionInstant
+		if r.SettingsArchiveRetention.Valid {
+			applied = r.SettingsArchiveRetention.String
+		}
+		if want := cluster.ArchiveLocalRetention; applied != want {
+			reasons = append(reasons, fmt.Sprintf("archive_local_retention is %s; this node applied %s", want, applied))
+		}
 	}
 
 	var dnsName string

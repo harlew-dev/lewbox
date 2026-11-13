@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,7 +36,8 @@ func newConfigureNodeCmd(a *app) *cobra.Command {
 		Use:   "configure",
 		Short: "Apply this cluster's storage and DNS settings on this machine",
 		Long: "Fetch the cluster's node settings and apply them here: the snapshot\n" +
-			"registry and its archive cleanup timer, Lewbox's env file, and a\n" +
+			"registry and its archive cleanup timer (none when the cluster keeps\n" +
+			"local archive copies forever), Lewbox's env file, and a\n" +
 			"changed DNS profile's token. Run it on every node whose cluster\n" +
 			"changed a profile.",
 		Args: usageArgs(cobra.NoArgs),
@@ -67,14 +69,19 @@ func newConfigureNodeCmd(a *app) *cobra.Command {
 
 // newCleanupNodeCmd runs one archive cleanup pass on this node.
 func newCleanupNodeCmd(a *app) *cobra.Command {
-	return &cobra.Command{
+	var olderThan time.Duration
+	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Remove this node's local copies of archived sandboxes",
 		Long: "Remove the local images of snapshots that are archived in the cluster's\n" +
 			"bucket. The lewbox-archive-cleanup.timer runs this as root every five\n" +
-			"minutes on a cluster with storage.",
+			"minutes on a cluster with storage, with --older-than set from the\n" +
+			"cluster's archive_local_retention.",
 		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if olderThan < 0 {
+				return usagef("--older-than must not be negative")
+			}
 			ctx := cmd.Context()
 			sudo := a.host().euid() != 0
 			if sudo {
@@ -87,13 +94,15 @@ func newCleanupNodeCmd(a *app) *cobra.Command {
 				return err
 			}
 			client := aerolvm.New(a.host().localAPIURL, pat)
-			result, err := machine.CleanupArchives(ctx, a.host().runner, client, sudo)
+			result, err := machine.CleanupArchives(ctx, a.host().runner, client, sudo, olderThan, a.host().now())
 			if err != nil {
 				return err
 			}
 			return a.write(result)
 		},
 	}
+	cmd.Flags().DurationVar(&olderThan, "older-than", 0, "only remove copies at least this old, such as 24h (default: all)")
+	return cmd
 }
 
 // configureNode applies a cluster's node settings: the snapshot registry and
@@ -112,8 +121,13 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 	if state.Mode != machine.ModeLocal {
 		switch {
 		case settings.Storage != nil:
+			age, cleanup := service.ArchiveRetentionAge(settings.ArchiveLocalRetention)
 			if dryRun {
-				a.say("  → would install the registry for storage profile %q and the archive cleanup timer", settings.Storage.Profile)
+				if cleanup {
+					a.say("  → would install the registry for storage profile %q and the archive cleanup timer", settings.Storage.Profile)
+				} else {
+					a.say("  → would install the registry for storage profile %q, with no archive cleanup timer (retention never)", settings.Storage.Profile)
+				}
 				out.Storage, out.RegistryChanged, out.CleanupTimer = "applied", true, true
 				break
 			}
@@ -130,7 +144,12 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 			if err := a.host().waitRegistry(ctx); err != nil {
 				return out, err
 			}
-			timer, err := a.applyCleanupTimer(ctx, runner, report)
+			var timer bool
+			if cleanup {
+				timer, err = a.applyCleanupTimer(ctx, runner, age, report)
+			} else {
+				timer, err = a.removeCleanupTimer(ctx, runner, report)
+			}
 			if err != nil {
 				return out, err
 			}
@@ -200,6 +219,8 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 		name := settings.Storage.Profile
 		req.StorageProfile = &name
 		req.StorageVersion = settings.Storage.Version
+		retention := settings.ArchiveLocalRetention
+		req.ArchiveRetention = &retention
 	}
 	if state.DNSProfile != "" && state.DNSProfileVersion >= 1 {
 		name := state.DNSProfile
@@ -230,9 +251,9 @@ func registryStorage(s service.NodeStorageSettings) machine.RegistryStorage {
 }
 
 // applyCleanupTimer installs the root-owned lewbox copy the timer runs, its
-// service and timer units, and enables the timer. It reports whether anything
-// changed.
-func (a *app) applyCleanupTimer(ctx context.Context, runner machine.Runner, report func(machine.Cmd)) (bool, error) {
+// service and timer units, and enables the timer. The service removes local
+// copies at least olderThan old. It reports whether anything changed.
+func (a *app) applyCleanupTimer(ctx context.Context, runner machine.Runner, olderThan time.Duration, report func(machine.Cmd)) (bool, error) {
 	run := func(cmd machine.Cmd) error {
 		if report != nil {
 			report(cmd)
@@ -274,9 +295,10 @@ func (a *app) applyCleanupTimer(ctx context.Context, runner machine.Runner, repo
 		changed = true
 	}
 
+	wantUnit := machine.CleanupServiceUnit(olderThan)
 	unit, _ := readRootFile(output, machine.CleanupService)
-	if unit != machine.CleanupServiceUnit {
-		if err := writeRootFile(run, machine.CleanupService, "0644", machine.CleanupServiceUnit); err != nil {
+	if unit != wantUnit {
+		if err := writeRootFile(run, machine.CleanupService, "0644", wantUnit); err != nil {
 			return false, err
 		}
 		changed = true

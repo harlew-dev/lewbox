@@ -50,28 +50,30 @@ type Archive struct {
 }
 
 type Cluster struct {
-	ID               string
-	Slug             string
-	Name             string
-	AdminURL         string
-	EndpointURL      string
-	Runtime          string
-	AdminTokenEnc    []byte
-	AdminTokenID     string
-	AdminTokenLast4  string
-	Status           string
-	StatusDetail     string
-	Version          string
-	Checks           string
-	CheckedAt        sql.NullTime
-	CreatedAt        time.Time
-	SyncedAt         sql.NullTime
-	SyncError        string
-	Domain           string
-	DnsProfileID     sql.NullString
-	DnsRecords       string
-	StorageProfileID sql.NullString
-	StopPolicy       string
+	ID                    string
+	Slug                  string
+	Name                  string
+	AdminURL              string
+	EndpointURL           string
+	Runtime               string
+	AdminTokenEnc         []byte
+	AdminTokenID          string
+	AdminTokenLast4       string
+	Status                string
+	StatusDetail          string
+	Version               string
+	Checks                string
+	CheckedAt             sql.NullTime
+	CreatedAt             time.Time
+	SyncedAt              sql.NullTime
+	SyncError             string
+	Domain                string
+	DnsProfileID          sql.NullString
+	DnsRecords            string
+	StorageProfileID      sql.NullString
+	StopPolicy            string
+	ArchiveLocalRetention string
+	ArchiveSnapshotName   string
 }
 
 type ClusterSample struct {
@@ -133,6 +135,7 @@ type Node struct {
 	SettingsStorageVersion   sql.NullInt64
 	SettingsDnsProfileID     sql.NullString
 	SettingsDnsVersion       sql.NullInt64
+	SettingsArchiveRetention sql.NullString
 }
 
 type NodeSample struct {

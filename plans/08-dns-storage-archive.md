@@ -72,6 +72,8 @@ New cluster fields:
 | `dns_records` | `auto` (default when there is a DNS profile) or `off`, when the operator points DNS at a load balancer |
 | `storage_profile` | Optional |
 | `stop_policy` | `keep` (default) or `archive`. `archive` needs a storage profile |
+| `archive_local_retention` | `instant` (default), `1h`, `1d`, `7d` or `never`: how long nodes keep local copies of archived sandboxes. Reported back by each node, so a change flags nodes outdated. `never` installs no cleanup timer |
+| `archive_snapshot_name` | `id` (default, `archive-<sandbox id>`) or `name` (`archive-<sandbox name>-<sandbox id>`). The prefix and the ID always stay |
 
 Set when the cluster is registered (`node add --new-cluster` reads them from the install), and later with `PATCH /v0/clusters/{ref}` and `lewbox cluster set`.
 
@@ -103,7 +105,7 @@ Both apply the cluster's **node settings**, fetched from `GET /v0/clusters/{ref}
     - `SB_AUTO_IMPORT_CLUSTER_PAT_PATH=/etc/sandboxd/lewbox-registry.token`
     - `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL=30s`
   - The token file holds a random value, never the PAT. The registry has no auth (loopback only), so the PAT never leaves the node.
-  - Install `lewbox-archive-cleanup.timer` (root, every 5 minutes). It removes the local image of every `archive-*` snapshot whose push is `active`, and pulled `127.0.0.1:5000/…/archive-*` images no container uses ([findings](../docs/design/snapshot-archive.md) 3 and 5).
+  - Install `lewbox-archive-cleanup.timer` (root, every 5 minutes). It removes the local image of every `archive-*` snapshot whose push is `active`, and pulled `127.0.0.1:5000/…/archive-*` images no container uses ([findings](../docs/design/snapshot-archive.md) 3 and 5). With `archive_local_retention` `1h`/`1d`/`7d` it only removes copies that old (`--older-than`; a snapshot's copy is aged from the snapshot, a pulled one from the pull); with `never` the timer is not installed.
 - **Without one:** remove the registry and those env lines, if present.
 - **When the DNS profile's token changed:** re-run the verified installer with `--version <installed>` and the new `--dns-api-token`. The installer keeps its other saved options.
 
@@ -125,7 +127,7 @@ On a cluster with `stop_policy: archive`, **every stopped customer sandbox is ar
 2. **Snapshot:**
    - Mint a `runner` token for the workspace team, for 1 hour, revoked afterwards (the D23 pattern).
    - Read the sandbox (`GET /v1/sandboxes/{id}`) for its name, tags, image, runtime and size.
-   - Snapshot it as `archive-<sandbox id>`. The status becomes `pushing`.
+   - Snapshot it as `archive-<sandbox id>`, or `archive-<sandbox name>-<sandbox id>` with `archive_snapshot_name: name`. The status becomes `pushing`.
 3. **Wait** until the snapshot's `push_state` is `active`. A push `error` is retried by AerolVM; Lewbox keeps waiting, up to 30 minutes, then marks the row `failed` and retries the whole archive later.
 4. **Check** the sandbox is still `stopped`. If it was started again, mark the row `cancelled` and delete the snapshot.
 5. **Delete the sandbox.** The status becomes `archived`, with `archived_at` and `registry_ref`.

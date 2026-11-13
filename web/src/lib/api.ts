@@ -274,6 +274,13 @@ export interface SessionResponse {
   user: User
 }
 
+// How long nodes keep their local copy of an archived sandbox before the
+// cleanup timer removes it. The bucket always holds the archive.
+export type ArchiveRetention = 'instant' | '1h' | '1d' | '7d' | 'never'
+
+// How archive snapshots are named: archive-<id> or archive-<name>-<id>.
+export type ArchiveSnapshotName = 'id' | 'name'
+
 export interface Cluster {
   id: string
   slug: string
@@ -286,6 +293,8 @@ export interface Cluster {
   dns_records: 'auto' | 'off'
   storage_profile: string | null
   stop_policy: 'keep' | 'archive'
+  archive_local_retention: ArchiveRetention
+  archive_snapshot_name: ArchiveSnapshotName
   admin_token_last4: string
   status: string
   status_detail?: string
@@ -1048,6 +1057,8 @@ export interface ClusterUpdate {
   dns_records?: 'auto' | 'off'
   storage_profile?: string
   stop_policy?: 'keep' | 'archive'
+  archive_local_retention?: ArchiveRetention
+  archive_snapshot_name?: ArchiveSnapshotName
 }
 
 export function updateCluster(clusterRef: string, input: ClusterUpdate): Promise<Cluster> {

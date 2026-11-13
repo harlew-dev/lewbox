@@ -42,6 +42,8 @@ describe('StartClusterDialog', () => {
     expect(text('ACME email')).toHaveAttribute('placeholder', 'ops@example.com')
     await choose('Storage profile', /s3-main/)
     fireEvent.click(screen.getByRole('radio', { name: /Archive it to storage/ }))
+    await choose('Local copies on servers', 'Keep for 7 days')
+    fireEvent.click(screen.getByRole('radio', { name: /Sandbox name and ID/ }))
     expect(screen.getByRole('button', { name: /Next/ })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
 
@@ -50,7 +52,9 @@ describe('StartClusterDialog', () => {
     expect(commands).toContain(
       'lewbox install --domain eu.api.example.com --dns-profile cf-prod --runtime docker --name node-1',
     )
-    expect(commands).toContain('lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main --stop-policy archive')
+    expect(commands).toContain(
+      'lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main --stop-policy archive --archive-local-retention 7d --archive-snapshot-name name',
+    )
     expect(commands).not.toContain('--dns-records off')
 
     // Back keeps the values.
@@ -88,6 +92,7 @@ describe('StartClusterDialog', () => {
     expect(commands).toContain('lewbox install --public-host 10.0.0.5 --runtime docker --name node-1 -- --lb-health-port=8081')
     expect(commands).toContain('lewbox node add node-1 --new-cluster lab')
     expect(commands).not.toContain('--stop-policy')
+    expect(commands).not.toContain('--archive-')
   })
 
   it('links to Settings to add a DNS profile when there is none', async () => {
@@ -104,7 +109,7 @@ describe('StartClusterDialog', () => {
 const domainCluster = {
   id: 'c1', slug: 'eu-west', name: 'EU West', admin_url: '', endpoint_url: '', runtime: 'docker',
   domain: 'eu.api.example.com', dns_profile: 'cf-prod', dns_records: 'auto', storage_profile: 's3-main',
-  stop_policy: 'keep', admin_token_last4: '', status: 'ready', nodes: 1, created_at: '',
+  stop_policy: 'keep', archive_local_retention: 'instant', archive_snapshot_name: 'id', admin_token_last4: '', status: 'ready', nodes: 1, created_at: '',
 } as Cluster
 
 describe('AddNodeDialog', () => {

@@ -2,7 +2,9 @@ package machine
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 )
@@ -21,9 +23,16 @@ const (
 	CleanupTimerName = "lewbox-archive-cleanup.timer"
 )
 
-// CleanupServiceUnit runs one cleanup pass. It runs a root-owned copy of the
-// lewbox binary, never the user's own, so the user can't swap what root runs.
-const CleanupServiceUnit = `# Written by lewbox node configure.
+// CleanupServiceUnit runs one cleanup pass that removes local copies at
+// least olderThan old (the cluster's archive_local_retention). It runs a
+// root-owned copy of the lewbox binary, never the user's own, so the user
+// can't swap what root runs.
+func CleanupServiceUnit(olderThan time.Duration) string {
+	flags := " node cleanup --json"
+	if olderThan > 0 {
+		flags += " --older-than " + olderThan.String()
+	}
+	return `# Written by lewbox node configure.
 [Unit]
 Description=Lewbox: remove local copies of archived sandboxes
 After=sandboxd.service docker.service
@@ -31,8 +40,9 @@ After=sandboxd.service docker.service
 [Service]
 Type=oneshot
 Environment=LEWBOX_ALLOW_ROOT=1
-ExecStart=` + CleanupBinary + ` node cleanup --json
+ExecStart=` + CleanupBinary + flags + `
 `
+}
 
 // CleanupTimerUnit runs the cleanup every five minutes.
 const CleanupTimerUnit = `# Written by lewbox node configure.
@@ -48,24 +58,29 @@ RandomizedDelaySec=30s
 WantedBy=timers.target
 `
 
-// CleanupResult says what one cleanup pass removed. Kept counts images still
-// used by a container, which a later pass removes.
+// CleanupResult says what one cleanup pass removed. Kept lists images still
+// used by a container, which a later pass removes. Young lists images newer
+// than the retention, which a later pass removes once they are old enough.
 type CleanupResult struct {
 	Removed []string `json:"removed"`
 	Kept    []string `json:"kept"`
+	Young   []string `json:"young"`
 }
 
 // CleanupArchives removes this node's copies of archived snapshots, which the
 // bucket already holds (docs/design/snapshot-archive.md, findings 3 and 5):
 //
-//   - the local image of every archive-* snapshot whose push is active;
-//   - images pulled from the node registry for archive-* snapshots.
+//   - the local image of every archive-* snapshot whose push is active, once
+//     the snapshot is olderThan old;
+//   - images pulled from the node registry for archive-* snapshots, once the
+//     pull is olderThan old.
 //
-// docker refuses to remove an image a container uses; those are kept for a
-// later pass. client must be able to list every team's snapshots on this
-// node (the PAT over loopback). sudo is false when already root.
-func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client, sudo bool) (CleanupResult, error) {
-	result := CleanupResult{Removed: []string{}, Kept: []string{}}
+// An image whose age can't be read is kept unless olderThan is zero. docker
+// refuses to remove an image a container uses; those are kept for a later
+// pass. client must be able to list every team's snapshots on this node (the
+// PAT over loopback). sudo is false when already root.
+func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client, sudo bool, olderThan time.Duration, now time.Time) (CleanupResult, error) {
+	result := CleanupResult{Removed: []string{}, Kept: []string{}, Young: []string{}}
 	snapshots, err := client.ListSnapshots(ctx)
 	if err != nil {
 		return result, err
@@ -78,6 +93,10 @@ func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client,
 		}
 		if image := strings.TrimSpace(snap.Image); image != "" && !seen[image] && !strings.HasPrefix(image, RegistryAddr+"/") {
 			seen[image] = true
+			if olderThan > 0 && (snap.CreatedAt.IsZero() || now.Sub(snap.CreatedAt) < olderThan) {
+				result.Young = append(result.Young, image)
+				continue
+			}
 			images = append(images, image)
 		}
 	}
@@ -90,6 +109,13 @@ func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client,
 		ref := strings.TrimSpace(line)
 		if isPulledArchive(ref) && !seen[ref] {
 			seen[ref] = true
+			if olderThan > 0 {
+				pulled, ok := imageTime(ctx, runner, ref, sudo)
+				if !ok || now.Sub(pulled) < olderThan {
+					result.Young = append(result.Young, ref)
+					continue
+				}
+			}
 			images = append(images, ref)
 		}
 	}
@@ -102,6 +128,27 @@ func CleanupArchives(ctx context.Context, runner Runner, client *aerolvm.Client,
 		result.Removed = append(result.Removed, image)
 	}
 	return result, nil
+}
+
+// imageTime is when an image arrived on this node: the later of its creation
+// and its last tag, which a pull sets. ok is false when neither can be read.
+func imageTime(ctx context.Context, runner Runner, ref string, sudo bool) (time.Time, bool) {
+	out, err := runner.Output(ctx, Cmd{
+		Name: "docker",
+		Args: []string{"image", "inspect", "--format", "{{json .Created}} {{json .Metadata.LastTagTime}}", ref},
+		Sudo: sudo,
+	})
+	if err != nil {
+		return time.Time{}, false
+	}
+	var latest time.Time
+	for _, field := range strings.Fields(string(out)) {
+		var t time.Time
+		if json.Unmarshal([]byte(field), &t) == nil && t.After(latest) {
+			latest = t
+		}
+	}
+	return latest, !latest.IsZero() && latest.Year() > 1
 }
 
 // isPulledArchive reports whether ref is an archive snapshot pulled from the

@@ -178,8 +178,8 @@ export function ClusterDetailPage() {
       <ClusterSettings cluster={detail} onEdit={() => setEditOpen(true)} />
       {configureNote && (
         <Notice variant="warning" className="mt-6" onDismiss={() => setConfigureNote(false)}>
-          A profile changed, so every node needs <code>lewbox node configure</code>, run on that node. Nodes show as
-          outdated until it has.
+          A node setting changed, so every node needs <code>lewbox node configure</code>, run on that node. Nodes show
+          as outdated until it has.
         </Notice>
       )}
 
@@ -306,7 +306,12 @@ export function ClusterDetailPage() {
         cluster={detail}
         onClose={() => setEditOpen(false)}
         onSaved={(changes) => {
-          if (changes.storage_profile !== undefined || changes.dns_profile !== undefined) setConfigureNote(true)
+          if (
+            changes.storage_profile !== undefined ||
+            changes.dns_profile !== undefined ||
+            changes.archive_local_retention !== undefined
+          )
+            setConfigureNote(true)
           setUpdated(null)
           reload()
         }}

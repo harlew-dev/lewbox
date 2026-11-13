@@ -16,6 +16,8 @@ const cluster = {
   dns_records: 'auto',
   storage_profile: null,
   stop_policy: 'keep',
+  archive_local_retention: 'instant',
+  archive_snapshot_name: 'id',
   admin_token_last4: '9f3a',
   status: 'ready',
   version: 'v0.7.0',
@@ -63,14 +65,19 @@ describe('ClusterDetailPage settings', () => {
     expect(screen.getByRole('button', { name: 'Save settings' })).toBeDisabled()
     // No storage profile yet: archiving is off, with the reason.
     expect(screen.getByText(/Not available: Choose a storage profile first/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Local copies on servers')).toBeNull()
     await choose('Storage profile', /s3-main/)
     fireEvent.click(await screen.findByRole('radio', { name: /Archive it to storage/ }))
+    await choose('Local copies on servers', 'Keep for 1 day')
+    fireEvent.click(screen.getByRole('radio', { name: /Sandbox name and ID/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }))
 
     await waitFor(() => expect(calls.find((call) => call.method === 'PATCH')).toBeDefined())
     expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
       storage_profile: 's3-main',
       stop_policy: 'archive',
+      archive_local_retention: '1d',
+      archive_snapshot_name: 'name',
     })
     expect(await screen.findByText(/every node needs/)).toBeInTheDocument()
   })

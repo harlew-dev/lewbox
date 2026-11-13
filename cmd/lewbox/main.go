@@ -562,6 +562,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	joinCommand.Flags().StringVar(&joinTTL, "ttl", "15m", "how long the token is valid")
 
 	var setDomain, setDNSProfile, setDNSRecords, setStorageProfile, setStopPolicy string
+	var setRetention, setSnapshotName string
 	set := &cobra.Command{
 		Use:   "set <id|slug>",
 		Short: "Change a cluster's DNS and storage settings (PATCH /v0/clusters/{id|slug})",
@@ -570,7 +571,8 @@ func newClusterCmd(a *app) *cobra.Command {
 			"`lewbox node configure` applies the profiles on each node.",
 		Example: "  lewbox cluster set eu-west --domain eu.example.com --dns-profile cf-prod\n" +
 			"  lewbox cluster set eu-west --dns-records off\n" +
-			"  lewbox cluster set lab --storage-profile s3-main --stop-policy archive",
+			"  lewbox cluster set lab --storage-profile s3-main --stop-policy archive\n" +
+			"  lewbox cluster set lab --archive-local-retention 1d --archive-snapshot-name name",
 		Args: usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateClusterRequest{}
@@ -589,9 +591,16 @@ func newClusterCmd(a *app) *cobra.Command {
 			if cmd.Flags().Changed("stop-policy") {
 				req.StopPolicy = &setStopPolicy
 			}
+			if cmd.Flags().Changed("archive-local-retention") {
+				req.ArchiveLocalRetention = &setRetention
+			}
+			if cmd.Flags().Changed("archive-snapshot-name") {
+				req.ArchiveSnapshotName = &setSnapshotName
+			}
 			if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
-				req.StorageProfile == nil && req.StopPolicy == nil {
-				return usagef("nothing to change: pass --domain, --dns-profile, --dns-records, --storage-profile or --stop-policy")
+				req.StorageProfile == nil && req.StopPolicy == nil &&
+				req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil {
+				return usagef("nothing to change: pass --domain, --dns-profile, --dns-records, --storage-profile, --stop-policy, --archive-local-retention or --archive-snapshot-name")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 				return b.UpdateCluster(ctx, args[0], req)
@@ -603,6 +612,8 @@ func newClusterCmd(a *app) *cobra.Command {
 	set.Flags().StringVar(&setDNSRecords, "dns-records", "", "keep the domain's records: auto or off")
 	set.Flags().StringVar(&setStorageProfile, "storage-profile", "", "the storage profile for snapshots (none clears it)")
 	set.Flags().StringVar(&setStopPolicy, "stop-policy", "", "what happens to a stopped sandbox: keep or archive")
+	set.Flags().StringVar(&setRetention, "archive-local-retention", "", "how long nodes keep local copies of archived sandboxes: instant, 1h, 1d, 7d or never")
+	set.Flags().StringVar(&setSnapshotName, "archive-snapshot-name", "", "how archive snapshots are named: id (archive-<id>) or name (archive-<name>-<id>)")
 
 	nodeSettings := &cobra.Command{
 		Use:   "node-settings <id|slug>",

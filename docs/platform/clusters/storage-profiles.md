@@ -99,13 +99,13 @@ On a node of a cluster with a storage profile, `node add` and `node configure`:
 
 1. **Install the registry**: CNCF Distribution, pinned and SHA-256 checked, as `/usr/local/bin/lewbox-registry`, listening on `127.0.0.1:5000` only. Its config is `/etc/lewbox-registry/config.yml` (`0640 root:lewbox-registry`), with the bucket's key and the cluster's root directory. A hardened `lewbox-registry.service` runs it as the `lewbox-registry` user.
 2. **Turn on snapshot push** in `/etc/sandboxd/lewbox.env`, then restart sandboxd if it changed.
-3. **Install the cleanup timer**: `lewbox-archive-cleanup.timer` runs `lewbox node cleanup` as root every five minutes, from a root-owned copy of the binary in `/usr/local/lib/lewbox/lewbox`.
+3. **Install the cleanup timer**: `lewbox-archive-cleanup.timer` runs `lewbox node cleanup` as root every five minutes, from a root-owned copy of the binary in `/usr/local/lib/lewbox/lewbox`. With [`archive_local_retention`](#local-copies-of-archives) `1h`, `1d` or `7d`, the service passes `--older-than`; with `never` there is no timer.
 
 Without a profile, the same commands remove the registry, its config and user files, the push lines, and the timer. See [What Lewbox changes](../reference/what-lewbox-changes.md#the-snapshot-registry).
 
 ### Outdated nodes
 
-Each node reports the profile versions it applied. A node is **outdated** when the cluster's profile is newer, when it applied another profile, when the cluster stopped using one, or when it applied none yet. The node list shows the reason and the cluster check reports it:
+Each node reports the profile versions and the archive retention it applied. A node is **outdated** when the cluster's profile is newer, when it applied another profile, when the cluster stopped using one, when it applied none yet, or when the cluster's `archive_local_retention` changed since. The node list shows the reason and the cluster check reports it:
 
 ```text
 node-a: storage profile archive is at version 2; this node has version 1; run `lewbox node configure` on each
@@ -120,14 +120,48 @@ Run `lewbox node configure` on each node to catch up. A profile change does not 
 The archiver runs beside the sync loop, at most two rows at once per cluster. For one sandbox:
 
 1. **Find** a stopped sandbox with no live archive and insert a `pending` row. A unique index on `(cluster_id, sandbox_id)` while the row is not `cancelled` or `deleted` stops two passes archiving one sandbox twice.
-2. **Snapshot** it as `archive-<sandbox id>` with a short-lived `runner` token bound to the workspace's team, after reading its name, tags, image, runtime and size. The status becomes `pushing`.
+2. **Snapshot** it as `archive-<sandbox id>` (or `archive-<sandbox name>-<sandbox id>`, see [snapshot names](#archive-snapshot-names)) with a short-lived `runner` token bound to the workspace's team, after reading its name, tags, image, runtime and size. The status becomes `pushing`.
 3. **Wait** for the push to become `active`. A push error is retried by AerolVM; Lewbox waits up to 30 minutes, then marks the row `failed` and retries the whole archive after 10 minutes.
 4. **Check** the sandbox is still stopped and has not been started and stopped again since the snapshot. If it changed, the archive is **cancelled**: its snapshot and bucket repository are removed, and the next pass archives it afresh.
 5. **Delete** the sandbox and mark the row `archived`, with `archived_at` and the snapshot's `registry_ref`. If the sandbox vanished meanwhile, the archive still finishes.
 
 A sandbox that is started again before its archive finishes is left alone; one that is gone cancels with a reason. AerolVM hiccups hold a row back for a minute instead of failing it.
 
-What stays in the bucket: the pushed image's **blobs are never swept yet**. Deleting an archive removes its repository (the manifest links and its own keys) and marks the row `deleted`, but content-addressed blobs may still be shared with other snapshots, so only a future sweep that reads every link may remove them. Deleting also leaves pulled copies on nodes: `node configure` installs `lewbox-archive-cleanup.timer` (root, every 5 minutes), which removes the local image of each `archive-*` snapshot whose push is active and any pulled `127.0.0.1:5000/…/archive-*` image no container uses. Customers' own snapshots are left alone.
+What stays in the bucket: the pushed image's **blobs are never swept yet**. Deleting an archive removes its repository (the manifest links and its own keys) and marks the row `deleted`, but content-addressed blobs may still be shared with other snapshots, so only a future sweep that reads every link may remove them. Deleting also leaves pulled copies on nodes: the cleanup timer removes those, as below.
+
+### Local copies of archives
+
+The bucket always holds an archive, but the node that took the snapshot keeps a local copy of its image, and a restore leaves the pulled image on the node it ran on. `lewbox-archive-cleanup.timer` (root, every five minutes) removes these copies: the local image of each `archive-*` snapshot whose push is active, and any pulled `127.0.0.1:5000/…/archive-*` image no container uses. Customers' own snapshots are left alone.
+
+The cluster's `archive_local_retention` decides how long a copy stays first:
+
+| Value | What the nodes do |
+|---|---|
+| `instant` (default) | Remove copies on the next pass, within five minutes. A restore always downloads from the bucket |
+| `1h`, `1d`, `7d` | Remove copies once they are that old. A restore on the same node within that time is faster |
+| `never` | No cleanup timer. Copies stay until you remove them (`lewbox node cleanup` by hand), so **disks fill up** |
+
+A snapshot's copy is aged from when the snapshot was taken; a pulled copy from when it was pulled. A copy whose age can't be read is kept until it can. The setting reaches a node when `lewbox node configure` runs there; until then the node shows as outdated.
+
+```bash
+lewbox cluster set lab --archive-local-retention 1d
+lewbox node configure      # on each node
+```
+
+### Archive snapshot names
+
+`archive_snapshot_name` sets how the archiver names its snapshots, which shows in AerolVM's own snapshot lists and in each archive's `snapshot_name`:
+
+| Value | Name |
+|---|---|
+| `id` (default) | `archive-<sandbox id>`, such as `archive-sb-1a2b3c` |
+| `name` | `archive-<sandbox name>-<sandbox id>`, such as `archive-my-app-sb-1a2b3c` |
+
+The `archive-` prefix and the sandbox ID always stay: node cleanup and the bucket delete guard find archives by the prefix, and sandbox names repeat (a restored sandbox keeps its old name). The name is lowercased to letters, digits and dashes and cut to 40 characters; a sandbox with no usable name gets the `id` form. A change applies to sandboxes archived afterwards; existing archives keep their names. Nodes need no `node configure` for it.
+
+```bash
+lewbox cluster set lab --archive-snapshot-name name
+```
 
 Restore and delete are described in the customer book: [Archived sandboxes](../../consumer/sandboxes/archived-sandboxes.md).
 

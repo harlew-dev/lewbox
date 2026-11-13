@@ -59,6 +59,9 @@ export function validInstallerFlags(value: string): boolean {
 
 export type AccessMode = 'domain' | 'public-host' | 'local'
 export type StopPolicy = 'keep' | 'archive'
+export type ArchiveRetention = 'instant' | '1h' | '1d' | '7d' | 'never'
+export type ArchiveSnapshotName = 'id' | 'name'
+const RETENTIONS: readonly string[] = ['instant', '1h', '1d', '7d', 'never']
 
 export interface InstallOptions {
   access: AccessMode
@@ -103,6 +106,9 @@ export interface NewClusterOptions {
   // Empty for none.
   storageProfile: string
   stopPolicy: StopPolicy
+  // Only sent when archiving and not the default (instant, id).
+  retention: ArchiveRetention
+  snapshotName: ArchiveSnapshotName
 }
 
 // `lewbox node add … --new-cluster …`, with the storage options when chosen.
@@ -114,7 +120,13 @@ export function newClusterCommand(options: NewClusterOptions): string {
   if (options.storageProfile !== '') {
     parts.push(`--storage-profile ${arg(options.storageProfile, validLabel, 'storage-profile')}`)
   }
-  if (options.stopPolicy === 'archive') parts.push('--stop-policy archive')
+  if (options.stopPolicy === 'archive') {
+    parts.push('--stop-policy archive')
+    if (options.retention !== 'instant' && RETENTIONS.includes(options.retention)) {
+      parts.push(`--archive-local-retention ${options.retention}`)
+    }
+    if (options.snapshotName === 'name') parts.push('--archive-snapshot-name name')
+  }
   return parts.join(' ')
 }
 

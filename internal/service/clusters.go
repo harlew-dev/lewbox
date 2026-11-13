@@ -41,24 +41,30 @@ type Check struct {
 
 // Cluster is an AerolVM cluster registered with Lewbox.
 type Cluster struct {
-	ID              string     `json:"id"`
-	Slug            string     `json:"slug"`
-	Name            string     `json:"name"`
-	AdminURL        string     `json:"admin_url"`
-	EndpointURL     string     `json:"endpoint_url"`
-	Runtime         string     `json:"runtime"`
-	Domain          string     `json:"domain"`
-	DNSProfile      *string    `json:"dns_profile"`
-	DNSRecords      string     `json:"dns_records"`
-	StorageProfile  *string    `json:"storage_profile"`
-	StopPolicy      string     `json:"stop_policy"`
-	AdminTokenLast4 string     `json:"admin_token_last4"`
-	Status          string     `json:"status"`
-	StatusDetail    string     `json:"status_detail,omitempty"`
-	Version         string     `json:"version,omitempty"`
-	Nodes           int        `json:"nodes"`
-	CheckedAt       *time.Time `json:"checked_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID             string  `json:"id"`
+	Slug           string  `json:"slug"`
+	Name           string  `json:"name"`
+	AdminURL       string  `json:"admin_url"`
+	EndpointURL    string  `json:"endpoint_url"`
+	Runtime        string  `json:"runtime"`
+	Domain         string  `json:"domain"`
+	DNSProfile     *string `json:"dns_profile"`
+	DNSRecords     string  `json:"dns_records"`
+	StorageProfile *string `json:"storage_profile"`
+	StopPolicy     string  `json:"stop_policy"`
+	// ArchiveLocalRetention is how long nodes keep local copies of archived
+	// sandboxes: instant, 1h, 1d, 7d or never.
+	ArchiveLocalRetention string `json:"archive_local_retention"`
+	// ArchiveSnapshotName is how archive snapshots are named: id
+	// (archive-<sandbox id>) or name (archive-<sandbox name>-<sandbox id>).
+	ArchiveSnapshotName string     `json:"archive_snapshot_name"`
+	AdminTokenLast4     string     `json:"admin_token_last4"`
+	Status              string     `json:"status"`
+	StatusDetail        string     `json:"status_detail,omitempty"`
+	Version             string     `json:"version,omitempty"`
+	Nodes               int        `json:"nodes"`
+	CheckedAt           *time.Time `json:"checked_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
 }
 
 // ClusterDetail is a cluster with its last checks and its nodes.
@@ -86,7 +92,11 @@ type AddClusterRequest struct {
 	// StorageProfile is an ID or name; empty for none.
 	StorageProfile string `json:"storage_profile"`
 	StopPolicy     string `json:"stop_policy"` // keep or archive; default keep
-	AdminToken     string `json:"admin_token"`
+	// ArchiveLocalRetention is instant, 1h, 1d, 7d or never; default instant.
+	ArchiveLocalRetention string `json:"archive_local_retention"`
+	// ArchiveSnapshotName is id or name; default id.
+	ArchiveSnapshotName string `json:"archive_snapshot_name"`
+	AdminToken          string `json:"admin_token"`
 }
 
 // UpdateClusterRequest changes a cluster's DNS and storage settings. A
@@ -97,6 +107,10 @@ type UpdateClusterRequest struct {
 	DNSRecords     *string `json:"dns_records,omitempty"`
 	StorageProfile *string `json:"storage_profile,omitempty"`
 	StopPolicy     *string `json:"stop_policy,omitempty"`
+	// ArchiveLocalRetention is instant, 1h, 1d, 7d or never.
+	ArchiveLocalRetention *string `json:"archive_local_retention,omitempty"`
+	// ArchiveSnapshotName is id or name.
+	ArchiveSnapshotName *string `json:"archive_snapshot_name,omitempty"`
 }
 
 // JoinTokenRequest is the input to CreateJoinToken.
@@ -191,6 +205,14 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	if err := checkStopPolicy(stopPolicy, storageProfile != nil, runtime); err != nil {
 		return ClusterDetail{}, err
 	}
+	retention, err := clusterArchiveRetention(req.ArchiveLocalRetention)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	snapshotName, err := clusterArchiveSnapshotName(req.ArchiveSnapshotName)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
 
 	if _, err := s.q.GetClusterBySlug(ctx, slug); err == nil {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -216,26 +238,28 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	}
 	now := s.now()
 	row, err := s.q.CreateCluster(ctx, db.CreateClusterParams{
-		ID:               uuid.NewV7().String(),
-		Slug:             slug,
-		Name:             name,
-		AdminURL:         adminURL,
-		EndpointURL:      endpointURL,
-		Runtime:          runtime,
-		AdminTokenEnc:    sealed,
-		AdminTokenID:     result.principalID,
-		AdminTokenLast4:  last4(token),
-		Status:           status,
-		StatusDetail:     detail,
-		Version:          result.version,
-		Domain:           domain,
-		DnsProfileID:     nullProfileID(profile),
-		DnsRecords:       dnsRecords,
-		StorageProfileID: nullStorageProfileID(storageProfile),
-		StopPolicy:       stopPolicy,
-		Checks:           encodeChecks(checks),
-		CheckedAt:        sql.NullTime{Time: now, Valid: true},
-		CreatedAt:        now,
+		ID:                    uuid.NewV7().String(),
+		Slug:                  slug,
+		Name:                  name,
+		AdminURL:              adminURL,
+		EndpointURL:           endpointURL,
+		Runtime:               runtime,
+		AdminTokenEnc:         sealed,
+		AdminTokenID:          result.principalID,
+		AdminTokenLast4:       last4(token),
+		Status:                status,
+		StatusDetail:          detail,
+		Version:               result.version,
+		Domain:                domain,
+		DnsProfileID:          nullProfileID(profile),
+		DnsRecords:            dnsRecords,
+		StorageProfileID:      nullStorageProfileID(storageProfile),
+		StopPolicy:            stopPolicy,
+		ArchiveLocalRetention: retention,
+		ArchiveSnapshotName:   snapshotName,
+		Checks:                encodeChecks(checks),
+		CheckedAt:             sql.NullTime{Time: now, Valid: true},
+		CreatedAt:             now,
 	})
 	if db.IsUniqueViolation(err) {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -300,15 +324,17 @@ func (s *Service) GetCluster(ctx context.Context, ref string) (ClusterDetail, er
 	return s.clusterDetail(ctx, row.ID)
 }
 
-// UpdateCluster changes a cluster's domain, DNS profile and DNS record mode.
-// DNS records follow on the next cluster check. Instance admins only.
+// UpdateCluster changes a cluster's domain, DNS profile and DNS record mode,
+// its storage profile and its archive settings. DNS records follow on the
+// next cluster check; node settings on the next `lewbox node configure`. Instance admins only.
 func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClusterRequest) (ClusterDetail, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return ClusterDetail{}, err
 	}
 	if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
-		req.StorageProfile == nil && req.StopPolicy == nil {
-		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile, dns_records, storage_profile or stop_policy")
+		req.StorageProfile == nil && req.StopPolicy == nil &&
+		req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil {
+		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention or archive_snapshot_name")
 	}
 	row, err := s.findCluster(ctx, ref)
 	if err != nil {
@@ -376,14 +402,30 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 	if err := checkStopPolicy(stopPolicy, storageID.Valid, row.Runtime); err != nil {
 		return ClusterDetail{}, err
 	}
+	retention := row.ArchiveLocalRetention
+	if req.ArchiveLocalRetention != nil {
+		retention, err = clusterArchiveRetention(*req.ArchiveLocalRetention)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+	}
+	snapshotName := row.ArchiveSnapshotName
+	if req.ArchiveSnapshotName != nil {
+		snapshotName, err = clusterArchiveSnapshotName(*req.ArchiveSnapshotName)
+		if err != nil {
+			return ClusterDetail{}, err
+		}
+	}
 
 	updated, err := s.q.UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
-		Domain:           domain,
-		DnsProfileID:     profileID,
-		DnsRecords:       records,
-		StorageProfileID: storageID,
-		StopPolicy:       stopPolicy,
-		ID:               row.ID,
+		Domain:                domain,
+		DnsProfileID:          profileID,
+		DnsRecords:            records,
+		StorageProfileID:      storageID,
+		StopPolicy:            stopPolicy,
+		ArchiveLocalRetention: retention,
+		ArchiveSnapshotName:   snapshotName,
+		ID:                    row.ID,
 	})
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("update cluster: %w", err)
@@ -1266,23 +1308,25 @@ func encodeChecks(checks []Check) string {
 
 func toCluster(r db.Cluster, nodes int, profile, storage *string) Cluster {
 	c := Cluster{
-		ID:              r.ID,
-		Slug:            r.Slug,
-		Name:            r.Name,
-		AdminURL:        r.AdminURL,
-		EndpointURL:     r.EndpointURL,
-		Runtime:         r.Runtime,
-		Domain:          r.Domain,
-		DNSProfile:      profile,
-		DNSRecords:      r.DnsRecords,
-		StorageProfile:  storage,
-		StopPolicy:      r.StopPolicy,
-		AdminTokenLast4: r.AdminTokenLast4,
-		Status:          r.Status,
-		StatusDetail:    r.StatusDetail,
-		Version:         r.Version,
-		Nodes:           nodes,
-		CreatedAt:       r.CreatedAt.UTC(),
+		ID:                    r.ID,
+		Slug:                  r.Slug,
+		Name:                  r.Name,
+		AdminURL:              r.AdminURL,
+		EndpointURL:           r.EndpointURL,
+		Runtime:               r.Runtime,
+		Domain:                r.Domain,
+		DNSProfile:            profile,
+		DNSRecords:            r.DnsRecords,
+		StorageProfile:        storage,
+		StopPolicy:            r.StopPolicy,
+		ArchiveLocalRetention: r.ArchiveLocalRetention,
+		ArchiveSnapshotName:   r.ArchiveSnapshotName,
+		AdminTokenLast4:       r.AdminTokenLast4,
+		Status:                r.Status,
+		StatusDetail:          r.StatusDetail,
+		Version:               r.Version,
+		Nodes:                 nodes,
+		CreatedAt:             r.CreatedAt.UTC(),
 	}
 	if r.CheckedAt.Valid {
 		t := r.CheckedAt.Time.UTC()

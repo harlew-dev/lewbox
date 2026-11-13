@@ -24,6 +24,14 @@ type nodeAddOptions struct {
 	endpointURL    string
 	storageProfile string
 	stopPolicy     string
+	retention      string
+	snapshotName   string
+}
+
+// newClusterOnly reports whether any option that only applies to a new
+// cluster was set.
+func (o *nodeAddOptions) newClusterOnly() bool {
+	return o.storageProfile != "" || o.stopPolicy != "" || o.retention != "" || o.snapshotName != ""
 }
 
 // newAddNodeCmd registers a node by URL, or starts or joins a cluster on this
@@ -47,8 +55,8 @@ func newAddNodeCmd(a *app) *cobra.Command {
 					return usagef("node add <name> --url <url>")
 				}
 				if o.cluster != "" || o.newCluster != "" || o.advertise != "" || o.adminURL != "" || o.endpointURL != "" ||
-					o.storageProfile != "" || o.stopPolicy != "" {
-					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url, --endpoint-url, --storage-profile or --stop-policy")
+					o.newClusterOnly() {
+					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url, --endpoint-url, --storage-profile, --stop-policy, --archive-local-retention or --archive-snapshot-name")
 				}
 				return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 					return b.AddNode(ctx, service.AddNodeRequest{Name: args[0], URL: o.url})
@@ -66,6 +74,8 @@ func newAddNodeCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&o.endpointURL, "endpoint-url", "", "the endpoint customers use (default: admin-url)")
 	cmd.Flags().StringVar(&o.storageProfile, "storage-profile", "", "the storage profile for a new cluster, by name")
 	cmd.Flags().StringVar(&o.stopPolicy, "stop-policy", "", "what happens to a stopped sandbox in a new cluster: keep or archive")
+	cmd.Flags().StringVar(&o.retention, "archive-local-retention", "", "how long a new cluster's nodes keep local copies of archived sandboxes: instant, 1h, 1d, 7d or never")
+	cmd.Flags().StringVar(&o.snapshotName, "archive-snapshot-name", "", "how a new cluster names archive snapshots: id or name")
 	return cmd
 }
 
@@ -76,8 +86,8 @@ func (a *app) runNodeAdd(ctx context.Context, args []string, o *nodeAddOptions) 
 	if o.cluster != "" && o.newCluster != "" {
 		return usagef("--cluster and --new-cluster cannot be used together")
 	}
-	if o.cluster != "" && (o.storageProfile != "" || o.stopPolicy != "") {
-		return usagef("--storage-profile and --stop-policy only apply to a new cluster: change them with lewbox cluster set")
+	if o.cluster != "" && o.newClusterOnly() {
+		return usagef("--storage-profile, --stop-policy, --archive-local-retention and --archive-snapshot-name only apply to a new cluster: change them with lewbox cluster set")
 	}
 	state, err := a.loadState()
 	if err != nil {
@@ -171,15 +181,17 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		endpointURL = adminURL
 	}
 	detail, err := b.AddCluster(ctx, service.AddClusterRequest{
-		Slug:           slug,
-		AdminURL:       adminURL,
-		EndpointURL:    endpointURL,
-		Runtime:        state.Runtime,
-		Domain:         clusterDomainOf(state),
-		DNSProfile:     state.DNSProfile,
-		StorageProfile: o.storageProfile,
-		StopPolicy:     o.stopPolicy,
-		AdminToken:     token,
+		Slug:                  slug,
+		AdminURL:              adminURL,
+		EndpointURL:           endpointURL,
+		Runtime:               state.Runtime,
+		Domain:                clusterDomainOf(state),
+		DNSProfile:            state.DNSProfile,
+		StorageProfile:        o.storageProfile,
+		StopPolicy:            o.stopPolicy,
+		ArchiveLocalRetention: o.retention,
+		ArchiveSnapshotName:   o.snapshotName,
+		AdminToken:            token,
 	})
 	if err != nil {
 		if se, ok := errors.AsType[*service.Error](err); ok && se.Code == service.CodeConflict {

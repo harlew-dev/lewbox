@@ -96,7 +96,7 @@ Another workspace's sandbox is always `404`, never `403`.
 
 **Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a region the workspace can use. `stop_policy` is `keep` or `archive`: on an `archive` region a stopped sandbox is archived to storage. A subscribed region also has `plan` (`{slug, name}`) and `limits`.
 
-**Archive**: `{id, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `status` is `pending`, `pushing`, `archived` or `failed`; `registry_ref` is the image to restore it by. The restore response's `sandbox` is `{id, name, status, region}`, a new sandbox.
+**Archive**: `{id, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `status` is `pending`, `pushing`, `archived` or `failed`; `registry_ref` is the image to restore it by. `snapshot_name` starts with `archive-` and ends with the sandbox ID; depending on the region it may include the sandbox's name too, as `archive-<name>-<id>`. The restore response's `sandbox` is `{id, name, status, region}`, a new sandbox.
 
 **SandboxKey**: `{id, name, region, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `token_hint` is `avm_…` and the token's last four characters. **NewSandboxKey** adds the `token`, `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a Docker region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
 

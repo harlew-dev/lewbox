@@ -134,11 +134,11 @@ INSERT OR IGNORE INTO archives (id, org_id, cluster_id, sandbox_id, sandbox_name
                                 status, created_at)
 SELECT ?1, sandboxes.org_id, sandboxes.cluster_id, sandboxes.id, sandboxes.name,
        sandboxes.image, sandboxes.runtime, sandboxes.cpu, sandboxes.memory_mb,
-       sandboxes.disk_gb, '{}', 'archive-' || sandboxes.id, 'pending', ?2
+       sandboxes.disk_gb, '{}', ?2, 'pending', ?3
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
-WHERE sandboxes.cluster_id = ?3
-  AND sandboxes.id = ?4
+WHERE sandboxes.cluster_id = ?4
+  AND sandboxes.id = ?5
   AND sandboxes.status = 'stopped'
   AND sandboxes.gone_at IS NULL
   AND sandboxes.org_id IS NOT NULL
@@ -147,17 +147,20 @@ WHERE sandboxes.cluster_id = ?3
 `
 
 type InsertArchiveParams struct {
-	ArchiveID string
-	CreatedAt time.Time
-	ClusterID string
-	SandboxID string
+	ArchiveID    string
+	SnapshotName string
+	CreatedAt    time.Time
+	ClusterID    string
+	SandboxID    string
 }
 
 // One statement that cannot double-insert: the partial unique index plus
-// INSERT OR IGNORE. The sandbox must still be stopped and orphan-free.
+// INSERT OR IGNORE. The sandbox must still be stopped and orphan-free. The
+// caller builds the snapshot name (archive-<id> or archive-<name>-<id>).
 func (q *Queries) InsertArchive(ctx context.Context, arg InsertArchiveParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, insertArchive,
 		arg.ArchiveID,
+		arg.SnapshotName,
 		arg.CreatedAt,
 		arg.ClusterID,
 		arg.SandboxID,
@@ -171,7 +174,7 @@ func (q *Queries) InsertArchive(ctx context.Context, arg InsertArchiveParams) (i
 const listArchivableSandboxes = `-- name: ListArchivableSandboxes :many
 SELECT sandboxes.cluster_id, sandboxes.id AS sandbox_id, sandboxes.org_id,
        sandboxes.name, sandboxes.image, sandboxes.runtime, sandboxes.cpu,
-       sandboxes.memory_mb, sandboxes.disk_gb
+       sandboxes.memory_mb, sandboxes.disk_gb, clusters.archive_snapshot_name
 FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.status = 'stopped'
@@ -188,15 +191,16 @@ WHERE sandboxes.status = 'stopped'
 `
 
 type ListArchivableSandboxesRow struct {
-	ClusterID string
-	SandboxID string
-	OrgID     sql.NullString
-	Name      string
-	Image     string
-	Runtime   string
-	Cpu       float64
-	MemoryMb  int64
-	DiskGb    int64
+	ClusterID           string
+	SandboxID           string
+	OrgID               sql.NullString
+	Name                string
+	Image               string
+	Runtime             string
+	Cpu                 float64
+	MemoryMb            int64
+	DiskGb              int64
+	ArchiveSnapshotName string
 }
 
 // Every stopped customer sandbox on an archive cluster with a storage profile
@@ -220,6 +224,7 @@ func (q *Queries) ListArchivableSandboxes(ctx context.Context) ([]ListArchivable
 			&i.Cpu,
 			&i.MemoryMb,
 			&i.DiskGb,
+			&i.ArchiveSnapshotName,
 		); err != nil {
 			return nil, err
 		}

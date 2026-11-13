@@ -1142,7 +1142,7 @@ func TestNodeConfigureStorage(t *testing.T) {
 	if h.files[machine.RegistryUnitFile] != machine.RegistryUnit {
 		t.Error("registry unit not written")
 	}
-	if h.files[machine.CleanupService] != machine.CleanupServiceUnit {
+	if h.files[machine.CleanupService] != machine.CleanupServiceUnit(0) {
 		t.Error("cleanup service not written")
 	}
 	if h.files[machine.CleanupTimer] != machine.CleanupTimerUnit {
@@ -1183,6 +1183,102 @@ func TestNodeConfigureStorage(t *testing.T) {
 	}
 	if h.runner.Ran("systemctl", "restart", "lewbox-registry") {
 		t.Error("an unchanged registry was restarted")
+	}
+}
+
+func TestNodeConfigureArchiveRetention(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	storageEnv(t, e, fake)
+	from := writeMirror(t, "v0.7.0", testScript)
+	writeRegistryMirror(t, from)
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab", From: from,
+	})
+	if _, errOut, code := e.cliWith(h, "", "node", "configure"); code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+	outdated := func() string {
+		t.Helper()
+		out, errOut, code := e.cli("node", "get", "node-1")
+		if code != 0 {
+			t.Fatalf("node get: exit %d: %s", code, errOut)
+		}
+		var node service.Node
+		if err := json.Unmarshal([]byte(out), &node); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(node.Settings.Reasons, "; ")
+	}
+
+	// 1d: the node is outdated until configure writes --older-than.
+	if _, errOut, code := e.cli("cluster", "set", "lab", "--archive-local-retention", "1d"); code != 0 {
+		t.Fatalf("cluster set: exit %d: %s", code, errOut)
+	}
+	if got := outdated(); got != "archive_local_retention is 1d; this node applied instant" {
+		t.Errorf("reasons = %q", got)
+	}
+	h.runner.Reset()
+	out, errOut, code := e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("node configure 1d: exit %d: %s", code, errOut)
+	}
+	var got configureOutput
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Storage != "applied" || got.RegistryChanged || !got.CleanupTimer {
+		t.Errorf("configure 1d = %+v", got)
+	}
+	if h.files[machine.CleanupService] != machine.CleanupServiceUnit(24*time.Hour) {
+		t.Errorf("cleanup service = %q", h.files[machine.CleanupService])
+	}
+	if got := outdated(); got != "" {
+		t.Errorf("after configure: %q", got)
+	}
+
+	// never: the registry stays, the timer goes.
+	if _, errOut, code := e.cli("cluster", "set", "lab", "--archive-local-retention", "never"); code != 0 {
+		t.Fatalf("cluster set never: exit %d: %s", code, errOut)
+	}
+	h.runner.Reset()
+	out, errOut, code = e.cliWith(h, "", "node", "configure")
+	if code != 0 {
+		t.Fatalf("node configure never: exit %d: %s", code, errOut)
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Storage != "applied" || got.RegistryChanged || !got.CleanupTimer {
+		t.Errorf("configure never = %+v", got)
+	}
+	if _, ok := h.files[machine.RegistryUnitFile]; !ok {
+		t.Error("the registry was removed")
+	}
+	for _, path := range []string{machine.CleanupService, machine.CleanupTimer, machine.CleanupBinary} {
+		if _, ok := h.files[path]; ok {
+			t.Errorf("%s was not removed", path)
+		}
+	}
+	if !h.runner.Ran("systemctl", "disable", "--now", machine.CleanupTimerName) {
+		t.Error("the cleanup timer was not disabled")
+	}
+	if got := outdated(); got != "" {
+		t.Errorf("after configure never: %q", got)
+	}
+}
+
+func TestNodeAddArchiveFlagsOnlyForANewCluster(t *testing.T) {
+	e := newEnv(t)
+	h := newHarness(t, "http://127.0.0.1:1")
+	for _, flag := range []string{"--archive-local-retention", "--archive-snapshot-name"} {
+		_, errOut, code := e.cliWith(h, "", "node", "add", "node-2", "--cluster", "lab", flag, "1d")
+		if code != 2 || !strings.Contains(errOut, "only apply to a new cluster") {
+			t.Errorf("%s with --cluster: exit %d: %s", flag, code, errOut)
+		}
 	}
 }
 

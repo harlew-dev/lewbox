@@ -70,20 +70,35 @@ describe('installCommand', () => {
 })
 
 describe('newClusterCommand', () => {
+  const defaults = { retention: 'instant', snapshotName: 'id' } as const
+
   it('starts a cluster, with storage options only when chosen', () => {
-    expect(newClusterCommand({ node: 'node-1', slug: 'eu-west', storageProfile: '', stopPolicy: 'keep' })).toBe(
+    expect(newClusterCommand({ ...defaults, node: 'node-1', slug: 'eu-west', storageProfile: '', stopPolicy: 'keep' })).toBe(
       'lewbox node add node-1 --new-cluster eu-west',
     )
-    expect(newClusterCommand({ node: 'node-1', slug: 'eu-west', storageProfile: 's3-main', stopPolicy: 'keep' })).toBe(
-      'lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main',
+    expect(
+      newClusterCommand({ ...defaults, node: 'node-1', slug: 'eu-west', storageProfile: 's3-main', stopPolicy: 'keep' }),
+    ).toBe('lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main')
+    expect(
+      newClusterCommand({ ...defaults, node: 'node-1', slug: 'eu-west', storageProfile: 's3-main', stopPolicy: 'archive' }),
+    ).toBe('lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main --stop-policy archive')
+  })
+
+  it('adds the archive settings only when archiving and not the default', () => {
+    const base = { node: 'node-1', slug: 'lab', storageProfile: 's3-main' }
+    expect(newClusterCommand({ ...base, stopPolicy: 'archive', retention: '1d', snapshotName: 'name' })).toBe(
+      'lewbox node add node-1 --new-cluster lab --storage-profile s3-main --stop-policy archive --archive-local-retention 1d --archive-snapshot-name name',
     )
-    expect(newClusterCommand({ node: 'node-1', slug: 'eu-west', storageProfile: 's3-main', stopPolicy: 'archive' })).toBe(
-      'lewbox node add node-1 --new-cluster eu-west --storage-profile s3-main --stop-policy archive',
+    expect(newClusterCommand({ ...base, stopPolicy: 'keep', retention: '1d', snapshotName: 'name' })).toBe(
+      'lewbox node add node-1 --new-cluster lab --storage-profile s3-main',
     )
+    // A value from outside the list never reaches the command.
+    const bad = { ...base, stopPolicy: 'archive', retention: '1d; rm -rf /', snapshotName: 'id' } as never
+    expect(newClusterCommand(bad)).toBe('lewbox node add node-1 --new-cluster lab --storage-profile s3-main --stop-policy archive')
   })
 
   it('shows placeholders for bad input', () => {
-    expect(newClusterCommand({ node: '', slug: 'A b', storageProfile: '$x', stopPolicy: 'keep' })).toBe(
+    expect(newClusterCommand({ ...defaults, node: '', slug: 'A b', storageProfile: '$x', stopPolicy: 'keep' })).toBe(
       'lewbox node add <node-name> --new-cluster <slug> --storage-profile <storage-profile>',
     )
   })

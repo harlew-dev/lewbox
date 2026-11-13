@@ -42,6 +42,7 @@ import {
   type StopPolicy,
 } from '../../lib/commands'
 import { useLoad } from '../../lib/use-load'
+import { ArchiveOptions } from './cluster-settings'
 import { StepIndicator } from './step-indicator'
 
 // Starting a cluster happens on its first machine: the console can only say
@@ -81,6 +82,8 @@ function StartCluster({ onClose }: { onClose: () => void }) {
   const [runtime, setRuntime] = useState<Runtime>('docker')
   const [storageProfile, setStorageProfile] = useState('')
   const [stopPolicy, setStopPolicy] = useState<StopPolicy>('keep')
+  const [retention, setRetention] = useState<api.ArchiveRetention>('instant')
+  const [snapshotName, setSnapshotName] = useState<api.ArchiveSnapshotName>('id')
   const [version, setVersion] = useState('')
   const [extraFlags, setExtraFlags] = useState('')
 
@@ -124,7 +127,7 @@ function StartCluster({ onClose }: { onClose: () => void }) {
     version,
     extraFlags,
   })
-  const addNode = newClusterCommand({ node, slug, storageProfile, stopPolicy: effectivePolicy })
+  const addNode = newClusterCommand({ node, slug, storageProfile, stopPolicy: effectivePolicy, retention, snapshotName })
 
   if (step === 'commands') {
     return (
@@ -352,6 +355,14 @@ function StartCluster({ onClose }: { onClose: () => void }) {
             ]}
           />
           {archiveBlocked && <Text>Archiving is off. {archiveBlocked}</Text>}
+          {effectivePolicy === 'archive' && (
+            <ArchiveOptions
+              retention={retention}
+              onRetention={setRetention}
+              snapshotName={snapshotName}
+              onSnapshotName={setSnapshotName}
+            />
+          )}
         </div>
 
         <Disclosure title="Advanced">
