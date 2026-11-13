@@ -474,6 +474,52 @@ func TestInstallDNSProfile(t *testing.T) {
 		detail.DNSProfile == nil || *detail.DNSProfile != "cf-prod" || detail.DNSRecords != "auto" {
 		t.Errorf("cluster = %+v", detail.Cluster)
 	}
+	// Registering created the domain's records: nothing could reach it
+	// before. newProfileEnv's zone is the fake's first.
+	records := map[string]string{}
+	for _, r := range cf.Records("zone-1") {
+		records[r.Name] = r.Content
+	}
+	if records["eu.example.com"] != "203.0.113.10" || records["*.eu.example.com"] != "203.0.113.10" {
+		t.Errorf("records after node add = %v", records)
+	}
+}
+
+func TestLocalPublicIP(t *testing.T) {
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "admin-token"
+	h := newHarness(t, fake.URL())
+	a := &app{hd: h.hd}
+	member := func(name, host string) aerolvm.Member {
+		return aerolvm.Member{NodeID: name, NodeName: name, APIURL: fake.URL(), Alive: true, PublicHost: host, Role: "mixed"}
+	}
+	cases := []struct {
+		name    string
+		members []aerolvm.Member
+		want    string
+		wantErr string
+	}{
+		{"own member", []aerolvm.Member{member("node-0", "203.0.113.9"), member("node-1", "203.0.113.10")}, "203.0.113.10", ""},
+		{"the only member", []aerolvm.Member{member("other", "2001:db8::1")}, "2001:db8::1", ""},
+		{"mapped v4", []aerolvm.Member{member("node-1", "::ffff:203.0.113.10")}, "203.0.113.10", ""},
+		{"a name", []aerolvm.Member{member("node-1", "node-1.example.com")}, "", "not an IP address"},
+		{"no host", []aerolvm.Member{member("node-1", "")}, "", "no public host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake.SetMembers(tc.members)
+			got, err := a.localPublicIP(context.Background(), fake.AdminToken, "node-1")
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
 }
 
 func TestInstallDNSProfileRefusals(t *testing.T) {

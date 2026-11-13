@@ -322,6 +322,32 @@ func (a *app) localClusterSize(ctx context.Context, runner machine.Runner) (int,
 	return len(members.Members), nil
 }
 
+// localPublicIP asks this machine's AerolVM, over loopback with the admin
+// token, which public address it advertises as node name. A node that isn't
+// in cluster mode has no member list, so it returns an error.
+func (a *app) localPublicIP(ctx context.Context, token, name string) (string, error) {
+	client := aerolvm.New(a.host().localAPIURL, token, aerolvm.WithRetry(15*time.Second))
+	members, err := client.Members(ctx)
+	if err != nil {
+		return "", err
+	}
+	var host string
+	for _, m := range members.Members {
+		if m.NodeID == name || m.NodeName == name || len(members.Members) == 1 {
+			host = strings.TrimSpace(m.PublicHost)
+			break
+		}
+	}
+	if host == "" {
+		return "", fmt.Errorf("node %q reports no public host", name)
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return "", fmt.Errorf("public host %q is not an IP address", host)
+	}
+	return addr.Unmap().String(), nil
+}
+
 // dialAddressForJoin returns the host and port to check before joining.
 func dialAddressForJoin(joinURL string) (string, error) {
 	u, err := url.Parse(joinURL)

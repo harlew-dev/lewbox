@@ -180,6 +180,19 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 	if endpointURL == "" {
 		endpointURL = adminURL
 	}
+	// A new domain usually doesn't resolve yet: the orchestrator creates its
+	// records once the cluster is registered. Tell it where this node is so
+	// registration doesn't depend on DNS.
+	var adminIP string
+	if state.Mode == machine.ModeDomain && adminURL == state.APIURL() {
+		ip, err := a.localPublicIP(ctx, token, name)
+		if err != nil {
+			a.say("  ! couldn't read this node's public IP (%v); the orchestrator will look up %s", err, state.Domain)
+		} else {
+			adminIP = ip
+			a.say("  ✓ this node's public IP is %s", ip)
+		}
+	}
 	detail, err := b.AddCluster(ctx, service.AddClusterRequest{
 		Slug:                  slug,
 		AdminURL:              adminURL,
@@ -192,6 +205,7 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		ArchiveLocalRetention: o.retention,
 		ArchiveSnapshotName:   o.snapshotName,
 		AdminToken:            token,
+		AdminIP:               adminIP,
 	})
 	if err != nil {
 		if se, ok := errors.AsType[*service.Error](err); ok && se.Code == service.CodeConflict {

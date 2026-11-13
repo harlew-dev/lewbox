@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strconv"
@@ -97,6 +98,11 @@ type AddClusterRequest struct {
 	// ArchiveSnapshotName is id or name; default id.
 	ArchiveSnapshotName string `json:"archive_snapshot_name"`
 	AdminToken          string `json:"admin_token"`
+	// AdminIP is an IP address at which admin_url's host answers. When the
+	// host doesn't resolve, the checks that register the cluster connect
+	// there, so a new domain whose DNS records Lewbox is about to create can
+	// register. TLS still verifies the certificate against the host name.
+	AdminIP string `json:"admin_ip"`
 }
 
 // UpdateClusterRequest changes a cluster's DNS and storage settings. A
@@ -155,6 +161,10 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		name = slug
 	}
 	adminURL, err := normalizeURL(req.AdminURL)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
+	adminIP, err := clusterAdminIP(req.AdminIP, adminURL)
 	if err != nil {
 		return ClusterDetail{}, err
 	}
@@ -226,6 +236,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		EndpointURL: endpointURL,
 		Runtime:     runtime,
 		AdminToken:  token,
+		AdminIP:     adminIP,
 	})
 	if result.fatal {
 		return ClusterDetail{}, precondition(checks, "cluster %q failed its checks", slug)
@@ -273,8 +284,19 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		if err != nil {
 			return ClusterDetail{}, err
 		}
+		changed := false
 		if len(conflicts) > 0 {
 			checks = applyConflicts(checks, conflicts)
+			changed = true
+		}
+		// Create the domain's records now, not at the first check: a new
+		// cluster's domain usually has none yet, and nothing else that
+		// needs them (customers, the next check) can reach it until then.
+		if check := s.reconcileDNSRecords(ctx, row, result.members); check.Name != "" {
+			checks = append(checks, check)
+			changed = true
+		}
+		if changed {
 			status, detail = summarizeChecks(checks)
 			if err := s.storeCheck(ctx, row.ID, status, detail, row.Version, checks); err != nil {
 				return ClusterDetail{}, err
@@ -725,6 +747,9 @@ type clusterSpec struct {
 	EndpointURL string
 	Runtime     string
 	AdminToken  string
+	// AdminIP, when valid, is where AdminURL's host is reached when it
+	// doesn't resolve (registration only).
+	AdminIP netip.Addr
 }
 
 type checkResult struct {
@@ -742,7 +767,8 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 	checks := make([]Check, 0, 7)
 	var result checkResult
 	add := func(c Check) { checks = append(checks, c) }
-	client := s.aerolvmClient(spec.AdminURL, spec.AdminToken)
+	pinned := pinnedHostOptions(spec.AdminURL, spec.AdminIP)
+	client := s.aerolvmClient(spec.AdminURL, spec.AdminToken, pinned...)
 
 	healthStart := time.Now()
 	health, err := client.Health(ctx)
@@ -837,7 +863,7 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 
 	add(runtimeCheck(result.members, spec.Runtime))
 
-	add(s.nodeCertCheck(ctx, spec.AdminToken, result.members))
+	add(s.nodeCertCheck(ctx, spec.AdminToken, result.members, pinned...))
 
 	token, err := client.CreateToken(ctx, aerolvm.CreateTokenRequest{
 		Name:      "lewbox-ttl-check",
@@ -858,7 +884,7 @@ func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, che
 	if spec.EndpointURL == spec.AdminURL {
 		add(Check{Name: "endpoint", OK: true, Detail: "same as admin_url"})
 	} else {
-		endpoint := s.aerolvmClient(spec.EndpointURL, "")
+		endpoint := s.aerolvmClient(spec.EndpointURL, "", pinned...)
 		if _, err := endpoint.Health(ctx); err != nil {
 			add(Check{
 				Name:   "endpoint",
@@ -910,7 +936,7 @@ func runtimeCheck(members []aerolvm.Member, runtime string) Check {
 
 // nodeCertCheck reads each alive member's cluster certificate expiry from its
 // metrics endpoint. Members that do not answer are skipped.
-func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aerolvm.Member) Check {
+func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aerolvm.Member, opts ...aerolvm.Option) Check {
 	expiries := make(map[string]time.Time, len(members))
 	var (
 		mu  sync.Mutex
@@ -928,7 +954,7 @@ func (s *Service) nodeCertCheck(ctx context.Context, token string, members []aer
 			defer func() { <-sem }()
 			reqCtx, cancel := context.WithTimeout(ctx, certCheckTimeout)
 			defer cancel()
-			at, ok, err := s.aerolvmClient(member.APIURL, token).NodeCertExpiry(reqCtx)
+			at, ok, err := s.aerolvmClient(member.APIURL, token, opts...).NodeCertExpiry(reqCtx)
 			if err != nil || !ok {
 				return
 			}
@@ -1202,8 +1228,12 @@ func (s *Service) clusterToken(row db.Cluster) (string, error) {
 	return string(plaintext), nil
 }
 
-func (s *Service) aerolvmClient(baseURL, token string) *aerolvm.Client {
-	return aerolvm.New(baseURL, token, s.aerolvmOptions...)
+func (s *Service) aerolvmClient(baseURL, token string, extra ...aerolvm.Option) *aerolvm.Client {
+	if len(extra) == 0 {
+		return aerolvm.New(baseURL, token, s.aerolvmOptions...)
+	}
+	opts := append(append([]aerolvm.Option(nil), s.aerolvmOptions...), extra...)
+	return aerolvm.New(baseURL, token, opts...)
 }
 
 // clusterClient opens the stored admin token and returns a client for the

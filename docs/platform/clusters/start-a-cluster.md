@@ -85,7 +85,7 @@ In order, Lewbox:
 1. starts AerolVM as the first node of a new cluster;
 2. turns on the AerolVM settings Lewbox needs (identity and long-lived keys);
 3. creates an admin token for Lewbox on the machine itself, over `127.0.0.1`;
-4. registers the cluster with the orchestrator, which checks it and stores the token encrypted.
+4. registers the cluster with the orchestrator, which checks it and stores the token encrypted. In domain mode with a DNS profile, it sends this node's public IP too: the domain has no DNS records yet, so the orchestrator reaches the node at that IP, then creates the records ([DNS profiles](dns-profiles.md#the-records-lewbox-keeps)).
 
 The node name defaults to the machine's short hostname, and the cluster slug defaults to the node name.
 

@@ -157,7 +157,7 @@ lewbox node add eu-1 --url https://eu-1:8443   # only record a node by URL; chan
 | `--cluster REF` | | Join this cluster: its slug, or the name of one of its nodes. `cluster/x` or `node/x` when a name is ambiguous |
 | `--role mixed\|server\|worker\|ingress` | `mixed` | The node's role in the cluster |
 | `--advertise IP` | the public host's IP | The address other nodes use for this one |
-| `--admin-url URL` | this machine's AerolVM URL | Where the orchestrator reaches the new cluster |
+| `--admin-url URL` | this machine's AerolVM URL | Where the orchestrator reaches the new cluster. Left at its default in domain mode, Lewbox also sends this node's public IP, which the orchestrator uses while the domain doesn't resolve yet, and then creates the domain's records from the DNS profile |
 | `--endpoint-url URL` | `--admin-url` | What customers use |
 | `--storage-profile NAME` | | New cluster only: the storage profile for snapshots |
 | `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` |

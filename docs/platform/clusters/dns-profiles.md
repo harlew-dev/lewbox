@@ -65,11 +65,12 @@ Point the cluster at another profile first, then delete this one. If the cluster
 
 ## The records Lewbox keeps
 
-When a cluster has a domain and a DNS profile, its check keeps the domain pointed at the cluster:
+When a cluster has a domain and a DNS profile, registering it creates the records, and each check keeps the domain pointed at the cluster:
 
 - For every **live `mixed` or `ingress` member whose `public_host` is a public IP**, an `A` (IPv4) or `AAAA` (IPv6) record for `<domain>` and for `*.<domain>`, TTL 60, DNS only (never proxied), with the comment `lewbox <cluster> <node>`.
 - A member whose `public_host` is a private, loopback or otherwise unusable address gets no record, and the check names it (`node-1: 10.0.0.5 is a private address, no record`). A `worker` or `server` member gets none either.
 - In domain mode, AerolVM's installer sets `public_host` to the machine's first IP address. On most VPSs that is the public IP. Behind a cloud provider's NAT (AWS, GCP) it is private: pass the public IP to the installer with `lewbox install … -- --public-host 203.0.113.10`, or set `dns_records` to `off` and point the domain at your load balancer yourself.
+- A new domain has no records until the cluster is registered, so `lewbox node add … --new-cluster` sends the node's `public_host` along, and the orchestrator connects to that IP for the registration checks when the domain doesn't resolve yet (still verifying the certificate for the domain). Nothing has looked the domain up before its records exist, so no resolver caches a "no such host" answer.
 - Lewbox records each Cloudflare record's ID. When a member leaves, stops being ingress or changes IP, its records are deleted; records that are gone from Cloudflare already count as deleted. **Lewbox never touches another record in the zone.**
 - An identical record that already exists is adopted rather than duplicated.
 

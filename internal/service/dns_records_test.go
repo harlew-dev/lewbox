@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 
@@ -30,6 +31,14 @@ func dnsMember(name, role, host string) aerolvm.Member {
 // fake AerolVM and a fake Cloudflare API, and returns its zone ID.
 func newDNSRecordsFixture(t *testing.T, members ...aerolvm.Member) (*Service, *cloudflaretest.Fake, *aerolvmtest.Server, string) {
 	t.Helper()
+	s, fake, clusterFake, zoneID, _ := newDNSRecordsFixtureBefore(t, nil, members...)
+	return s, fake, clusterFake, zoneID
+}
+
+// newDNSRecordsFixtureBefore is newDNSRecordsFixture that runs before on the
+// zone ahead of registering the cluster, and returns what AddCluster said.
+func newDNSRecordsFixtureBefore(t *testing.T, before func(fake *cloudflaretest.Fake, zoneID string), members ...aerolvm.Member) (*Service, *cloudflaretest.Fake, *aerolvmtest.Server, string, ClusterDetail) {
+	t.Helper()
 	fake := cloudflaretest.New(t)
 	fake.Token = dnsTestToken
 	zoneID := fake.AddZone("example.com")
@@ -42,10 +51,14 @@ func newDNSRecordsFixture(t *testing.T, members ...aerolvm.Member) (*Service, *c
 	req := clusterRequest(clusterFake, "eu-west")
 	req.Domain = "eu.example.com"
 	req.DNSProfile = "cf"
-	if _, err := s.AddCluster(localCtx(), req); err != nil {
+	if before != nil {
+		before(fake, zoneID)
+	}
+	detail, err := s.AddCluster(localCtx(), req)
+	if err != nil {
 		t.Fatalf("AddCluster: %v", err)
 	}
-	return s, fake, clusterFake, zoneID
+	return s, fake, clusterFake, zoneID, detail
 }
 
 func recordSet(records []cloudflare.Record) map[string]string {
@@ -154,17 +167,17 @@ func TestClusterDNSRecordsSkipsUnusableAddresses(t *testing.T) {
 }
 
 func TestClusterDNSRecordsAdoptsExisting(t *testing.T) {
-	s, fake, _, zoneID := newDNSRecordsFixture(t, dnsMember("node-a", "mixed", "203.0.113.10"))
-	ctx := context.Background()
+	// The operator already made the apex record before registering.
+	s, fake, _, zoneID, _ := newDNSRecordsFixtureBefore(t, func(fake *cloudflaretest.Fake, zoneID string) {
+		client := cloudflare.New(dnsTestToken, cloudflare.WithBaseURL(fake.URL))
+		if _, err := client.CreateRecord(context.Background(), zoneID, cloudflare.Record{
+			Type: "A", Name: "eu.example.com", Content: "203.0.113.10", TTL: 300,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}, dnsMember("node-a", "mixed", "203.0.113.10"))
 
-	// The operator already made the apex record.
-	client := cloudflare.New(dnsTestToken, cloudflare.WithBaseURL(fake.URL))
-	if _, err := client.CreateRecord(ctx, zoneID, cloudflare.Record{
-		Type: "A", Name: "eu.example.com", Content: "203.0.113.10", TTL: 300,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
+	// Registering adopts it; a later check keeps it.
 	detail, err := s.CheckCluster(localCtx(), "eu-west")
 	if err != nil {
 		t.Fatal(err)
@@ -228,13 +241,12 @@ func TestClusterDNSRecordsOff(t *testing.T) {
 }
 
 func TestClusterDNSRecordsFailureDegrades(t *testing.T) {
-	s, fake, _, zoneID := newDNSRecordsFixture(t, dnsMember("node-a", "mixed", "203.0.113.10"))
-	fake.FailNext("POST", "/zones/"+zoneID+"/dns_records", 500, 1)
+	// Cloudflare fails while the cluster is registered: the cluster is
+	// still stored, degraded, so the next check can retry.
+	s, _, _, _, detail := newDNSRecordsFixtureBefore(t, func(fake *cloudflaretest.Fake, zoneID string) {
+		fake.FailNext("POST", "/zones/"+zoneID+"/dns_records", 500, 1)
+	}, dnsMember("node-a", "mixed", "203.0.113.10"))
 
-	detail, err := s.CheckCluster(localCtx(), "eu-west")
-	if err != nil {
-		t.Fatal(err)
-	}
 	check, ok := findCheck(detail.Checks, "dns records")
 	if !ok || check.OK {
 		t.Fatalf("dns records check = %+v", check)
@@ -247,7 +259,7 @@ func TestClusterDNSRecordsFailureDegrades(t *testing.T) {
 	}
 
 	// The next check retries and settles.
-	detail, err = s.CheckCluster(localCtx(), "eu-west")
+	detail, err := s.CheckCluster(localCtx(), "eu-west")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,5 +358,62 @@ func TestRemoveClusterDeletesDNSRecords(t *testing.T) {
 	}
 	if records := fake.Records(zoneID); len(records) != 0 {
 		t.Errorf("records after removal = %+v", records)
+	}
+}
+
+// A new cluster gets its records when it is registered, not at the first
+// check: until then nothing can reach its domain.
+func TestAddClusterCreatesDNSRecords(t *testing.T) {
+	_, fake, _, zoneID, detail := newDNSRecordsFixtureBefore(t, nil, dnsMember("node-a", "mixed", "203.0.113.10"))
+	got := recordSet(fake.Records(zoneID))
+	if len(got) != 2 || got["eu.example.com 203.0.113.10"] != "A" || got["*.eu.example.com 203.0.113.10"] != "A" {
+		t.Errorf("records after AddCluster = %v", got)
+	}
+	if check, ok := findCheck(detail.Checks, "dns records"); !ok || !check.OK {
+		t.Errorf("dns records check = %+v (found %v)", check, ok)
+	}
+	if detail.Status != "ready" {
+		t.Errorf("status = %q", detail.Status)
+	}
+}
+
+// A new domain doesn't resolve yet, so registration reaches the cluster at
+// admin_ip while keeping the domain as its admin URL.
+func TestAddClusterAdminIP(t *testing.T) {
+	clusterFake := newClusterFake(t)
+	_, port, err := net.SplitHostPort(strings.TrimPrefix(clusterFake.URL(), "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// .invalid never resolves (RFC 2606).
+	unresolved := "http://eu.lewbox-test.invalid:" + port
+	s := newClusterService(t)
+
+	req := clusterRequest(clusterFake, "eu-west")
+	req.AdminURL, req.EndpointURL = unresolved, unresolved
+	_, err = s.AddCluster(localCtx(), req)
+	wantCode(t, err, CodePrecondition)
+
+	req.AdminIP = "127.0.0.1"
+	detail, err := s.AddCluster(localCtx(), req)
+	if err != nil {
+		t.Fatalf("AddCluster with admin_ip: %v", err)
+	}
+	if detail.AdminURL != unresolved || detail.EndpointURL != unresolved {
+		t.Errorf("urls = %q, %q; want the host name kept", detail.AdminURL, detail.EndpointURL)
+	}
+	if check, ok := findCheck(detail.Checks, "health"); !ok || !check.OK {
+		t.Errorf("health check = %+v", check)
+	}
+
+	for _, tc := range []struct{ adminURL, adminIP string }{
+		{unresolved, "eu.example.com"},
+		{unresolved, "fe80::1%eth0"},
+		{clusterFake.URL(), "127.0.0.1"}, // admin_url is already an IP
+	} {
+		req := clusterRequest(clusterFake, "eu-bad")
+		req.AdminURL, req.AdminIP = tc.adminURL, tc.adminIP
+		_, err := s.AddCluster(localCtx(), req)
+		wantCode(t, err, CodeInvalid)
 	}
 }
