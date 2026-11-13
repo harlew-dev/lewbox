@@ -3,6 +3,7 @@ import {
   Button,
   Code,
   ConfirmationDialog,
+  CopyText,
   DescriptionDetails,
   DescriptionList,
   DescriptionTerm,
@@ -14,6 +15,7 @@ import {
   EmptyState,
   ErrorNotice,
   ListSkeleton,
+  Notice,
   PageHeader,
   Subheading,
   Table,
@@ -36,6 +38,7 @@ import { formatDate, relativeTime } from '../../lib/format'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { AddNodeDialog } from './add-node-dialog'
+import { ClusterSettings, ClusterSettingsDialog } from './cluster-settings'
 import { ClusterMetrics, ClusterUptime } from './cluster-health'
 import { RemoveNodeDialog } from './remove-node-dialog'
 import { NodeActions } from './servers'
@@ -48,6 +51,8 @@ export function ClusterDetailPage() {
   const [updated, setUpdated] = useState<api.ClusterDetail | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [configureNote, setConfigureNote] = useState(false)
   const [removeNode, setRemoveNode] = useState<api.Node | null>(null)
   const { data, error, failure, loading, reload } = useLoad(
     () => api.getCluster(ref),
@@ -170,6 +175,14 @@ export function ClusterDetailPage() {
         </DescriptionDetails>
       </DescriptionList>
 
+      <ClusterSettings cluster={detail} onEdit={() => setEditOpen(true)} />
+      {configureNote && (
+        <Notice variant="warning" className="mt-6" onDismiss={() => setConfigureNote(false)}>
+          A profile changed, so every node needs <code>lewbox node configure</code>, run on that node. Nodes show as
+          outdated until it has.
+        </Notice>
+      )}
+
       <div className="mt-12 flex items-center gap-3">
         <Subheading>Checks</Subheading>
         {detail.checks.length > 0 &&
@@ -232,7 +245,22 @@ export function ClusterDetailPage() {
             <TableBody>
               {detail.node_list.map((node) => (
                 <TableRow key={node.id}>
-                  <TableCell className="font-medium">{node.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {node.name}
+                    {node.settings?.outdated && (
+                      <div className="mt-1 whitespace-normal font-normal">
+                        <Badge color="amber">Outdated</Badge>
+                        <ul className="mt-1 list-disc pl-5 text-sm text-zinc-500 dark:text-zinc-400">
+                          {node.settings.reasons.map((reason) => (
+                            <li key={reason}>{reason}</li>
+                          ))}
+                        </ul>
+                        <div className="mt-1 max-w-56">
+                          <CopyText value="lewbox node configure" label="Copy lewbox node configure" />
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>{node.role ?? '—'}</TableCell>
                   <TableCell>
                     <AliveBadge alive={node.alive} />
@@ -273,6 +301,16 @@ export function ClusterDetailPage() {
         }}
       />
 
+      <ClusterSettingsDialog
+        open={editOpen}
+        cluster={detail}
+        onClose={() => setEditOpen(false)}
+        onSaved={(changes) => {
+          if (changes.storage_profile !== undefined || changes.dns_profile !== undefined) setConfigureNote(true)
+          setUpdated(null)
+          reload()
+        }}
+      />
       <AddNodeDialog open={addOpen} onClose={() => setAddOpen(false)} clusters={[detail]} cluster={detail} />
       <RemoveNodeDialog
         node={removeNode}

@@ -9,17 +9,28 @@ import {
   ListboxOption,
   ListSkeleton,
   PageHeader,
+  PageTabs,
   RadioGroup,
   SettingsSection,
   Text,
+  tabFrom,
   toast,
   useAction,
 } from '@harlew-dev/ui'
 import { useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
 import { useInstance } from '../../lib/instance'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
+import { DNSProfiles } from './dns-profiles'
+import { StorageProfiles } from './storage-profiles'
+
+const tabs = [
+  { id: 'general', label: 'General' },
+  { id: 'dns', label: 'DNS profiles' },
+  { id: 'storage', label: 'Storage profiles' },
+] as const
 
 const signupOptions: { value: api.SignupMode; label: string; description: string }[] = [
   { value: 'closed', label: 'Closed', description: 'Only you add workspaces, with New workspace.' },
@@ -29,14 +40,24 @@ const signupOptions: { value: api.SignupMode; label: string; description: string
 
 export function AdminSettingsPage() {
   useDocumentTitle('Settings')
+  const [searchParams] = useSearchParams()
+  const tab = tabFrom(searchParams, tabs)
+  return (
+    <div className="max-w-4xl">
+      <PageHeader title="Settings" />
+      <PageTabs label="Settings views" tabs={tabs} current={tab} className="mb-8" />
+      {tab === 'general' ? <GeneralSettings /> : tab === 'dns' ? <DNSProfiles /> : <StorageProfiles />}
+    </div>
+  )
+}
+
+function GeneralSettings() {
   const settings = useLoad(() => api.getSettings(), [])
   const plans = useLoad(() => api.listPlans(), [])
   const regions = useLoad(() => api.listRegions(), [])
 
   return (
-    <div className="max-w-4xl">
-      <PageHeader title="Settings" />
-      <Divider className="mb-10" />
+    <>
       {settings.loading && !settings.data ? (
         <ListSkeleton label="Loading settings" rows={4} />
       ) : settings.error.message || !settings.data ? (
@@ -49,7 +70,7 @@ export function AdminSettingsPage() {
           onSaved={settings.refresh}
         />
       )}
-    </div>
+    </>
   )
 }
 

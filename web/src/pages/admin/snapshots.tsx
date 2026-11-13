@@ -5,17 +5,22 @@ import {
   ListboxOption,
   ListSkeleton,
   PageHeader,
+  PageTabs,
   Stat,
   Subheading,
   Text,
+  tabFrom,
 } from '@harlew-dev/ui'
 import { BarList } from '@harlew-dev/ui/chart'
 import { useState } from 'react'
-import type * as api from '../../lib/api'
+import { useSearchParams } from 'react-router'
+import * as api from '../../lib/api'
+import { ArchiveTable } from '../../components/archive-table'
 import { PartialNotice, SnapshotTable, useSnapshots } from '../../components/snapshot-table'
 import { formatMemory, formatNumber } from '../../lib/format'
 import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
+import { useLoad } from '../../lib/use-load'
 
 interface Group {
   key: string
@@ -61,8 +66,54 @@ function GroupList({ title, groups }: { title: string; groups: Group[] }) {
   )
 }
 
+const tabs = [
+  { id: 'snapshots', label: 'Snapshots' },
+  { id: 'archived', label: 'Archived' },
+] as const
+
 export function FleetSnapshotsPage() {
-  useDocumentTitle('Snapshots')
+  const [searchParams] = useSearchParams()
+  const tab = tabFrom(searchParams, tabs)
+  useDocumentTitle(tab === 'archived' ? 'Archived sandboxes' : 'Snapshots')
+  return tab === 'archived' ? (
+    <>
+      <PageHeader title="Snapshots" description="Every workspace’s snapshots, and its archived sandboxes." />
+      <PageTabs label="Snapshot views" tabs={tabs} current={tab} className="mb-8" />
+      <FleetArchives />
+    </>
+  ) : (
+    <SnapshotsView />
+  )
+}
+
+// Every workspace's archived sandboxes, which an instance admin may delete.
+function FleetArchives() {
+  const archives = useLoad(() => api.listArchives(''), [])
+  const regions = useRegions()
+  if (archives.loading && !archives.data) return <ListSkeleton label="Loading archived sandboxes" rows={4} />
+  if (archives.error.message) return <ErrorNotice error={archives.error} onRetry={archives.reload} />
+  const list = archives.data?.data ?? []
+  if (list.length === 0) {
+    return (
+      <EmptyState
+        title="No archived sandboxes"
+        description="Sandboxes archived on stop, in regions that archive, show up here."
+      />
+    )
+  }
+  return (
+    <ArchiveTable
+      archives={list}
+      canChange
+      fleet
+      showRegion
+      regionName={regions.name}
+      onChanged={archives.refresh}
+    />
+  )
+}
+
+function SnapshotsView() {
   const [region, setRegion] = useState('')
   const [workspace, setWorkspace] = useState('')
   const snapshots = useSnapshots('')
@@ -95,6 +146,7 @@ export function FleetSnapshotsPage() {
   return (
     <>
       <PageHeader title="Snapshots" description="Every workspace’s snapshots, on every node." />
+      <PageTabs label="Snapshot views" tabs={tabs} current="snapshots" className="mb-8" />
       <div className="mb-6 flex flex-wrap gap-3">
         <Listbox aria-label="Region" value={region} onChange={setRegion} className="sm:w-48">
           <ListboxOption value="">All regions</ListboxOption>

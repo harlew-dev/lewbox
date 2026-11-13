@@ -53,12 +53,12 @@ The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sand
 | Workspaces | Every workspace: its cluster and plan, status, running sandboxes, vCPU-hours over 30 days. Tabs for pending and suspended workspaces, and for **setup links** | **New workspace**: the owner's email (and a password if the account is new), a workspace name, a cluster and a plan, in one dialog. **Create setup link**: a single-use link for a plan in a cluster. Each row's `⋯` menu: view, approve, suspend or restore |
 | Workspace | One workspace: status, its cluster and plan (limits, use, quota push errors), usage, sandboxes, sandbox keys, members | Approve, suspend, restore; assign a cluster and plan, change the plan or limits, remove it (and remove anyway if keys couldn't be revoked) |
 | Sandboxes | Every workspace's sandboxes, longest-running first | Stop, delete |
-| Snapshots | Every workspace's snapshots with their workspace and node; totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Filter by region and workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk | Delete |
+| Snapshots | Two tabs. **Snapshots**: every workspace's snapshots with their workspace and node; totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Filter by region and workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk. **Archived**: every workspace's archived sandboxes, with the workspace and region | Delete |
 | Plans | Plans with their limits, how many workspaces use each, and the default | Create, edit, delete an unused plan |
-| Servers | **Clusters** (status, runtime, nodes, version, last check) and **Nodes** | **Add server** (the commands to run on the machine, or a single-use join command), register an existing cluster, remove a node or cluster |
-| Cluster | Node metrics (sandboxes, vCPU allocated, memory, disk) over 24 hours, 7 or 30 days; 30-day uptime bars for the cluster and each node; the summary and latest checks; the nodes | Run the checks, add or remove a node |
+| Servers | **Clusters** (status, runtime, nodes, version, last check) and **Nodes** | **Add server**: **Start a new cluster** and **Add a node** are two steps, *Configure* (access mode, DNS and storage profiles, runtime, when a sandbox stops, node role) and *Install commands* (the exact commands for those choices, with Back to change them); or a single-use join command. Register an existing cluster, remove a node or cluster |
+| Cluster | Node metrics (sandboxes, vCPU allocated, memory, disk) over 24 hours, 7 or 30 days; 30-day uptime bars for the cluster and each node; the summary; a **Settings** card (domain, DNS profile, DNS records, storage profile, when a sandbox stops); the latest checks; the nodes, with an **Outdated** badge, its reasons and `lewbox node configure` on a node behind the cluster's profiles | Run the checks, edit the settings (after a profile change, run `lewbox node configure` on every node), add or remove a node |
 | Users | Every account | Create, disable, set a password, remove |
-| Settings | Instance name, sign-up mode, and the default plan and region for workspaces people create themselves | Save |
+| Settings | Tabs. **General**: instance name, sign-up mode, and the default plan and region for workspaces people create themselves. **DNS profiles** and **Storage profiles**: saved Cloudflare tokens and S3-compatible buckets, with the masked key, the clusters using each and the last test | Save; create, edit, test and delete profiles (saving tests the profile and shows the step that failed; a profile clusters use can't be deleted) |
 
 ## Portal pages (`/`, customers)
 
@@ -67,7 +67,7 @@ The sidebar starts with the **workspace menu**: Workspace settings, every worksp
 | Page | Shows | Actions |
 |---|---|---|
 | Home | **Get started** until the first sandbox exists (create a key, run the snippet, wait for the sandbox); then the last 30 days' numbers and the plan's limits | Create a key |
-| Sandboxes | The workspace's sandboxes, and a **Snapshots** tab | Stop, delete |
+| Sandboxes | The workspace's sandboxes, a **Snapshots** tab, and an **Archived** tab when the workspace has archives or its region archives stopped sandboxes | Stop, delete; restore an archive as a new sandbox, delete an archive (viewers see the list only) |
 | API keys | Sandbox keys (the token is shown once, with the AerolVM SDK, E2B SDK and curl settings) | Create, revoke |
 | Usage | vCPU-hours, memory GiB-hours and sandbox-hours over 7, 30 or 90 days, and the plan's limits with current use | |
 | Plan & Billing | The workspace's plan, its region and its limits with current use. There is no billing | |
