@@ -3,7 +3,7 @@ title: CLI reference
 description: Every lewbox command, its flags, and what it does.
 ---
 
-`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `subscriptions`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
+`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `tokens`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `subscriptions`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
 
 ***
 
@@ -55,18 +55,26 @@ Signs in and saves a context, then makes it current. Prompts for email and passw
 |---|---|
 | `--email EMAIL` | The account's email |
 | `--password-stdin` | Read the password from stdin |
-| `--key-stdin` | Save a token read from stdin instead of signing in. With an API key (`lba_…`), its organization becomes the context's default |
+| `--token` | Save a token instead of signing in: an [access token](../accounts/access-tokens.md) (`lbp_…`) or an organization's API key (`lba_…`). On its own it reads the token from stdin, or asks for it without echo on a terminal. `--token=TOKEN` also works, with a warning that it stays in your shell history; `--token TOKEN` with a space is refused (exit 2). With an API key, its organization becomes the context's default. `--key-stdin` is an older name for `--token` on its own |
 | `--context-name NAME` | Save it under this name. Default: the URL's host |
 
-The URL defaults to `--api-url`. The output never contains the token.
+The URL defaults to `--api-url`. The output never contains the token. `--token` can't be combined with `--email` or `--password-stdin`.
 
 ### `lewbox logout [--all]`
 
-Ends the session on the server and deletes the saved token, for the current context or (with `--all`) every context.
+Ends the session on the server and deletes the saved token, for the current context or (with `--all`) every context. A context saved with `--token` has no session: `logout` only deletes the saved token and says that the token still works until it expires or is revoked.
 
 ### `lewbox whoami`
 
-The signed-in account, how you're signed in (`session` or `local`), and the context.
+The signed-in account, how you're signed in (`session`, `access_token`, `admin_key` or `local`), and the context. With an access token it also shows the token.
+
+### `lewbox token create NAME [--expires-in DUR | --never-expires] [--user EMAIL]`
+
+Creates an [access token](../accounts/access-tokens.md) and prints its `lbp_…` token, once. The token acts as the account, with its rights: an instance admin's token can run every operator command. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Any account can create its own tokens, but not while signed in with a token. `--user` names another account (instance admins only); it is required in local mode, which has no account. Aliases: `tokens`, `access-token`, `access-tokens`.
+
+### `lewbox token list [--user EMAIL]` · `lewbox token revoke ID|NAME [--user EMAIL]`
+
+Lists the account's tokens, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm. `--user` works as for `create`.
 
 ### `lewbox context list|use NAME|remove NAME`
 
@@ -86,6 +94,7 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--listen ADDR` | `LEWBOX_LISTEN` | `:8080` | The whole listen address, such as `127.0.0.1:8080`. Not with `--port` |
 | `--check-interval D` | `LEWBOX_CHECK_INTERVAL` | `1m` | How often to check every cluster. `0` turns it off |
 | `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
+| `--archive-interval D` | `LEWBOX_ARCHIVE_INTERVAL` | `5s` | How often to archive stopped sandboxes on archive clusters and advance their pushes. `0` turns it off |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
 | `--trusted-proxy CIDR` | `LEWBOX_TRUSTED_PROXIES` | | Trust `X-Forwarded-For` from this proxy network for the client IP, repeatable (env: comma-separated). Behind Caddy on the same host: `127.0.0.1/32` |
@@ -109,6 +118,7 @@ Checks the machine and installs AerolVM with its own installer, verified by chec
 ```bash
 lewbox install                                   # local mode
 lewbox install --public-host 10.0.0.5            # IP mode, no TLS
+lewbox install --domain eu.api.example.com --dns-profile cf-prod
 lewbox install --domain eu.api.example.com --dns-api-token-stdin < token
 lewbox install --public-host 10.0.0.5 --dry-run  # print, change nothing
 lewbox install --public-host 10.0.0.5 -- --lb-health-port 8081   # pass flags to install.sh
@@ -119,7 +129,8 @@ lewbox install --public-host 10.0.0.5 -- --lb-health-port 8081   # pass flags to
 | `--mode local\|public-host\|domain` | `local`, unless `--domain` or `--public-host` is set | How the node is reached |
 | `--public-host HOST` | | IP mode: customers reach `http://HOST:21212` |
 | `--domain DOMAIN` | | Domain mode with wildcard TLS through Cloudflare DNS |
-| `--dns-api-token-stdin` | | Read the Cloudflare token from stdin. Required with `--domain` |
+| `--dns-profile NAME` | | Domain mode: use this [DNS profile](../clusters/dns-profiles.md)'s token and ACME email. Must contain `--domain` |
+| `--dns-api-token-stdin` | | Read the Cloudflare token from stdin. One of this and `--dns-profile` is required with `--domain` |
 | `--acme-email EMAIL` | | Let's Encrypt contact for domain mode |
 | `--runtime docker\|firecracker` | `docker` | Firecracker needs `/dev/kvm` and a non-local mode |
 | `--name NAME` | short hostname | The node name |
@@ -148,9 +159,13 @@ lewbox node add eu-1 --url https://eu-1:8443   # only record a node by URL; chan
 | `--advertise IP` | the public host's IP | The address other nodes use for this one |
 | `--admin-url URL` | this machine's AerolVM URL | Where the orchestrator reaches the new cluster |
 | `--endpoint-url URL` | `--admin-url` | What customers use |
+| `--storage-profile NAME` | | New cluster only: the storage profile for snapshots |
+| `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` and the Docker runtime |
+| `--archive-local-retention instant\|1h\|1d\|7d\|never` | `instant` | New cluster only: how long nodes keep local copies of archived sandboxes |
+| `--archive-snapshot-name id\|name` | `id` | New cluster only: name archive snapshots `archive-<id>` or `archive-<name>-<id>` |
 | `--url URL` | | Record a node by URL only |
 
-`NAME` defaults to the name given to `install`. Both forms register things with the orchestrator, so when signed in they need an instance admin. Running it again is safe. See [Start a cluster](../clusters/start-a-cluster.md) and [Add nodes](../clusters/add-nodes.md).
+`NAME` defaults to the name given to `install`. Both forms register things with the orchestrator, so when signed in they need an instance admin. Running it again is safe. After it registers the node, `node add` applies the cluster's node settings, the same steps as `lewbox node configure`. See [Start a cluster](../clusters/start-a-cluster.md) and [Add nodes](../clusters/add-nodes.md).
 
 ### `lewbox update`
 
@@ -220,6 +235,14 @@ One cluster: its fields, the last check results, and its nodes. Doesn't contact 
 
 Runs every check now and syncs the node list. See [Health and checks](../clusters/health-and-checks.md).
 
+### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off] [--storage-profile NAME|none] [--stop-policy keep|archive] [--archive-local-retention instant|1h|1d|7d|never] [--archive-snapshot-name id|name]`
+
+Changes the cluster's DNS and storage settings. `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile, refuses the Firecracker runtime, and refuses to be set while the profile is being cleared. `--archive-local-retention` sets how long nodes keep their local copies of archived sandboxes (`instant` by default; `never` installs no cleanup timer), and `--archive-snapshot-name name` names new archive snapshots `archive-<name>-<id>` instead of `archive-<id>`. The next check reconciles the DNS records, and `lewbox node configure` applies the profiles on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+
+### `lewbox cluster node-settings ID|SLUG`
+
+Prints what every node of the cluster must apply: the cluster ID, stop policy, archive retention, the storage profile's bucket and registry root, and the DNS profile's zone, domain and token. It is mostly for debugging. The text form masks the bucket secret and the DNS token with `******`; `--json` shows them. Instance admins only, because it returns secrets.
+
 ### `lewbox cluster health ID|SLUG [--days 30]`
 
 A 30-day uptime bar for the cluster and each node, and the percentage. `--days` is 1–31.
@@ -260,6 +283,14 @@ One node.
 ### `lewbox node remove ID|NAME`
 
 Drains the node, removes it from its cluster in AerolVM, and forgets it. Asks to confirm. `--force` removes a node that still owns sandboxes. Refuses a cluster's last node and the node behind its admin URL. See [Remove nodes and clusters](../clusters/remove-nodes-and-clusters.md).
+
+### `lewbox node configure [--dry-run]`
+
+Run on a node. Fetches the cluster's node settings and applies them here: installs or removes the snapshot registry and its archive cleanup timer (set to the cluster's `archive_local_retention`; no timer for `never`), writes `/etc/sandboxd/lewbox.env` (with the snapshot push lines when the cluster has storage), and re-runs the verified installer with a changed DNS profile's token. Then it reports the versions and retention it applied, so an out-of-date node stops being flagged. Run it on every node whose cluster changed a profile. It refuses to run as root. `--dry-run` prints what would change, changing nothing. See [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+
+### `lewbox node cleanup [--older-than DURATION]`
+
+Removes this node's local copies of snapshots already archived in the cluster's bucket. `--older-than 24h` removes only copies at least that old (a snapshot's copy is aged from the snapshot, a pulled one from the pull) and lists younger ones under `young`; without it every copy goes. The `lewbox-archive-cleanup.timer` runs the same command as root every five minutes on a cluster with storage, with `--older-than` from the cluster's `archive_local_retention`. It needs no orchestrator; it talks to this machine's AerolVM over `127.0.0.1` with the operator token. As root it runs its commands without `sudo`; as another user it uses `sudo`.
 
 ***
 
@@ -353,6 +384,12 @@ Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--re
 
 Your workspace's snapshots, from every node of every subscribed region (or one region). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm. As an instance admin without `--org`, the list is every workspace's snapshots, with WORKSPACE and NODE columns.
 
+### `lewbox archive list [--region SLUG] [--org SLUG]` · `lewbox archive show ID` · `lewbox archive restore ID` · `lewbox archive delete ID [--yes]`
+
+The workspace's archived sandboxes (also `archives`), newest first, with a short ID, the sandbox name, region, status, when it was archived, its original size and the last sandbox restored from it. Only `pending`, `pushing`, `archived` and `failed` rows are shown. `--region` filters by cluster. As an instance admin without `--org`, the list is every workspace's, with a WORKSPACE column; `show` and the others take `--org` for a workspace whose archive it is. `show` is a key/value view including the registry ref and tags.
+
+`restore` creates a **new** sandbox from the archive's registry ref, with the archived name, tags and size and the tag `lewbox.restored_from=<old ID>`, and prints the new ID and name. The archive is kept, so it can be restored again. `delete` removes the snapshot and its keys in the bucket and asks to confirm. Owners, admins, members and API keys can restore and delete; viewers can only list and show. See [Archived sandboxes](../../consumer/sandboxes/archived-sandboxes.md).
+
 ### `lewbox usage [--from DATE] [--to DATE] [--hourly]`
 
 Metered usage, one bucket per day by default or per hour with `--hourly`. The default range is the last 30 days; buckets with no usage are shown with zeros. Members see their organization's; instance admins the whole fleet unless they choose one.
@@ -392,3 +429,51 @@ Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB
 ### `lewbox plan delete ID|SLUG`
 
 Deletes a plan no subscription uses and that is not the default. Asks to confirm.
+
+### `lewbox dns-profile list` · `lewbox dns-profile show ID|NAME`
+
+Every saved Cloudflare profile with its zone, the token's last four characters, how many clusters use it and its last test result, or one profile. Instance admins only. The token is never shown, only `…abcd`.
+
+### `lewbox dns-profile create NAME --zone ZONE --api-token-stdin [--acme-email EMAIL]`
+
+Saves and tests a Cloudflare profile. The token is read from stdin, never from a flag. The test finds the zone, creates and deletes the TXT record `_lewbox-test.<zone>`, and a failure saves nothing: it exits with a precondition error whose details name the `zone` or `write` step. See [DNS profiles](../clusters/dns-profiles.md).
+
+### `lewbox dns-profile update ID|NAME [--name NAME] [--zone ZONE] [--api-token-stdin] [--acme-email EMAIL]`
+
+Changes only the flags given. A new zone or token is tested before it is saved; either changes the profile's `version`. `--acme-email ""` clears the address.
+
+### `lewbox dns-profile test ID|NAME`
+
+Runs the test again now. A failure is recorded in `test_error` and is not an error exit.
+
+### `lewbox dns-profile credentials ID|NAME`
+
+Prints the profile's name, zone, zone ID, ACME email, version and **API token**. It is the only command that returns the token, and it exists to configure a node. Instance admins only.
+
+### `lewbox dns-profile delete ID|NAME [--yes]`
+
+Deletes a profile no cluster uses. Asks to confirm; a profile in use is refused with `409`.
+
+### `lewbox storage-profile list` · `lewbox storage-profile show ID|NAME`
+
+Every saved S3-compatible profile with its bucket, endpoint (`aws` when the endpoint is empty), prefix, the secret's last four characters, how many clusters use it and its last test result, or one profile. Instance admins only. The secret is never shown, only `…abcd`.
+
+### `lewbox storage-profile create NAME --bucket BUCKET [--endpoint URL] [--region R] [--prefix P] [--path-style=true|false] --access-key-id ID --secret-access-key-stdin`
+
+Saves and tests an S3-compatible bucket. The secret access key is read from stdin, never from a flag. `--endpoint` is empty for AWS S3, `https://<account id>.r2.cloudflarestorage.com` for Cloudflare R2, or any S3-compatible URL. `--region` is required for AWS and defaults to `us-east-1` when an endpoint is set. `--path-style` defaults to true when an endpoint is set. The test puts, gets, lists and deletes a small object under `<prefix>/lewbox-test/`, and a failure saves nothing: it exits with a precondition error whose details name the `write`, `read`, `list` or `delete` step. See [Storage profiles](../clusters/storage-profiles.md).
+
+### `lewbox storage-profile update ID|NAME [--name NAME] [--endpoint URL] [--region R] [--bucket B] [--prefix P] [--path-style=true|false] [--access-key-id ID] [--secret-access-key-stdin]`
+
+Changes only the flags given. A changed endpoint, region, bucket, prefix, path style, key ID or secret is tested before it is saved, and bumps the profile's `version`. `--prefix ""` clears the prefix.
+
+### `lewbox storage-profile test ID|NAME`
+
+Runs the test again now. A failure is recorded in `test_error` and is not an error exit.
+
+### `lewbox storage-profile credentials ID|NAME`
+
+Prints the profile's name, provider, endpoint, region, bucket, prefix, path style, access key ID, **secret access key** and version. It is the only command that returns the secret, and it exists to configure a node. Instance admins only.
+
+### `lewbox storage-profile delete ID|NAME [--yes]`
+
+Deletes a profile no cluster uses. Asks to confirm; a profile in use is refused with `409`.

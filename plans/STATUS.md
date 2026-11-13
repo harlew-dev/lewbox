@@ -1,4 +1,4 @@
-# Status (2026-11-12)
+# Status (2026-11-13)
 
 ## What exists now
 
@@ -18,6 +18,7 @@ Lewbox is a self-hosted E2B: you run AerolVM clusters, and Lewbox is the account
   - 30-day uptime bars and node metrics (sandboxes, vCPU allocated, memory, disk).
   - A warning when a node's cluster certificate is near expiry.
 - **Users**, and **Settings** (sign-up mode, default plan and regions).
+- **Access tokens** (D38): `lbp_…` tokens that act as an account, made in Account settings or with `lewbox token create`, for scripts and CI. An instance admin's token can add clusters and nodes; `lewbox login --token` saves one.
 - **Machines**: `lewbox install`, `node add`, `update` and `firewall enable` set them up.
 
 **For customers (portal, `/`):**
@@ -36,6 +37,53 @@ Lewbox is a self-hosted E2B: you run AerolVM clusters, and Lewbox is the account
 - Per-member limits (D29; built, then reverted).
 - Email, invitation links, webhooks.
 - A CPU-utilisation agent on nodes (D11).
+
+## Phase 8: DNS profiles, storage profiles, archiving (2026-11-13)
+
+Branch `feat/dns-storage-archive`. Plan: [08-dns-storage-archive.md](08-dns-storage-archive.md); decisions D34–D36.
+
+**Built:**
+- **DNS profiles** (Cloudflare): saved, sealed, tested before saving (find the zone, then write and delete a TXT record).
+  - `lewbox install --dns-profile`.
+  - Clusters record their domain and profile.
+  - The cluster check keeps `<domain>` and `*.<domain>` A/AAAA records pointing at live ingress nodes, and deletes only records Lewbox made.
+- **Storage profiles** (S3, R2, MinIO and other S3-compatible stores): saved, sealed, tested (write, read, list, delete), with a standard-library SigV4 client.
+- **Node settings:**
+  - `lewbox node configure` (also run by `node add`) installs the pinned CNCF Distribution registry on the bucket, AerolVM's snapshot push settings and the archive cleanup timer, set by the cluster's `archive_local_retention` (D37: `instant`, `1h`, `1d`, `7d` or `never`). `archive_snapshot_name` names archive snapshots `archive-<id>` or `archive-<name>-<id>`.
+  - It re-runs the installer when a DNS token changed.
+  - Nodes report what they applied, and outdated nodes are flagged on the cluster.
+- **Archiving:**
+  - On a cluster with `stop_policy: archive`, every stopped customer sandbox is snapshotted, pushed to the bucket, checked unchanged, and deleted.
+  - Restore makes a **new** sandbox (new ID) from the registry ref, on any node.
+  - Delete removes the snapshot and its repository from the bucket.
+  - API, CLI (`lewbox archive`), and portal and console tabs.
+- **Web:**
+  - Profile tabs in Settings.
+  - Start cluster and Add node as two steps (Configure, then Install commands).
+  - A cluster Settings card and outdated badges.
+  - Archived tabs in the portal and on the fleet Snapshots page.
+
+**Verified:**
+- `make test` passes: Go, and 32 web test files with 122 tests.
+- The S3 client against a real S3-compatible server (RustFS), and against AWS's published SigV4 example.
+- The AerolVM behaviour archiving depends on, tested by hand on real v0.7.0 ([docs/design/snapshot-archive.md](../docs/design/snapshot-archive.md)):
+  - push to a loopback registry on a bucket;
+  - restore by registry ref on another node;
+  - other teams refused;
+  - what's left on nodes and in the bucket;
+  - `updated_at` unchanged by a snapshot.
+- The new console screens, in a browser.
+
+- `deploy/dev-cluster/archives.sh`, inside the full `e2e.sh` on real AerolVM v0.7.0 (2026-11-13, all 18 steps): registry install on real nodes, archive as `archive-<name>-<id>`, local copies kept under a 1d retention and freed under `instant`, restore on any node, delete from the bucket, and back to `keep`. That run found and fixed a bug: `node add` in local mode reported settings for a node the orchestrator calls `standalone`.
+
+**Not verified yet:**
+- Domain mode with a real Cloudflare zone hasn't been run.
+
+**Gaps:**
+- Blobs in the bucket are never swept (only an archive's repository is deleted).
+- Restores get a new ID (the AerolVM change that would fix it: [aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)).
+- Archiving is only for Docker clusters.
+- Bucket keys and the DNS token live on every node.
 
 ## What was verified, and how
 

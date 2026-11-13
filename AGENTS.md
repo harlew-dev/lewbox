@@ -6,7 +6,7 @@ Context for coding agents working in this repo. Read it before changing anything
 
 **Lewbox** is one Go binary, `lewbox`, that is both a server (the **orchestrator**, `lewbox serve`, HTTP API under `/v0`) and a CLI. It installs [AerolVM](https://github.com/aerol-ai/microvm) (a sandbox platform: `sandboxd`) on Linux machines, starts and joins AerolVM clusters, registers them with the orchestrator, and checks them. It is a self-hosted E2B: one operator (the instance admins) resells their clusters' compute to customer **workspaces** (code: `organization`), each exactly one AerolVM team on a plan in one region (cluster), pushed as that team's quota. Customers' apps talk to the clusters directly; Lewbox is never in the sandbox request path. **`plans/` is the current spec** (start with `plans/README.md` and `plans/DECISIONS.md`); `MVP.md` is the older, larger design and is partly superseded. `REVIEW.md` explains why Lewbox builds on stock AerolVM clusters.
 
-**Built:** accounts, sessions, sign-up and setup links; self-serve workspaces with members and API keys; plans, one subscription (region) per workspace; sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `update`, `firewall enable`; text/JSON output. **Deliberately not built** (see `plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
+**Built:** accounts, sessions, sign-up and setup links, access tokens (`lbp_…`, act as their account; D38); self-serve workspaces with members and API keys; plans, one subscription (region) per workspace; sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `node configure`, `update`, `firewall enable`; DNS profiles (Cloudflare) with managed DNS records, storage profiles (S3-compatible) with a registry on each node, and archiving stopped sandboxes to the bucket, with per-cluster local copy retention and snapshot names (D34–D37); text/JSON output. **Deliberately not built** (see `plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
 
 ## Layout
 
@@ -21,7 +21,9 @@ Context for coding agents working in this repo. Read it before changing anything
 | `internal/db/` | SQLite (modernc), goose migrations in `migrations/`, sqlc queries in `queries/` → generated `*.sql.go` |
 | `internal/aerolvm/` | AerolVM admin API client. `aerolvmtest/` is an in-memory fake cluster for tests. `testdata/` holds **real** v0.7.0 responses (see its README) |
 | `internal/machine/` | Node-side work: `Runner` (sudo exec + secret masking), installer source/verification, checks, Lewbox settings, node state, releases. `machinetest/` is a fake runner |
-| `internal/secrets/` | AES-256-GCM keyring for cluster admin tokens |
+| `internal/secrets/` | AES-256-GCM keyring for cluster admin tokens and profile secrets |
+| `internal/dns/` | Cloudflare API client (`cloudflare/`) and an in-memory fake (`cloudflaretest/`), for DNS profiles and records |
+| `internal/objstore/` | Standard-library S3 client (SigV4), for storage profiles and deleting archives; `objstoretest/` is a fake |
 | `internal/webui/` | Top-level HTTP handler: the API, the built console, and one origin for both |
 | `internal/docs/` | Parses the embedded markdown into nav and pages for `/v0/docs` (customer book) and `/v0/platform` (platform book) |
 | `docs/embed.go` | Embeds the two documentation books into the binary |

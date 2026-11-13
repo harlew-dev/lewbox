@@ -74,15 +74,40 @@ func newLoginCmd(a *app) *cobra.Command {
 		email         string
 		passwordStdin bool
 		keyStdin      bool
+		token         string
 		contextName   string
 	)
 	cmd := &cobra.Command{
 		Use:   "login [<url>]",
 		Short: "Sign in to a Lewbox server and save the session",
-		Args:  usageArgs(cobra.MaximumNArgs(1)),
+		Long: `Sign in to a Lewbox server and save it as a context.
+
+Without --token, login asks for an email and password and starts a session.
+With --token, it saves a token instead: an access token (lbp_…, from
+lewbox token create) or a workspace admin key (lba_…). --token on its own
+reads the token from stdin, or asks for it without echo in a terminal;
+--token=<token> also works, but leaves the token in your shell history.`,
+		Example: `  lewbox login https://lewbox.example.com
+  lewbox login https://lewbox.example.com --token
+  printf '%s\n' "$LEWBOX_ACCESS_TOKEN" | lewbox login https://lewbox.example.com --token`,
+		Args: usageArgs(func(cmd *cobra.Command, args []string) error {
+			// --token takes its value only as --token=<token>, so a token
+			// after a space arrives here as an argument. Don't send it to a
+			// server as a URL.
+			for _, arg := range args {
+				if strings.HasPrefix(arg, accessTokenPrefix) || strings.HasPrefix(arg, adminKeyPrefix) {
+					return fmt.Errorf("that looks like a token: pass it as --token=<token>, or use --token alone to paste or pipe it")
+				}
+			}
+			return cobra.MaximumNArgs(1)(cmd, args)
+		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if passwordStdin && keyStdin {
-				return usagef("--password-stdin and --key-stdin cannot be used together")
+			useToken := keyStdin || cmd.Flags().Changed("token")
+			if keyStdin && cmd.Flags().Changed("token") {
+				return usagef("--key-stdin and --token cannot be used together")
+			}
+			if useToken && (passwordStdin || email != "") {
+				return usagef("--token cannot be used with --email or --password-stdin")
 			}
 			rawURL := a.apiURL
 			if len(args) == 1 {
@@ -107,25 +132,29 @@ func newLoginCmd(a *app) *cobra.Command {
 				return err
 			}
 
-			if keyStdin {
-				token, err := readToken(a.stdin)
+			if useToken {
+				if keyStdin {
+					token = tokenFromStdin
+				}
+				secret, err := a.readLoginToken(cmd, token)
 				if err != nil {
 					return err
 				}
-				if token == "" {
-					return errors.New("no key on stdin")
-				}
-				c := client.New(apiURL, token, nil)
+				c := client.New(apiURL, secret, nil)
 				me, err := c.Me(cmd.Context())
 				if err != nil {
 					return err
 				}
 				// An admin key acts for one organization; make it the default.
+				// An access token keeps the context's default, as signing in
+				// again does.
 				saved := cliconfig.Context{APIURL: apiURL}
 				if me.Organization != nil {
 					saved.Org = me.Organization.Slug
+				} else if prev, ok := store.Context(name); ok && strings.TrimRight(prev.APIURL, "/") == apiURL {
+					saved.Org = prev.Org
 				}
-				if err := store.Add(name, saved, token); err != nil {
+				if err := store.Add(name, saved, secret); err != nil {
 					return err
 				}
 				if err := store.SetCurrent(name); err != nil {
@@ -172,7 +201,10 @@ func newLoginCmd(a *app) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&email, "email", "", "account email")
 	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read the password from stdin")
-	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read an admin key from stdin")
+	cmd.Flags().StringVar(&token, "token", "", "save an access token (lbp_…) or admin key (lba_…) instead of signing in; alone, it reads the token from stdin or asks for it")
+	cmd.Flags().Lookup("token").NoOptDefVal = tokenFromStdin
+	cmd.Flags().BoolVar(&keyStdin, "key-stdin", false, "read a token from stdin (the same as --token)")
+	_ = cmd.Flags().MarkHidden("key-stdin")
 	cmd.Flags().StringVar(&contextName, "context-name", "", "name to save this sign-in as (default: the URL's host)")
 	return cmd
 }
@@ -201,6 +233,42 @@ func readToken(r io.Reader) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// The prefixes of the two kinds of token login --token accepts.
+const (
+	accessTokenPrefix = "lbp_"
+	adminKeyPrefix    = "lba_"
+)
+
+// tokenFromStdin is the value --token takes when it is given without one.
+const tokenFromStdin = "-"
+
+// readLoginToken returns the token given to login --token. A value of "-"
+// reads it from stdin, or asks for it without echo when stdin is a terminal.
+// A token typed on the command line works, with a warning: it is in the
+// shell's history and other users' ps output.
+func (a *app) readLoginToken(cmd *cobra.Command, value string) (string, error) {
+	var (
+		token string
+		err   error
+	)
+	if value != tokenFromStdin {
+		fmt.Fprintln(a.stderr, "warning: a token on the command line can end up in shell history; use --token alone to paste or pipe it")
+		token = strings.TrimSpace(value)
+	} else if f, ok := a.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		token, err = promptPassword(cmd, f, "Token: ")
+		token = strings.TrimSpace(token)
+	} else {
+		token, err = readToken(a.stdin)
+	}
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", errors.New("no token given")
+	}
+	return token, nil
 }
 
 // readLoginPassword reads a password from stdin or prompts without echo.
@@ -280,6 +348,15 @@ func newLogoutCmd(a *app) *cobra.Command {
 // logoutRemote ends one session, ignoring an already-invalid token.
 func (a *app) logoutRemote(ctx context.Context, apiURL, token string) error {
 	if apiURL == "" || token == "" {
+		return nil
+	}
+	// A token has no session to end: logout only forgets it here.
+	switch {
+	case strings.HasPrefix(token, accessTokenPrefix):
+		fmt.Fprintln(a.stderr, "Forgot the access token. It still works until it expires or you revoke it: lewbox token revoke <name>")
+		return nil
+	case strings.HasPrefix(token, adminKeyPrefix):
+		fmt.Fprintln(a.stderr, "Forgot the admin key. It still works until it expires or is revoked: lewbox admin-key revoke <name>")
 		return nil
 	}
 	_, err := client.New(apiURL, token, nil).Logout(ctx)

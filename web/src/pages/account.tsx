@@ -14,6 +14,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { AccessTokensSection } from './access-tokens'
 import { roleLabel, useOrganizations } from '../lib/organizations'
 import { useDocumentTitle } from '../lib/use-document-title'
 import { failureMessage } from '../lib/use-load'
@@ -96,6 +97,16 @@ export function AccountPage() {
             </Button>
           </div>
         </form>
+      </SettingsSection>
+
+      <Divider soft className="my-10" />
+
+      <SettingsSection
+        title="Access tokens"
+        description="Tokens for scripts and CI. A token acts as you, with your rights, until it expires or you revoke it."
+        stacked
+      >
+        <AccessTokensSection instanceAdmin={user.instance_admin} />
       </SettingsSection>
     </div>
   )

@@ -70,6 +70,36 @@ func (c *Client) Me(ctx context.Context) (service.Me, error) {
 	return out, err
 }
 
+// CreateAccessToken creates an access token and returns it once.
+func (c *Client) CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error) {
+	var out service.NewAccessToken
+	err := c.do(ctx, http.MethodPost, "/v0/access-tokens", req, &out, defaultTimeout)
+	return out, err
+}
+
+// ListAccessTokens returns an account's access tokens; user "" is the
+// caller's own account.
+func (c *Client) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
+	var out service.AccessTokenList
+	err := c.do(ctx, http.MethodGet, "/v0/access-tokens"+userQuery(user), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// RevokeAccessToken revokes an access token.
+func (c *Client) RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error) {
+	var out service.AccessToken
+	err := c.do(ctx, http.MethodDelete, "/v0/access-tokens/"+url.PathEscape(ref)+userQuery(user), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// userQuery is "?user=<ref>", or nothing for the caller's own account.
+func userQuery(user string) string {
+	if user == "" {
+		return ""
+	}
+	return "?" + url.Values{"user": {user}}.Encode()
+}
+
 // CreateUser creates an account.
 func (c *Client) CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error) {
 	var out service.User
@@ -137,6 +167,13 @@ func (c *Client) GetCluster(ctx context.Context, ref string) (service.ClusterDet
 	return out, err
 }
 
+// UpdateCluster changes a cluster's DNS settings.
+func (c *Client) UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error) {
+	var out service.ClusterDetail
+	err := c.do(ctx, http.MethodPatch, "/v0/clusters/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
 // CheckCluster runs the cluster checks now.
 func (c *Client) CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error) {
 	var out service.ClusterDetail
@@ -190,6 +227,14 @@ func (c *Client) CreateJoinToken(ctx context.Context, ref string, req service.Jo
 	return out, err
 }
 
+// ClusterNodeSettings returns what a cluster's nodes must apply, with the
+// profiles' secrets.
+func (c *Client) ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error) {
+	var out service.NodeSettings
+	err := c.do(ctx, http.MethodGet, "/v0/clusters/"+url.PathEscape(ref)+"/node-settings", nil, &out, defaultTimeout)
+	return out, err
+}
+
 // AddNode registers a node.
 func (c *Client) AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error) {
 	var out service.Node
@@ -220,6 +265,13 @@ func (c *Client) RemoveNode(ctx context.Context, ref string, req service.RemoveN
 	path := "/v0/nodes/" + url.PathEscape(ref) + "?force=" + strconv.FormatBool(req.Force)
 	var out service.Node
 	err := c.do(ctx, http.MethodDelete, path, nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ReportNodeSettings records the profile versions a node applied.
+func (c *Client) ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error) {
+	var out service.Node
+	err := c.do(ctx, http.MethodPut, "/v0/nodes/"+url.PathEscape(ref)+"/settings", req, &out, defaultTimeout)
 	return out, err
 }
 
@@ -342,6 +394,105 @@ func (c *Client) UpdatePlan(ctx context.Context, ref string, req service.UpdateP
 func (c *Client) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
 	var out service.Plan
 	err := c.do(ctx, http.MethodDelete, "/v0/plans/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ListDNSProfiles returns every DNS profile.
+func (c *Client) ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error) {
+	var out service.DNSProfileList
+	err := c.do(ctx, http.MethodGet, "/v0/dns-profiles", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetDNSProfile returns a DNS profile by ID or name.
+func (c *Client) GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodGet, "/v0/dns-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// CreateDNSProfile saves and tests a DNS profile.
+func (c *Client) CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles", req, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdateDNSProfile changes a DNS profile.
+func (c *Client) UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPatch, "/v0/dns-profiles/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// DeleteDNSProfile removes a DNS profile no cluster uses.
+func (c *Client) DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodDelete, "/v0/dns-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// TestDNSProfile tests a DNS profile's token now.
+func (c *Client) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// DNSProfileCredentials returns a DNS profile's token, for a node.
+func (c *Client) DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error) {
+	var out service.DNSProfileCredentials
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/credentials", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// ListStorageProfiles returns every storage profile.
+func (c *Client) ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error) {
+	var out service.StorageProfileList
+	err := c.do(ctx, http.MethodGet, "/v0/storage-profiles", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetStorageProfile returns a storage profile by ID or name.
+func (c *Client) GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodGet, "/v0/storage-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// CreateStorageProfile saves and tests a storage profile.
+func (c *Client) CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles", req, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdateStorageProfile changes a storage profile.
+func (c *Client) UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPatch, "/v0/storage-profiles/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// DeleteStorageProfile removes a storage profile no cluster uses.
+func (c *Client) DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodDelete, "/v0/storage-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// TestStorageProfile tests a storage profile's bucket and key now.
+func (c *Client) TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// StorageProfileCredentials returns a storage profile's secret key, for a
+// node.
+func (c *Client) StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error) {
+	var out service.StorageProfileCredentials
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/credentials", nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -503,6 +654,42 @@ func (c *Client) DeleteSnapshot(ctx context.Context, name string, req service.Re
 	}
 	var out service.Snapshot
 	err := c.request(ctx, http.MethodDelete, path, req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
+// ListArchives lists archives, optionally filtered by region.
+func (c *Client) ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error) {
+	query := url.Values{}
+	if req.Region != "" {
+		query.Set("region", req.Region)
+	}
+	path := "/v0/archives"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.ArchiveList
+	err := c.doOrg(ctx, req.Org, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// GetArchive returns one archive by ID.
+func (c *Client) GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	var out service.Archive
+	err := c.doOrg(ctx, req.Org, http.MethodGet, "/v0/archives/"+url.PathEscape(id), nil, &out)
+	return out, err
+}
+
+// RestoreArchive creates a new sandbox from an archive.
+func (c *Client) RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error) {
+	var out service.RestoredArchive
+	err := c.request(ctx, http.MethodPost, "/v0/archives/"+url.PathEscape(id)+"/restore", req.Org, nil, &out, longTimeout)
+	return out, err
+}
+
+// DeleteArchive removes an archive.
+func (c *Client) DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	var out service.Archive
+	err := c.request(ctx, http.MethodDelete, "/v0/archives/"+url.PathEscape(id), req.Org, nil, &out, longTimeout)
 	return out, err
 }
 

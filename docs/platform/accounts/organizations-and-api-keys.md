@@ -67,10 +67,10 @@ Use it as a bearer token, or sign the CLI in with it:
 
 ```bash
 curl -H "Authorization: Bearer $LEWBOX_KEY" https://lewbox.example.com/v0/organization
-printf '%s\n' "$LEWBOX_KEY" | lewbox login https://lewbox.example.com --key-stdin
+printf '%s\n' "$LEWBOX_KEY" | lewbox login https://lewbox.example.com --token
 ```
 
-A key is deliberately narrow. It can read its organization, its members and its keys. It can't change members or admin keys, and it can't reach anything outside its organization, such as clusters, nodes or accounts: those calls get `403`. It can list, create and revoke the organization's [sandbox keys](../../consumer/sandboxes/api-keys.md). Revoking a key, or suspending its organization, stops it at once.
+A key is deliberately narrow. It can read its organization, its members and its keys. It can't change members or admin keys, and it can't reach anything outside its organization, such as clusters, nodes or accounts: those calls get `403`. It can list, create and revoke the organization's [sandbox keys](../../consumer/sandboxes/api-keys.md). Revoking a key, or suspending its organization, stops it at once. To automate clusters, nodes or accounts, use an [access token](access-tokens.md) instead.
 
 ## Suspend an organization
 

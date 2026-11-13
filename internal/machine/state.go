@@ -26,16 +26,18 @@ const (
 // State records what this machine installed, so node add and update know what
 // to do here. It holds no secrets.
 type State struct {
-	Name           string    `json:"name"`
-	Mode           string    `json:"mode"`
-	Domain         string    `json:"domain,omitempty"`
-	PublicHost     string    `json:"public_host,omitempty"`
-	Runtime        string    `json:"runtime"`
-	AerolVMVersion string    `json:"aerolvm_version"`
-	From           string    `json:"from,omitempty"`
-	InstalledAt    time.Time `json:"installed_at"`
-	Cluster        string    `json:"cluster,omitempty"`
-	StoredAPIURL   string    `json:"api_url,omitempty"`
+	Name              string    `json:"name"`
+	Mode              string    `json:"mode"`
+	Domain            string    `json:"domain,omitempty"`
+	PublicHost        string    `json:"public_host,omitempty"`
+	DNSProfile        string    `json:"dns_profile,omitempty"`
+	DNSProfileVersion int64     `json:"dns_profile_version,omitempty"`
+	Runtime           string    `json:"runtime"`
+	AerolVMVersion    string    `json:"aerolvm_version"`
+	From              string    `json:"from,omitempty"`
+	InstalledAt       time.Time `json:"installed_at"`
+	Cluster           string    `json:"cluster,omitempty"`
+	StoredAPIURL      string    `json:"api_url,omitempty"`
 }
 
 // APIURL is the URL at which this machine's AerolVM answers.

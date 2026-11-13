@@ -25,6 +25,7 @@ type Service struct {
 
 	keyring        *secrets.Keyring
 	aerolvmOptions []aerolvm.Option
+	cloudflareURL  string
 
 	limiter       *loginLimiter
 	signupLimiter *loginLimiter
@@ -33,11 +34,14 @@ type Service struct {
 	syncInterval time.Duration
 	syncMu       sync.Mutex
 
+	archiveMu sync.Mutex
+
 	pruneMu   sync.Mutex
 	lastPrune time.Time
 
 	snapshotMu     sync.Mutex
 	snapshotTokens map[snapshotKey]snapshotToken
+	archiveTokens  map[snapshotKey]snapshotToken
 	snapshotCache  map[snapshotKey]snapshotCacheEntry
 }
 
@@ -53,6 +57,12 @@ func WithKeyring(k *secrets.Keyring) Option {
 // creates, such as a short retry budget in tests.
 func WithAerolVMOptions(opts ...aerolvm.Option) Option {
 	return func(s *Service) { s.aerolvmOptions = append(s.aerolvmOptions, opts...) }
+}
+
+// WithCloudflareURL points every Cloudflare client the service creates at u,
+// such as a test server. An empty u keeps Cloudflare's API.
+func WithCloudflareURL(u string) Option {
+	return func(s *Service) { s.cloudflareURL = u }
 }
 
 // WithClock replaces the service's clock, which tests use for fixed times.
@@ -99,6 +109,7 @@ func New(q *db.Queries, opts ...Option) *Service {
 		syncInterval:  15 * time.Second,
 
 		snapshotTokens: make(map[snapshotKey]snapshotToken),
+		archiveTokens:  make(map[snapshotKey]snapshotToken),
 		snapshotCache:  make(map[snapshotKey]snapshotCacheEntry),
 	}
 	for _, opt := range opts {

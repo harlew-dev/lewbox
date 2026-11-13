@@ -32,10 +32,11 @@ const EnvFileContent = "SB_IDENTITY_ENABLED=true\nSB_TOKEN_MAX_TTL=876000h\n"
 const DropInContent = "[Service]\nEnvironmentFile=" + EnvironmentFile + "\n"
 
 // ApplySettings writes Lewbox's two files on this node, reloads systemd and
-// restarts sandboxd when something changed or it is not running. It then
-// waits for /health. report, when set, sees every privileged command first so
-// the CLI can print it.
-func ApplySettings(ctx context.Context, runner Runner, baseURL string, sleep func(context.Context, time.Duration), report func(Cmd)) (bool, error) {
+// restarts sandboxd when something changed or it is not running. envFile is
+// the content of Lewbox's env file: EnvFileContent, plus machine.PushEnv when
+// the cluster has storage. It then waits for /health. report, when set, sees
+// every privileged command first so the CLI can print it.
+func ApplySettings(ctx context.Context, runner Runner, baseURL string, sleep func(context.Context, time.Duration), report func(Cmd), envFileContent string) (bool, error) {
 	run := func(cmd Cmd) error {
 		if report != nil {
 			report(cmd)
@@ -52,8 +53,8 @@ func ApplySettings(ctx context.Context, runner Runner, baseURL string, sleep fun
 	dropIn, _ := readFile(output, DropInFile)
 	changed := false
 
-	if envFile != EnvFileContent {
-		if err := writeFile(run, EnvironmentFile, "0600", EnvFileContent); err != nil {
+	if envFile != envFileContent {
+		if err := writeFile(run, EnvironmentFile, "0600", envFileContent); err != nil {
 			return false, err
 		}
 		changed = true
@@ -105,7 +106,13 @@ func writeFile(run func(Cmd) error, path, mode, content string) error {
 
 // LocalPAT reads SB_PAT_TOKEN from the root-only installer env file.
 func LocalPAT(ctx context.Context, runner Runner) (string, error) {
-	out, err := runner.Output(ctx, Cmd{Name: "cat", Args: []string{"/etc/sandboxd/sandboxd.env"}, Sudo: true})
+	return LocalPATWithSudo(ctx, runner, true)
+}
+
+// LocalPATWithSudo reads SB_PAT_TOKEN, with or without sudo. A process that
+// already runs as root reads the file directly.
+func LocalPATWithSudo(ctx context.Context, runner Runner, sudo bool) (string, error) {
+	out, err := runner.Output(ctx, Cmd{Name: "cat", Args: []string{"/etc/sandboxd/sandboxd.env"}, Sudo: sudo})
 	if err != nil {
 		return "", fmt.Errorf("read /etc/sandboxd/sandboxd.env: %w", err)
 	}

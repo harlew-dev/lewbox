@@ -180,6 +180,29 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// Access tokens belong to an account: the caller's own, or the one named
+	// by ?user= (an ID or email; instance admins only, required in local mode).
+	mux.HandleFunc("GET "+Prefix+"/access-tokens", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListAccessTokens(r.Context(), r.URL.Query().Get("user"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/access-tokens", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateAccessTokenRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateAccessToken(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	// {ref} is a token ID or the name of a live token.
+	mux.HandleFunc("DELETE "+Prefix+"/access-tokens/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RevokeAccessToken(r.Context(), r.URL.Query().Get("user"), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/users", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.ListUsers(r.Context())
 		respond(w, log, http.StatusOK, resp, err)
@@ -254,6 +277,16 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	mux.HandleFunc("PATCH "+Prefix+"/clusters/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateClusterRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateCluster(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("DELETE "+Prefix+"/clusters/{ref}", func(w http.ResponseWriter, r *http.Request) {
 		force, err := queryBool(r, "force")
 		if err != nil {
@@ -266,6 +299,13 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 
 	mux.HandleFunc("POST "+Prefix+"/clusters/{ref}/check", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.CheckCluster(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// What a cluster's nodes must apply. The response carries the profiles'
+	// secrets, so it is admin-only.
+	mux.HandleFunc("GET "+Prefix+"/clusters/{ref}/node-settings", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ClusterNodeSettings(r.Context(), r.PathValue("ref"))
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -336,6 +376,17 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// A node reports the profile versions it applied.
+	mux.HandleFunc("PUT "+Prefix+"/nodes/{ref}/settings", func(w http.ResponseWriter, r *http.Request) {
+		var req service.ReportNodeSettingsRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.ReportNodeSettings(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	mux.HandleFunc("GET "+Prefix+"/regions", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.ListRegions(r.Context(), r.Header.Get(OrganizationHeader))
 		respond(w, log, http.StatusOK, resp, err)
@@ -389,6 +440,99 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 
 	mux.HandleFunc("DELETE "+Prefix+"/plans/{ref}", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.DeletePlan(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// DNS profiles are saved Cloudflare credentials. {ref} is an ID or name.
+	mux.HandleFunc("GET "+Prefix+"/dns-profiles", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListDNSProfiles(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateDNSProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateDNSProfile(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("PATCH "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateDNSProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateDNSProfile(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles/{ref}/test", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.TestDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles/{ref}/credentials", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DNSProfileCredentials(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// Storage profiles are saved S3-compatible bucket credentials. {ref} is
+	// an ID or name.
+	mux.HandleFunc("GET "+Prefix+"/storage-profiles", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListStorageProfiles(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateStorageProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateStorageProfile(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("PATCH "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateStorageProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateStorageProfile(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles/{ref}/test", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.TestStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles/{ref}/credentials", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.StorageProfileCredentials(r.Context(), r.PathValue("ref"))
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
@@ -545,6 +689,37 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		resp, err := svc.DeleteSnapshot(r.Context(), r.PathValue("name"), service.RegionScope{
 			Region: r.URL.Query().Get("region"),
 			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	// Archives are stopped sandboxes kept in a cluster's bucket. Their IDs
+	// are unique, so only the organization is chosen.
+	mux.HandleFunc("GET "+Prefix+"/archives", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListArchives(r.Context(), service.RegionScope{
+			Region: r.URL.Query().Get("region"),
+			Org:    requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/archives/{id}/restore", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.RestoreArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
+		})
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteArchive(r.Context(), r.PathValue("id"), service.RegionScope{
+			Org: requestOrganization(r),
 		})
 		respond(w, log, http.StatusOK, resp, err)
 	})

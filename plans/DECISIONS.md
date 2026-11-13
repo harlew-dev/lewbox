@@ -291,3 +291,53 @@ Every decision made while building the self-hosted E2B version of Lewbox, writte
 **Other options.** A reusable invite code, or a public sign-up flow with operator approval. A reusable code loses the plan/region binding and the per-customer record; approval adds a manual step the link is meant to remove.
 
 **Caveats.** The link is bound to one plan and region; moving the workspace later is still an operator action. A claimed link whose account never creates a workspace stays `claimed` until it expires, and the token cannot be handed to someone else.
+
+## D34. DNS profiles: saved Cloudflare credentials, chosen per cluster (your call, 2026-11-13)
+
+**Chosen.** Instance admins save Cloudflare credentials once as a **DNS profile** (name, zone, API token, optional ACME email), sealed with the keyring and tested before saving. A cluster in domain mode names its profile. `lewbox install --dns-profile NAME` fetches the token from the orchestrator and passes it to AerolVM's installer for DNS-01. Lewbox also keeps the cluster's `<domain>` and `*.<domain>` A/AAAA records pointing at its live ingress nodes, unless the cluster's `dns_records` is `off`.
+
+**Why.** The token was typed on every install and never stored, and the operator made the DNS records by hand. Cloudflare only, because AerolVM v0.7.0's installer and Caddy build support only Cloudflare; other providers would need AerolVM changes.
+
+**Other options.** Per-workspace profiles (customers don't run nodes, so no). Keeping the token off nodes by relaying DNS-01 through Lewbox, as the old design planned (needs an AerolVM change).
+
+**Caveats.** The token still ends up on every node, in the installer's Caddy env file, and can edit the whole zone. Use a token scoped to the one zone. A new token reaches existing nodes only when `lewbox node configure` runs on each (they show as outdated until then).
+
+## D35. Storage profiles, and a registry on each node (your call, 2026-11-13)
+
+**Chosen.** Instance admins save S3-compatible storage (AWS S3, Cloudflare R2, MinIO, …) as a **storage profile**. A cluster with one runs CNCF Distribution on every node at `127.0.0.1:5000`, backed by the bucket under `clusters/<cluster id>/`, and AerolVM pushes every snapshot there (`SB_SNAPSHOT_PUSH_ENABLED`, `SB_MIRROR_PUSH_HOST`). Any node can then start a pushed snapshot. `node add` and `node configure` install and configure it; each node reports the profile versions it applied, so out-of-date nodes are flagged.
+
+**Why.** AerolVM pushes to an OCI registry, not to a bucket. A registry per node on a shared bucket has no single point of failure, and the legacy app ran exactly this on real AerolVM. The registry is loopback-only without auth, so the PAT AerolVM sends to it is a random placeholder, not the real one.
+
+**Other options.** One shared registry service (a single point of failure, and it needs TLS and auth). AerolVM's hosted registry (AOCR), which isn't self-hosted.
+
+**Caveats.** The bucket keys are on every node of the cluster; use a key scoped to the bucket. Nothing in AerolVM or Distribution garbage-collects the bucket; deleting an archive retires its manifest but blobs stay until a sweep, which isn't built yet. This reverses D23's "Other options" note that a registry on every cluster was too much to ask.
+
+## D36. Archive on stop, with a new ID on restore (your call, 2026-11-13)
+
+**Chosen.** A cluster's `stop_policy` is `keep` (default) or `archive`. On an archive cluster, Lewbox's sync loop notices every stopped customer sandbox, snapshots it with a short-lived team token, waits for the push to the bucket, and deletes the sandbox. The archive (snapshot name, registry ref, and the sandbox's name, tags, image and size) is recorded and kept until deleted. **Restore** creates a **new** sandbox from the snapshot, on any node, with the old name and tags plus `lewbox.restored_from=<old id>`. On such a cluster, stopped sandboxes don't persist.
+
+**Why.** Nodes have 70 GB of disk, and a stopped sandbox's disk stays on its node; only that node could start it. AerolVM v0.7.0 has no way to move a stopped sandbox and keep its ID (failover keeps the ID but loses the disk; snapshots move but start a new sandbox). Lewbox isn't in the request path, so it can't hide the new ID.
+
+**Other options.** Keep stopped sandboxes and delete them after N days (no restore). Ask AerolVM for archive-on-stop that keeps the ID ([aerolvm-push-on-stop-request.md](aerolvm-push-on-stop-request.md)); when that lands, this setting maps onto it.
+
+**Caveats.** E2B `pause` then `connect(id)` gets 404 on an archive cluster. Snapshots keep no `env` values, so a restore needs them passed again. Running programs end on stop, as before. Each archive and restore adds an image layer, so a sandbox cycled about 100 times reaches overlayfs's layer limit. A start that races the archive is caught by a re-check before the delete, but a write between that check and the delete can be lost.
+
+## D37. Local copy retention and archive snapshot names, per cluster (your call, 2026-11-13)
+
+**Chosen.** Two cluster settings beside `stop_policy`. `archive_local_retention` (`instant` default, `1h`, `1d`, `7d`, `never`) sets how long nodes keep their local copies of archived sandboxes before the cleanup timer removes them; `never` installs no timer. Each node reports the retention it applied, so a change flags nodes outdated until `node configure`. `archive_snapshot_name` (`id` default, `name`) names archive snapshots `archive-<id>` or `archive-<name>-<id>`.
+
+**Why.** Cleanup was forced to "at once". A kept local copy makes a restore on that node faster at the cost of disk, and that trade-off is the operator's. Names make AerolVM's own snapshot lists readable.
+
+**Other options.** A free-form name template: refused, because the `archive-` prefix (node cleanup, bucket delete guard, hiding archives from customers' snapshot lists) and the sandbox ID (names repeat; a restored sandbox keeps its name, and a name collision would make the archiver take a 409 for a finished snapshot) must both stay. A per-workspace retention: the copies are on the operator's disks.
+
+**Caveats.** A snapshot's copy is aged from the snapshot; a pulled copy from the pull (Docker's last tag time), falling back to the image's creation. A copy whose age can't be read is kept. `never` lets disks fill. A name change applies to sandboxes archived afterwards.
+
+## D38. Access tokens: long-lived tokens that act as an account (your call, 2026-11-13)
+
+**Chosen.** Any account can create **access tokens** (`lbp_…`, the same format as admin keys: 58 hex characters and a 6-character checksum, stored as a SHA-256 hash). A token acts as its account with the account's rights, read on every request: an instance admin's token can manage clusters, nodes and accounts, and a demoted admin's token loses that at once. `lewbox token create|list|revoke` and `/v0/access-tokens` manage them, and they are on the console's Account settings page. Instance admins can manage another account's tokens with `--user` (`?user=`); local mode, which has no account, must name one. `lewbox login --token` saves an access token or an admin key as a context. On its own, `--token` reads stdin or prompts without echo. `--token=<token>` also works, with a warning. `--key-stdin` stays as a hidden alias.
+
+**Why.** Operators had no way to automate cluster and node work without a password: admin keys are scoped to one workspace and refused on every instance route, and a session token expires and is tied to a sign-in. Tying tokens to an account, rather than making a separate "instance token", means a token can never have more rights than a person, auditing is per account, and disabling an account stops everything it can do.
+
+**Other options.** (a) Instance-level operator tokens with no account: simpler to explain, but a second kind of admin outside the users table, which the last-admin guard and disabling don't cover. (b) Scopes (read-only, clusters only): more useful for least privilege, at the cost of a scope check on every service method; a dedicated account per job is the workaround for now.
+
+**Caveats.** A token can't create another token, so a leaked token can't outlive its expiry; it can list and revoke tokens, including itself. Disabling an account revokes its tokens for good (enabling it again doesn't bring them back), and removing it deletes them. Changing a password does not revoke tokens. `--token=<token>` breaks the rule that secrets are never flag values (cli-conventions §8), because you asked for it; the CLI warns, and `--token <token>` with a space is refused because cobra would read the token as the URL. `lewbox logout` on a token context now forgets the token locally and exits 0, rather than failing on the server's "no session"; this also changes it for admin keys.

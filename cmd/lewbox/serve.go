@@ -28,13 +28,14 @@ import (
 
 // serveOptions are the flags that describe where and how often to serve.
 type serveOptions struct {
-	port           int
-	listen         string
-	interval       time.Duration
-	syncInterval   time.Duration
-	cookieSecure   string
-	trustedOrigins []string
-	trustedProxies []string
+	port            int
+	listen          string
+	interval        time.Duration
+	syncInterval    time.Duration
+	archiveInterval time.Duration
+	cookieSecure    string
+	trustedOrigins  []string
+	trustedProxies  []string
 }
 
 func addServeFlags(cmd *cobra.Command, o *serveOptions) {
@@ -46,6 +47,8 @@ func addServeFlags(cmd *cobra.Command, o *serveOptions) {
 		"how often to check every cluster; 0 disables (env LEWBOX_CHECK_INTERVAL)")
 	cmd.Flags().DurationVar(&o.syncInterval, "sync-interval", envDuration("LEWBOX_SYNC_INTERVAL", 15*time.Second),
 		"how often to sync sandboxes and usage; 0 disables (env LEWBOX_SYNC_INTERVAL)")
+	cmd.Flags().DurationVar(&o.archiveInterval, "archive-interval", envDuration("LEWBOX_ARCHIVE_INTERVAL", 5*time.Second),
+		"how often to archive stopped sandboxes and advance their pushes; 0 disables (env LEWBOX_ARCHIVE_INTERVAL)")
 	cmd.Flags().StringVar(&o.cookieSecure, "cookie-secure", envOr("LEWBOX_COOKIE_SECURE", "auto"),
 		"session cookie security: auto or always (env LEWBOX_COOKIE_SECURE)")
 	cmd.Flags().StringSliceVar(&o.trustedOrigins, "trusted-origin", envList("LEWBOX_TRUSTED_ORIGINS"),
@@ -177,6 +180,7 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	svc.SetSyncInterval(o.syncInterval)
 	startClusterChecks(ctx, svc, o.interval, log)
 	startSync(ctx, svc, o.syncInterval, log)
+	startArchives(ctx, svc, o.archiveInterval, log)
 	consumerDocs, platformDocs, err := loadDocs()
 	if err != nil {
 		return err
@@ -194,6 +198,27 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 		httpapi.WithDocs(consumerDocs),
 		httpapi.WithPlatform(platformDocs),
 	), dist), log)
+}
+
+// startArchives runs the archiver in the background until ctx ends.
+func startArchives(ctx context.Context, svc *service.Service, every time.Duration, log *slog.Logger) {
+	if every <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := svc.ArchivePass(ctx); err != nil {
+					log.Warn("archive pass failed", "err", err)
+				}
+			}
+		}
+	}()
 }
 
 // loadDocs parses the embedded documentation books (consumer and platform),

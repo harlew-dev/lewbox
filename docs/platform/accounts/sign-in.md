@@ -22,7 +22,7 @@ user   : you@example.com (instance admin)
 via    : session
 ```
 
-Sessions last 30 days. `lewbox logout` ends the session and deletes the saved token; `lewbox logout --all` does it for every context.
+Sessions last 30 days. `lewbox logout` ends the session and deletes the saved token; `lewbox logout --all` does it for every context. For a context saved with `--token`, `logout` only forgets the token: it keeps working until it expires or is revoked.
 
 ## In a browser
 
@@ -74,31 +74,38 @@ lewbox status          # --check exits 1 when not healthy or not signed in
 
 ## Scripts and CI
 
-Never put a password on the command line. Pass it on stdin:
+Use an [access token](access-tokens.md) (`lbp_…`) rather than a password. It acts as its account, so an instance admin's token can manage clusters and nodes. It lasts as long as you choose, and you can revoke it on its own:
+
+```bash
+lewbox token create ci                                 # signed in with a password; prints the token once
+printf '%s\n' "$LEWBOX_ACCESS_TOKEN" | lewbox login https://lewbox.example.com --token --context-name ci
+```
+
+Or skip `login` entirely:
+
+```bash
+export LEWBOX_API_URL=https://lewbox.example.com
+export LEWBOX_TOKEN=lbp_…
+lewbox node list --json
+```
+
+If you must sign in with a password from a script, never put it on the command line. Pass it on stdin:
 
 ```bash
 printf '%s\n' "$LEWBOX_PASSWORD" | lewbox login https://lewbox.example.com \
   --email ci@example.com --password-stdin --context-name ci
 ```
 
-Or, with a session token you already have, skip `login` entirely:
-
-```bash
-export LEWBOX_API_URL=https://lewbox.example.com
-export LEWBOX_TOKEN=lbs_…
-lewbox node list --json
-```
-
 Output is JSON whenever it isn't going to a terminal, so piping into `jq` just works. See [Output and errors](../reference/output-and-errors.md).
 
-An organization's API key (`lba_…`) works the same way for that organization's routes; see [Organizations and API keys](organizations-and-api-keys.md). A key can't reach clusters, nodes or accounts, so a job that manages those needs a dedicated account. Give it instance admin only if the job changes things.
+An organization's API key (`lba_…`) works the same way, with `--token` or `LEWBOX_TOKEN`, for that organization's routes; see [Organizations and API keys](organizations-and-api-keys.md). A key can't reach clusters, nodes or accounts. A job that manages those needs an access token, ideally for a dedicated account: see [Access tokens](access-tokens.md#a-dedicated-account-for-automation). Give that account instance admin only if the job changes things.
 
 ## Where it's stored
 
 | File | Holds |
 |---|---|
 | `~/.config/lewbox/config.json` | Contexts and which one is current |
-| `~/.config/lewbox/credentials.json` | Session tokens |
+| `~/.config/lewbox/credentials.json` | Session tokens, and access tokens and API keys saved with `--token` |
 
 Both are written atomically, mode `0600`. `$XDG_CONFIG_HOME` moves them.
 

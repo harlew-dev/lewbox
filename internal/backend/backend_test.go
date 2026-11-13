@@ -3,6 +3,7 @@ package backend_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,13 +12,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
 	"github.com/harlew-dev/lewbox/internal/backend"
 	"github.com/harlew-dev/lewbox/internal/client"
 	"github.com/harlew-dev/lewbox/internal/db"
+	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
+	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
@@ -35,9 +39,10 @@ type harness struct {
 	remote backend.Backend
 	fake   *aerolvmtest.Server
 	url    string
+	conn   *sql.DB
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...service.Option) *harness {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -50,10 +55,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(db.New(conn),
+	svcOpts := append([]service.Option{
 		service.WithKeyring(keyring),
 		service.WithAerolVMOptions(aerolvm.WithRetry(0)),
-	)
+	}, opts...)
+	svc := service.New(db.New(conn), svcOpts...)
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 
@@ -88,6 +94,7 @@ func newHarness(t *testing.T) *harness {
 		remote: client.New(srv.URL, login.Token, srv.Client()),
 		fake:   fake,
 		url:    srv.URL,
+		conn:   conn,
 	}
 }
 
@@ -245,6 +252,19 @@ func TestBackendsAgree(t *testing.T) {
 		},
 		{name: "list clusters", local: listClusters, remote: listClusters, compare: true},
 		{name: "get cluster", local: getCluster, remote: getCluster, compare: true},
+		{
+			name: "update cluster DNS settings",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				domain, records := "eu.example.com", "off"
+				v, err := b.UpdateCluster(ctx, "eu-west", service.UpdateClusterRequest{
+					Domain:     &domain,
+					DNSRecords: &records,
+				})
+				return v, err
+			},
+			remote:  getCluster,
+			compare: true,
+		},
 		{
 			name: "check cluster",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
@@ -496,6 +516,103 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	}
 }
 
+func TestAccessTokenBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.CreateUser(ctx, service.CreateUserRequest{Email: "dev@example.com", Password: "member-password-1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Local mode names the account; the remote admin's own is the default.
+	listOwn := step{
+		name:    "list tokens",
+		local:   func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, adminEmail) },
+		remote:  func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, "") },
+		compare: true,
+	}
+	listDev := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListAccessTokens(ctx, "dev@example.com")
+	}
+	var token string
+	afterRevoke := listOwn
+	afterRevoke.name = "list tokens after revoke"
+
+	runSteps(t, h, []step{
+		{
+			name: "create token",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "laptop", User: adminEmail, ExpiresIn: "30d"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				k, err := b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "ci"})
+				token = k.Token
+				return k, err
+			},
+			check: func(t *testing.T, v any) {
+				k, ok := v.(service.NewAccessToken)
+				if !ok || !strings.HasPrefix(k.Token, "lbp_") || k.Status != "active" {
+					t.Errorf("new token = %+v", v)
+				}
+			},
+		},
+		listOwn,
+		{
+			name: "create another account's token",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "a", User: "dev@example.com"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "b", User: "dev@example.com"})
+			},
+		},
+		both("list another account's tokens", listDev),
+		{
+			name:  "revoke token",
+			local: listOwn.local,
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RevokeAccessToken(ctx, "", "laptop")
+			},
+			check: func(t *testing.T, v any) {
+				if k, ok := v.(service.AccessToken); ok && k.Status != "revoked" {
+					t.Errorf("revoked token = %+v", k)
+				}
+			},
+		},
+		afterRevoke,
+		both("revoke missing token", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.RevokeAccessToken(ctx, adminEmail, "missing")
+		}),
+		both("missing account", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListAccessTokens(ctx, "nobody@example.com")
+		}),
+		both("bad expiry", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "x", User: adminEmail, ExpiresIn: "soon"})
+		}),
+	})
+
+	// The admin's token manages the instance over HTTP, but can't mint more.
+	tokened := client.New(h.url, token, nil)
+	me, err := tokened.Me(ctx)
+	if err != nil || me.Via != "access_token" || me.User == nil || me.User.Email != adminEmail || me.AccessToken == nil || me.AccessToken.Name != "ci" {
+		t.Fatalf("me with token = %+v, %v", me, err)
+	}
+	if _, err := tokened.ListClusters(ctx); err != nil {
+		t.Errorf("clusters with an admin's token: %v", err)
+	}
+	if _, err := tokened.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "more"}); err == nil || !strings.Contains(err.Error(), "cannot create another") {
+		t.Errorf("a token created another: %v", err)
+	}
+	if _, err := tokened.Logout(ctx); err == nil {
+		t.Error("logout with a token succeeded")
+	}
+	if _, err := tokened.RevokeAccessToken(ctx, "", "ci"); err != nil {
+		t.Fatalf("a token revokes itself: %v", err)
+	}
+	if _, err := tokened.Me(ctx); err == nil {
+		t.Error("a revoked token still works")
+	}
+}
+
 func TestSandboxKeyBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -711,6 +828,108 @@ func TestSnapshotBackendsAgree(t *testing.T) {
 	})
 }
 
+func TestArchiveBackendsAgree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:        "eu-west",
+		AdminURL:    h.fake.URL(),
+		EndpointURL: h.fake.URL(),
+		Runtime:     "docker",
+		AdminToken:  clusterToken,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	org, err := h.local.CreateOrganization(ctx, service.CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.local.SetSubscription(ctx, "acme", "eu-west", service.SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	cluster, err := h.local.GetCluster(ctx, "eu-west")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket := objstoretest.New(t)
+	bucket.AddBucket("assets")
+	profile, err := h.local.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+		Name: "archive", Endpoint: bucket.URL, Region: "us-east-1", Bucket: "assets",
+		AccessKeyID: bucket.AccessKeyID, SecretAccessKey: bucket.SecretAccessKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.conn.ExecContext(ctx,
+		`UPDATE clusters SET stop_policy = 'archive', storage_profile_id = ? WHERE id = ?`,
+		profile.ID, cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	archiveIDs := map[string]string{}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		id := uuid.NewV7().String()
+		archiveIDs[sandboxID] = id
+		ref := "127.0.0.1:5000/cluster/" + cluster.ID + "/snapshots/tenant-x/archive-" + sandboxID + ":latest"
+		if _, err := h.conn.ExecContext(ctx,
+			`INSERT INTO archives (id, org_id, cluster_id, sandbox_id, sandbox_name, image,
+			                       runtime, cpu, memory_mb, disk_gb, tags, snapshot_name,
+			                       registry_ref, status, created_at, archived_at)
+			 VALUES (?, ?, ?, ?, 'box', 'ubuntu:22.04', 'docker', 2, 1024, 20, '{"app":"demo"}',
+			         ?, ?, 'archived', ?, ?)`,
+			id, org.ID, cluster.ID, sandboxID,
+			"archive-"+sandboxID, ref, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listArchives := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListArchives(ctx, service.RegionScope{Org: "acme"})
+	}
+	runSteps(t, h, []step{
+		both("list archives", listArchives),
+		both("get archive", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+		}),
+		{
+			name: "restore archives",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RestoreArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.RestoreArchive(ctx, archiveIDs["sb-2"], service.RegionScope{Org: "acme"})
+			},
+			check: func(t *testing.T, v any) {
+				restored, ok := v.(service.RestoredArchive)
+				if !ok || restored.Sandbox.ID == "" || restored.Sandbox.Region != "eu-west" ||
+					restored.Archive.LastRestoredSandboxID != restored.Sandbox.ID {
+					t.Errorf("restored archive = %+v", v)
+				}
+			},
+		},
+		both("list archives after restore", listArchives),
+		{
+			name: "delete archives",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteArchive(ctx, archiveIDs["sb-2"], service.RegionScope{Org: "acme"})
+			},
+			check: func(t *testing.T, v any) {
+				archive, ok := v.(service.Archive)
+				if !ok || archive.Status != "deleted" || archive.Region != "eu-west" {
+					t.Errorf("deleted archive = %+v", v)
+				}
+			},
+		},
+		both("list archives after delete", listArchives),
+		both("missing archive", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetArchive(ctx, archiveIDs["sb-1"], service.RegionScope{Org: "acme"})
+		}),
+	})
+}
+
 func TestMonitoringBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -912,6 +1131,248 @@ func TestSetupLinkBackendsAgree(t *testing.T) {
 		both("list onboarding links after revoke", listLinks),
 		both("revoke a missing link", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.RevokeSetupLink(ctx, "missing")
+		}),
+	})
+}
+
+func TestDNSProfileBackendsAgree(t *testing.T) {
+	fake := cloudflaretest.New(t)
+	const token = "cf_backend_agree_token"
+	fake.Token = token
+	zoneID := fake.AddZone("example.com")
+	h := newHarness(t, service.WithCloudflareURL(fake.URL))
+
+	create := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.CreateDNSProfile(ctx, service.CreateDNSProfileRequest{
+			Name: "cf-eu", Zone: "example.com", APIToken: token, ACMEEmail: "ops@example.com",
+		})
+	}
+	get := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetDNSProfile(ctx, "cf-eu")
+	}
+	list := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListDNSProfiles(ctx)
+	}
+	test := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.TestDNSProfile(ctx, "cf-eu")
+	}
+
+	runSteps(t, h, []step{
+		{
+			name:    "create a DNS profile",
+			local:   create,
+			remote:  get,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				p, ok := v.(service.DNSProfile)
+				if !ok || p.ZoneID != zoneID || p.Version != 1 || p.TestedAt == nil || p.TokenLast4 != "oken" {
+					t.Errorf("profile = %+v", v)
+				}
+			},
+		},
+		both("list DNS profiles", list),
+		{
+			name:    "test a DNS profile",
+			local:   test,
+			remote:  get,
+			compare: true,
+		},
+		both("DNS profile credentials", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.DNSProfileCredentials(ctx, "cf-eu")
+		}),
+		{
+			name: "rename a DNS profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				name := "cf-west"
+				return b.UpdateDNSProfile(ctx, "cf-eu", service.UpdateDNSProfileRequest{Name: &name})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetDNSProfile(ctx, "cf-west")
+			},
+			compare: true,
+		},
+		{
+			name: "delete a DNS profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetDNSProfile(ctx, "cf-west")
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteDNSProfile(ctx, "cf-west")
+			},
+			compare: true,
+		},
+		both("list DNS profiles after delete", list),
+		both("missing DNS profile", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetDNSProfile(ctx, "cf-west")
+		}),
+		both("a refused token", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateDNSProfile(ctx, service.CreateDNSProfileRequest{
+				Name: "cf-bad", Zone: "example.com", APIToken: "wrong",
+			})
+		}),
+	})
+}
+
+func TestStorageProfileBackendsAgree(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_backend_secret"
+	h := newHarness(t)
+
+	create := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+			Name: "backups", Endpoint: fake.URL, Region: "us-east-1", Bucket: "assets",
+			AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
+		})
+	}
+	get := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetStorageProfile(ctx, "backups")
+	}
+	list := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListStorageProfiles(ctx)
+	}
+	test := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.TestStorageProfile(ctx, "backups")
+	}
+
+	runSteps(t, h, []step{
+		{
+			name:    "create a storage profile",
+			local:   create,
+			remote:  get,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				p, ok := v.(service.StorageProfile)
+				if !ok || p.Version != 1 || p.TestedAt == nil || !p.PathStyle ||
+					p.SecretLast4 != "cret" || p.Region != "us-east-1" {
+					t.Errorf("profile = %+v", v)
+				}
+			},
+		},
+		both("list storage profiles", list),
+		{
+			name:    "test a storage profile",
+			local:   test,
+			remote:  get,
+			compare: true,
+		},
+		both("storage profile credentials", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.StorageProfileCredentials(ctx, "backups")
+		}),
+		{
+			name: "rename a storage profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				name := "backups-west"
+				return b.UpdateStorageProfile(ctx, "backups", service.UpdateStorageProfileRequest{Name: &name})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetStorageProfile(ctx, "backups-west")
+			},
+			compare: true,
+		},
+		{
+			name: "delete a storage profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetStorageProfile(ctx, "backups-west")
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteStorageProfile(ctx, "backups-west")
+			},
+			compare: true,
+		},
+		both("list storage profiles after delete", list),
+		both("missing storage profile", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetStorageProfile(ctx, "backups-west")
+		}),
+		both("a missing bucket", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+				Name: "bad", Endpoint: fake.URL, Region: "us-east-1", Bucket: "missing",
+				AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
+			})
+		}),
+	})
+}
+
+func TestNodeSettingsBackendsAgree(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_node_settings_secret"
+	h := newHarness(t)
+	ctx := context.Background()
+
+	if _, err := h.local.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+		Name: "s3-main", Endpoint: fake.URL, Region: "us-east-1", Bucket: "assets",
+		Prefix: "lewbox", AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := h.local.AddCluster(ctx, service.AddClusterRequest{
+		Slug:           "eu-west",
+		AdminURL:       h.fake.URL(),
+		EndpointURL:    h.fake.URL(),
+		Runtime:        "docker",
+		StorageProfile: "s3-main",
+		StopPolicy:     "archive",
+		AdminToken:     clusterToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nodeSettings := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ClusterNodeSettings(ctx, "eu-west")
+	}
+	report := func(ctx context.Context, b backend.Backend) (any, error) {
+		name := "s3-main"
+		return b.ReportNodeSettings(ctx, "node-a", service.ReportNodeSettingsRequest{
+			StorageProfile: &name, StorageVersion: 1,
+		})
+	}
+	getNode := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetNode(ctx, "node-a")
+	}
+
+	runSteps(t, h, []step{
+		both("cluster node settings", nodeSettings),
+		{
+			name: "node settings carry the bucket secret",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.ClusterNodeSettings(ctx, "eu-west")
+			},
+			remote:  nodeSettings,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				settings, ok := v.(service.NodeSettings)
+				if !ok || settings.Storage == nil || settings.DNS != nil {
+					t.Fatalf("settings = %+v", v)
+				}
+				st := settings.Storage
+				if st.Profile != "s3-main" || st.Version != 1 || st.SecretAccessKey != secret ||
+					st.RootDirectory != "/lewbox/clusters/"+detail.ID || !st.PathStyle {
+					t.Errorf("storage = %+v", st)
+				}
+			},
+		},
+		{
+			name:    "report node settings",
+			local:   report,
+			remote:  getNode,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				node, ok := v.(service.Node)
+				if !ok || node.Settings == nil || node.Settings.AppliedAt == nil || node.Settings.Outdated {
+					t.Fatalf("node = %+v", v)
+				}
+			},
+		},
+		both("list nodes after a report", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListNodes(ctx, service.ListNodesRequest{Cluster: "eu-west"})
+		}),
+		both("get cluster with storage", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetCluster(ctx, "eu-west")
+		}),
+		both("node settings without a cluster", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ClusterNodeSettings(ctx, "missing")
 		}),
 	})
 }

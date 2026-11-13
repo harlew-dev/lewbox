@@ -16,6 +16,10 @@ type Backend interface {
 	Logout(ctx context.Context) (service.LogoutResponse, error)
 	Me(ctx context.Context) (service.Me, error)
 
+	CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error)
+	ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error)
+	RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error)
+
 	CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error)
 	ListUsers(ctx context.Context) (service.UserList, error)
 	GetUser(ctx context.Context, ref string) (service.User, error)
@@ -26,6 +30,7 @@ type Backend interface {
 	AddCluster(ctx context.Context, req service.AddClusterRequest) (service.ClusterDetail, error)
 	ListClusters(ctx context.Context) (service.ClusterList, error)
 	GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
+	UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error)
 	CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
 	ClusterHealth(ctx context.Context, ref string, days int) (service.ClusterHealth, error)
 	ClusterMetrics(ctx context.Context, ref, rng string) (service.ClusterMetrics, error)
@@ -33,11 +38,13 @@ type Backend interface {
 	RemoveCluster(ctx context.Context, ref string, force bool) (service.Cluster, error)
 	ResolveCluster(ctx context.Context, ref string) (service.Cluster, error)
 	CreateJoinToken(ctx context.Context, ref string, req service.JoinTokenRequest) (service.JoinToken, error)
+	ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error)
 
 	AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error)
 	ListNodes(ctx context.Context, req service.ListNodesRequest) (service.NodeList, error)
 	GetNode(ctx context.Context, ref string) (service.Node, error)
 	RemoveNode(ctx context.Context, ref string, req service.RemoveNodeRequest) (service.Node, error)
+	ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error)
 
 	// org is an organization ID or slug; "" means an admin key's own.
 	ListOrganizations(ctx context.Context, req service.ListOrganizationsRequest) (service.OrganizationList, error)
@@ -56,6 +63,22 @@ type Backend interface {
 	CreatePlan(ctx context.Context, req service.CreatePlanRequest) (service.Plan, error)
 	UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error)
 	DeletePlan(ctx context.Context, ref string) (service.Plan, error)
+
+	ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error)
+	GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error)
+	UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error)
+	DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error)
+
+	ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error)
+	GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error)
+	UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error)
+	DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error)
 
 	ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error)
 	SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error)
@@ -79,6 +102,10 @@ type Backend interface {
 	DeleteSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error)
 	ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error)
 	DeleteSnapshot(ctx context.Context, name string, req service.RegionScope) (service.Snapshot, error)
+	ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error)
+	GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error)
+	RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error)
+	DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error)
 	Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error)
 	Limits(ctx context.Context, org string) (service.LimitsReport, error)
 }
@@ -112,6 +139,21 @@ func (l Local) Logout(ctx context.Context) (service.LogoutResponse, error) {
 // Me describes the local principal.
 func (l Local) Me(ctx context.Context) (service.Me, error) {
 	return l.Svc.Me(l.withPrincipal(ctx))
+}
+
+// CreateAccessToken creates an access token and returns it once.
+func (l Local) CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error) {
+	return l.Svc.CreateAccessToken(l.withPrincipal(ctx), req)
+}
+
+// ListAccessTokens returns an account's access tokens.
+func (l Local) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
+	return l.Svc.ListAccessTokens(l.withPrincipal(ctx), user)
+}
+
+// RevokeAccessToken revokes an access token.
+func (l Local) RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error) {
+	return l.Svc.RevokeAccessToken(l.withPrincipal(ctx), user, ref)
 }
 
 // CreateUser creates an account.
@@ -159,6 +201,11 @@ func (l Local) GetCluster(ctx context.Context, ref string) (service.ClusterDetai
 	return l.Svc.GetCluster(l.withPrincipal(ctx), ref)
 }
 
+// UpdateCluster changes a cluster's DNS settings.
+func (l Local) UpdateCluster(ctx context.Context, ref string, req service.UpdateClusterRequest) (service.ClusterDetail, error) {
+	return l.Svc.UpdateCluster(l.withPrincipal(ctx), ref, req)
+}
+
 // CheckCluster runs the cluster checks now.
 func (l Local) CheckCluster(ctx context.Context, ref string) (service.ClusterDetail, error) {
 	return l.Svc.CheckCluster(l.withPrincipal(ctx), ref)
@@ -194,6 +241,12 @@ func (l Local) CreateJoinToken(ctx context.Context, ref string, req service.Join
 	return l.Svc.CreateJoinToken(l.withPrincipal(ctx), ref, req)
 }
 
+// ClusterNodeSettings returns what a cluster's nodes must apply, with the
+// profiles' secrets.
+func (l Local) ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error) {
+	return l.Svc.ClusterNodeSettings(l.withPrincipal(ctx), ref)
+}
+
 // AddNode registers a node.
 func (l Local) AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error) {
 	return l.Svc.AddNode(l.withPrincipal(ctx), req)
@@ -212,6 +265,11 @@ func (l Local) GetNode(ctx context.Context, ref string) (service.Node, error) {
 // RemoveNode removes a node.
 func (l Local) RemoveNode(ctx context.Context, ref string, req service.RemoveNodeRequest) (service.Node, error) {
 	return l.Svc.RemoveNode(l.withPrincipal(ctx), ref, req)
+}
+
+// ReportNodeSettings records the profile versions a node applied.
+func (l Local) ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error) {
+	return l.Svc.ReportNodeSettings(l.withPrincipal(ctx), ref, req)
 }
 
 // ListOrganizations returns organizations.
@@ -287,6 +345,77 @@ func (l Local) UpdatePlan(ctx context.Context, ref string, req service.UpdatePla
 // DeletePlan removes a plan that no subscription uses.
 func (l Local) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
 	return l.Svc.DeletePlan(l.withPrincipal(ctx), ref)
+}
+
+// ListDNSProfiles returns every DNS profile.
+func (l Local) ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error) {
+	return l.Svc.ListDNSProfiles(l.withPrincipal(ctx))
+}
+
+// GetDNSProfile returns a DNS profile by ID or name.
+func (l Local) GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.GetDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// CreateDNSProfile saves and tests a DNS profile.
+func (l Local) CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error) {
+	return l.Svc.CreateDNSProfile(l.withPrincipal(ctx), req)
+}
+
+// UpdateDNSProfile changes a DNS profile.
+func (l Local) UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error) {
+	return l.Svc.UpdateDNSProfile(l.withPrincipal(ctx), ref, req)
+}
+
+// DeleteDNSProfile removes a DNS profile no cluster uses.
+func (l Local) DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.DeleteDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// TestDNSProfile tests a DNS profile's token now.
+func (l Local) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.TestDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// DNSProfileCredentials returns a DNS profile's token, for a node.
+func (l Local) DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error) {
+	return l.Svc.DNSProfileCredentials(l.withPrincipal(ctx), ref)
+}
+
+// ListStorageProfiles returns every storage profile.
+func (l Local) ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error) {
+	return l.Svc.ListStorageProfiles(l.withPrincipal(ctx))
+}
+
+// GetStorageProfile returns a storage profile by ID or name.
+func (l Local) GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.GetStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// CreateStorageProfile saves and tests a storage profile.
+func (l Local) CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error) {
+	return l.Svc.CreateStorageProfile(l.withPrincipal(ctx), req)
+}
+
+// UpdateStorageProfile changes a storage profile.
+func (l Local) UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error) {
+	return l.Svc.UpdateStorageProfile(l.withPrincipal(ctx), ref, req)
+}
+
+// DeleteStorageProfile removes a storage profile no cluster uses.
+func (l Local) DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.DeleteStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// TestStorageProfile tests a storage profile's bucket and key now.
+func (l Local) TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.TestStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// StorageProfileCredentials returns a storage profile's secret key, for a
+// node.
+func (l Local) StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error) {
+	return l.Svc.StorageProfileCredentials(l.withPrincipal(ctx), ref)
 }
 
 // ListSubscriptions returns an organization's subscriptions.
@@ -377,6 +506,26 @@ func (l Local) ListSnapshots(ctx context.Context, req service.RegionScope) (serv
 // DeleteSnapshot deletes a snapshot on its cluster.
 func (l Local) DeleteSnapshot(ctx context.Context, name string, req service.RegionScope) (service.Snapshot, error) {
 	return l.Svc.DeleteSnapshot(l.withPrincipal(ctx), name, req)
+}
+
+// ListArchives lists the archives the caller may see.
+func (l Local) ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error) {
+	return l.Svc.ListArchives(l.withPrincipal(ctx), req)
+}
+
+// GetArchive returns one archive by ID.
+func (l Local) GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	return l.Svc.GetArchive(l.withPrincipal(ctx), id, req)
+}
+
+// RestoreArchive creates a new sandbox from an archive.
+func (l Local) RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error) {
+	return l.Svc.RestoreArchive(l.withPrincipal(ctx), id, req)
+}
+
+// DeleteArchive removes an archive.
+func (l Local) DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+	return l.Svc.DeleteArchive(l.withPrincipal(ctx), id, req)
 }
 
 // Usage returns metered usage.

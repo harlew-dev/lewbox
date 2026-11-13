@@ -62,4 +62,45 @@ describe('FleetSnapshotsPage', () => {
     const deleted = calls.find((call) => call.method === 'DELETE')
     expect(deleted).toMatchObject({ url: '/v0/snapshots/ckpt-c?region=eu-west', org: 'globex' })
   })
+
+  it('lists every workspace’s archives on the Archived tab, with delete only', async () => {
+    const archive = {
+      id: '01a1cb34-29a5-74c3-9691-5394d021b0aa',
+      org: 'globex',
+      region: 'eu-west',
+      sandbox_id: 'sb-1',
+      sandbox_name: 'builder',
+      image: 'ubuntu:22.04',
+      runtime: 'docker',
+      cpu: 1,
+      memory_mb: 1024,
+      disk_gb: 10,
+      tags: {},
+      snapshot_name: 'a',
+      registry_ref: '',
+      status: 'archived',
+      error: '',
+      created_at: '2026-11-12T10:00:00Z',
+      archived_at: '2026-11-12T10:05:00Z',
+      last_restored_sandbox_id: '',
+      last_restored_at: null,
+    }
+    const calls = stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/regions': () => json(200, { data: [euWest] }),
+      'GET /v0/archives': () => json(200, { data: [archive] }),
+      [`DELETE /v0/archives/${archive.id}`]: () => json(200, archive),
+    })
+    renderApp('/admin/snapshots?tab=archived')
+
+    const row = (await screen.findByText('builder')).closest('tr')!
+    expect(within(row).getByText('globex')).toBeInTheDocument()
+    expect(within(row).getByText('EU West')).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /Restore/ })).toBeNull()
+    fireEvent.click(within(row).getByRole('button', { name: 'Delete builder' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete archive' }))
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === 'DELETE')).toMatchObject({ org: 'globex' }),
+    )
+  })
 })

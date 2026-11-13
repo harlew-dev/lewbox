@@ -1,40 +1,75 @@
-import { Button, EmptyState, ErrorNotice, ListSkeleton, PageHeader, PageTabs, tabFrom } from '@harlew-dev/ui'
+import { Button, EmptyState, ErrorNotice, ListSkeleton, Notice, PageHeader, PageTabs, TextLink, tabFrom } from '@harlew-dev/ui'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
+import { ArchiveTable } from '../../components/archive-table'
 import { SandboxFilters } from '../../components/sandbox-filters'
 import { SandboxTable } from '../../components/sandbox-table'
 import { Snapshots } from '../../components/snapshot-table'
+import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { usePortalOrg } from './portal-route'
 
-const tabs = [
+const baseTabs = [
   { id: 'sandboxes', label: 'Sandboxes' },
   { id: 'snapshots', label: 'Snapshots' },
 ] as const
+const archivedTab = { id: 'archived', label: 'Archived' } as const
 
-// The workspace's sandboxes and, on a second tab, its snapshots.
+// The workspace's sandboxes and, on further tabs, its snapshots and, where
+// stopped sandboxes are archived, its archives.
 export function SandboxesPage() {
   const [searchParams] = useSearchParams()
-  const tab = tabFrom(searchParams, tabs)
-  useDocumentTitle(tab === 'snapshots' ? 'Snapshots' : 'Sandboxes')
   const { org, can } = usePortalOrg()
+  const regions = useRegions(org.slug)
+  const archives = useLoad(() => api.listArchives(org.slug), [org.slug])
   const regionName = (slug: string) => org.region?.name ?? slug
+  const region = regions.list.find((item) => item.slug === org.region?.slug)
+  const archiving = region?.stop_policy === 'archive'
+  const list = archives.data?.data ?? []
+  const tabs = archiving || list.length > 0 ? ([...baseTabs, archivedTab] as const) : baseTabs
+  const tab = tabFrom(searchParams, tabs)
+  useDocumentTitle(tab === 'snapshots' ? 'Snapshots' : tab === 'archived' ? 'Archived sandboxes' : 'Sandboxes')
 
   return (
     <>
       <PageHeader title="Sandboxes" />
       <PageTabs label="Sandbox views" tabs={tabs} current={tab} className="mb-8" />
       {tab === 'sandboxes' ? (
-        <SandboxList />
-      ) : (
+        <>
+          {archiving && (
+            <Notice variant="info" className="mb-6">
+              Stopped sandboxes in {regionName(region?.slug ?? '')} are archived to storage and come back as new
+              sandboxes. <TextLink href="/docs/sandboxes/archived-sandboxes">How archiving works</TextLink>
+            </Notice>
+          )}
+          <SandboxList />
+        </>
+      ) : tab === 'snapshots' ? (
         <Snapshots
           org={org.slug}
           canDelete={can.sandboxes}
           regionName={regionName}
           empty={<EmptyState title="No snapshots" description="Snapshots you take show up here." />}
           showRegion={false}
+        />
+      ) : archives.loading && !archives.data ? (
+        <ListSkeleton label="Loading archived sandboxes" rows={3} />
+      ) : archives.error.message ? (
+        <ErrorNotice error={archives.error} onRetry={archives.reload} />
+      ) : list.length === 0 ? (
+        <EmptyState
+          title="No archived sandboxes"
+          description="When a sandbox stops, it is archived to storage and listed here. Restore it to start a new sandbox from it."
+        />
+      ) : (
+        <ArchiveTable
+          archives={list}
+          canChange={can.sandboxes}
+          org={org.slug}
+          regionName={regionName}
+          onChanged={archives.refresh}
         />
       )}
     </>

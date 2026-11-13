@@ -90,6 +90,8 @@ export interface Region {
   endpoint_url: string
   runtime: string
   status?: string
+  // 'keep' leaves a stopped sandbox on its node; 'archive' moves it to storage.
+  stop_policy?: 'keep' | 'archive'
   plan?: PlanRef
   limits?: Limits
 }
@@ -272,6 +274,13 @@ export interface SessionResponse {
   user: User
 }
 
+// How long nodes keep their local copy of an archived sandbox before the
+// cleanup timer removes it. The bucket always holds the archive.
+export type ArchiveRetention = 'instant' | '1h' | '1d' | '7d' | 'never'
+
+// How archive snapshots are named: archive-<id> or archive-<name>-<id>.
+export type ArchiveSnapshotName = 'id' | 'name'
+
 export interface Cluster {
   id: string
   slug: string
@@ -279,6 +288,13 @@ export interface Cluster {
   admin_url: string
   endpoint_url: string
   runtime: string
+  domain: string
+  dns_profile: string | null
+  dns_records: 'auto' | 'off'
+  storage_profile: string | null
+  stop_policy: 'keep' | 'archive'
+  archive_local_retention: ArchiveRetention
+  archive_snapshot_name: ArchiveSnapshotName
   admin_token_last4: string
   status: string
   status_detail?: string
@@ -310,6 +326,15 @@ export interface Node {
   version?: string
   alive?: boolean
   last_seen_at?: string
+  // What the node last applied, and whether it is behind its cluster's
+  // profiles. Null for a node in no cluster.
+  settings?: NodeSettingsState | null
+}
+
+export interface NodeSettingsState {
+  applied_at: string | null
+  outdated: boolean
+  reasons: string[]
 }
 
 export interface JoinToken {
@@ -402,6 +427,29 @@ export interface Member {
 
 export interface MemberList {
   data: Member[]
+}
+
+// An account's own token for the Lewbox API (lbp_…). It acts as the
+// account, with the account's rights.
+export interface AccessToken {
+  id: string
+  user_id: string
+  name: string
+  prefix: string
+  last4: string
+  status: 'active' | 'expired' | 'revoked'
+  created_at: string
+  last_used_at?: string
+  expires_at?: string
+  revoked_at?: string
+}
+
+export interface NewAccessToken extends AccessToken {
+  token: string
+}
+
+export interface AccessTokenList {
+  data: AccessToken[]
 }
 
 export interface AdminKey {
@@ -769,6 +817,20 @@ export function removeMember(org: string, memberRef: string): Promise<Member> {
   return request<Member>(`/v0/members/${ref(memberRef)}`, { method: 'DELETE', org })
 }
 
+export function listAccessTokens(): Promise<AccessTokenList> {
+  return request<AccessTokenList>('/v0/access-tokens')
+}
+
+// A token that never expires is sent with an empty expires_in.
+export function createAccessToken(input: { name: string; expires_in: KeyLifetime }): Promise<NewAccessToken> {
+  const body = { ...input, expires_in: input.expires_in === 'never' ? '' : input.expires_in }
+  return request<NewAccessToken>('/v0/access-tokens', { method: 'POST', body })
+}
+
+export function revokeAccessToken(tokenRef: string): Promise<AccessToken> {
+  return request<AccessToken>(`/v0/access-tokens/${ref(tokenRef)}`, { method: 'DELETE' })
+}
+
 export function listAdminKeys(org: string): Promise<AdminKeyList> {
   return request<AdminKeyList>('/v0/admin-keys', { org })
 }
@@ -916,4 +978,172 @@ export function docsPage(book: DocsBook, path: string): Promise<DocsPage> {
     .map((segment) => encodeURIComponent(segment))
     .join('/')
   return request<DocsPage>(`${base}/${suffix}`)
+}
+
+// A saved Cloudflare token and the zone it reaches. The token is never returned.
+export interface DNSProfile {
+  id: string
+  name: string
+  provider: string
+  zone: string
+  zone_id: string
+  token_last4: string
+  acme_email: string
+  version: number
+  clusters: number
+  tested_at: string | null
+  test_error: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DNSProfileInput {
+  name?: string
+  zone?: string
+  // Omitted on an update to keep the current token.
+  api_token?: string
+  acme_email?: string
+}
+
+export function listDNSProfiles(): Promise<{ data: DNSProfile[] }> {
+  return request<{ data: DNSProfile[] }>('/v0/dns-profiles')
+}
+
+export function createDNSProfile(input: DNSProfileInput & { name: string; zone: string; api_token: string }): Promise<DNSProfile> {
+  return request<DNSProfile>('/v0/dns-profiles', { method: 'POST', body: { provider: 'cloudflare', ...input } })
+}
+
+export function updateDNSProfile(profileRef: string, input: DNSProfileInput): Promise<DNSProfile> {
+  return request<DNSProfile>(`/v0/dns-profiles/${ref(profileRef)}`, { method: 'PATCH', body: input })
+}
+
+export function deleteDNSProfile(profileRef: string): Promise<DNSProfile> {
+  return request<DNSProfile>(`/v0/dns-profiles/${ref(profileRef)}`, { method: 'DELETE' })
+}
+
+export function testDNSProfile(profileRef: string): Promise<DNSProfile> {
+  return request<DNSProfile>(`/v0/dns-profiles/${ref(profileRef)}/test`, { method: 'POST' })
+}
+
+// A bucket for snapshots and archives. The secret is never returned.
+export interface StorageProfile {
+  id: string
+  name: string
+  provider: string
+  endpoint: string
+  region: string
+  bucket: string
+  prefix: string
+  path_style: boolean
+  access_key_id: string
+  secret_last4: string
+  version: number
+  clusters: number
+  tested_at: string | null
+  test_error: string
+  created_at: string
+  updated_at: string
+}
+
+export interface StorageProfileInput {
+  name?: string
+  endpoint?: string
+  region?: string
+  bucket?: string
+  prefix?: string
+  path_style?: boolean
+  access_key_id?: string
+  // Omitted on an update to keep the current secret.
+  secret_access_key?: string
+}
+
+export function listStorageProfiles(): Promise<{ data: StorageProfile[] }> {
+  return request<{ data: StorageProfile[] }>('/v0/storage-profiles')
+}
+
+export function createStorageProfile(
+  input: StorageProfileInput & { name: string; bucket: string; access_key_id: string; secret_access_key: string },
+): Promise<StorageProfile> {
+  return request<StorageProfile>('/v0/storage-profiles', { method: 'POST', body: { provider: 's3', ...input } })
+}
+
+export function updateStorageProfile(profileRef: string, input: StorageProfileInput): Promise<StorageProfile> {
+  return request<StorageProfile>(`/v0/storage-profiles/${ref(profileRef)}`, { method: 'PATCH', body: input })
+}
+
+export function deleteStorageProfile(profileRef: string): Promise<StorageProfile> {
+  return request<StorageProfile>(`/v0/storage-profiles/${ref(profileRef)}`, { method: 'DELETE' })
+}
+
+export function testStorageProfile(profileRef: string): Promise<StorageProfile> {
+  return request<StorageProfile>(`/v0/storage-profiles/${ref(profileRef)}/test`, { method: 'POST' })
+}
+
+// The step a profile test failed at, from an error body's details, if any.
+export function failedStep(failure: unknown): string {
+  if (!(failure instanceof ApiError)) return ''
+  const details = failure.details as { step?: unknown } | undefined
+  return typeof details?.step === 'string' ? details.step : ''
+}
+
+// Only the fields that are set change. dns_profile and storage_profile take
+// 'none' to clear; dns_records is 'auto' or 'off'.
+export interface ClusterUpdate {
+  domain?: string
+  dns_profile?: string
+  dns_records?: 'auto' | 'off'
+  storage_profile?: string
+  stop_policy?: 'keep' | 'archive'
+  archive_local_retention?: ArchiveRetention
+  archive_snapshot_name?: ArchiveSnapshotName
+}
+
+export function updateCluster(clusterRef: string, input: ClusterUpdate): Promise<Cluster> {
+  return request<Cluster>(`/v0/clusters/${ref(clusterRef)}`, { method: 'PATCH', body: input })
+}
+
+// A stopped sandbox kept in a region's bucket.
+export interface Archive {
+  id: string
+  // Only for instance admins listing every workspace's archives.
+  org?: string
+  region: string
+  sandbox_id: string
+  sandbox_name: string
+  image: string
+  runtime: string
+  cpu: number
+  memory_mb: number
+  disk_gb: number
+  tags: Record<string, string>
+  snapshot_name: string
+  registry_ref: string
+  status: string
+  error: string
+  created_at: string
+  archived_at: string | null
+  last_restored_sandbox_id: string
+  last_restored_at: string | null
+}
+
+export interface RestoredArchive {
+  archive: Archive
+  sandbox: { id: string; name: string; status: string; region: string }
+}
+
+// An empty org is every workspace's, for an instance admin.
+export function listArchives(org: string): Promise<{ data: Archive[] }> {
+  return request<{ data: Archive[] }>('/v0/archives', { org: org || undefined })
+}
+
+export function getArchive(org: string, id: string): Promise<Archive> {
+  return request<Archive>(`/v0/archives/${ref(id)}`, { org: org || undefined })
+}
+
+export function restoreArchive(org: string, id: string): Promise<RestoredArchive> {
+  return request<RestoredArchive>(`/v0/archives/${ref(id)}/restore`, { method: 'POST', org })
+}
+
+export function deleteArchive(org: string, id: string): Promise<Archive> {
+  return request<Archive>(`/v0/archives/${ref(id)}`, { method: 'DELETE', org: org || undefined })
 }

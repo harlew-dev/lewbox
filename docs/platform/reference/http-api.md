@@ -21,7 +21,7 @@ TOKEN=$(curl -fsS -X POST https://lewbox.example.com/v0/auth/login \
 curl -fsS -H "Authorization: Bearer $TOKEN" https://lewbox.example.com/v0/clusters
 ```
 
-Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
+Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An [access token](../accounts/access-tokens.md) (`lbp_…`, see [below](#access-tokens)) works the same way and acts as its account; use one for scripts and CI. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
 
 Browsers use `POST /v0/auth/session` instead. It takes the same body and sets an `HttpOnly` session cookie, so the token never reaches JavaScript:
 
@@ -69,8 +69,8 @@ API responses carry `Cache-Control: no-store`.
 | `POST /v0/auth/login` | anyone | `{email, password}` → `{token, expires_at, user}` |
 | `POST /v0/auth/session` | anyone | Same body, sets the browser session cookie → `{expires_at, user}`. The token is only in the cookie |
 | `POST /v0/auth/signup` | anyone | `{email, password, setup_token}` → the same body and cookie as `POST /v0/auth/session`. It creates only the account, with no workspace. A valid, unused `setup_token` allows sign-up in any mode and claims the link; without one, `403` when sign-up is closed. An invalid or used token is `400`; a taken email is `409` |
-| `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}` |
-| `GET /v0/me` | signed in | `{user, organizations, via}` for an account; `{organization, admin_key, via}` for an API key |
+| `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}`. `400` for an access token or API key, which have no session |
+| `GET /v0/me` | signed in | `{user, organizations, via}` for an account, plus `access_token` when `via` is `access_token`; `{organization, admin_key, via}` for an API key |
 | `GET /v0/setup/{token}` | anyone | The public setup page for an unused, unexpired link: `{instance_name, plan: {name}, region: {name}, expires_at}`. Never a slug or who claimed it. `404` (`this setup link is invalid or has expired`) for an unknown, used or expired link |
 
 ### Regions
@@ -110,15 +110,45 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `PATCH /v0/plans/{ref}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
 | `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while a subscription uses it or it is the default plan |
 
+### DNS profiles
+
+Instance admins only. A DNS profile is a saved Cloudflare token, kept sealed and shown only by its last four characters. Creating one, or changing its zone or token, tests it first and saves nothing when the test fails. See [DNS profiles](../clusters/dns-profiles.md).
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/dns-profiles` | admin | `{data: [DNSProfile]}`, ordered by name |
+| `POST /v0/dns-profiles` | admin | `{name, provider, zone, api_token, acme_email}` → `201` DNSProfile. A failed test → `412`, with `details.step` set to `zone` or `write` |
+| `GET /v0/dns-profiles/{ref}` | admin | DNSProfile, by ID or name |
+| `PATCH /v0/dns-profiles/{ref}` | admin | Any of `name`, `zone`, `api_token` and `acme_email`. A new zone or token is tested before it is saved and bumps `version` |
+| `DELETE /v0/dns-profiles/{ref}` | admin | → the DNSProfile. `409` while a cluster uses it |
+| `POST /v0/dns-profiles/{ref}/test` | admin | Test now → DNSProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/dns-profiles/{ref}/credentials` | admin | `{name, provider, zone, zone_id, api_token, acme_email, version}`. The only response with the token |
+
+### Storage profiles
+
+Instance admins only. A storage profile is a saved S3-compatible bucket and access key, kept sealed and shown only by its last four characters. Creating one, or changing anything but its name, tests it first and saves nothing when the test fails. See [Storage profiles](../clusters/storage-profiles.md).
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/storage-profiles` | admin | `{data: [StorageProfile]}`, ordered by name |
+| `POST /v0/storage-profiles` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key}` → `201` StorageProfile. A failed test → `412`, with `details.step` set to `write`, `read`, `list` or `delete` |
+| `GET /v0/storage-profiles/{ref}` | admin | StorageProfile, by ID or name |
+| `PATCH /v0/storage-profiles/{ref}` | admin | Any of `name`, `endpoint`, `region`, `bucket`, `prefix`, `path_style`, `access_key_id` and `secret_access_key`. A change other than the name is tested before it is saved and bumps `version` |
+| `DELETE /v0/storage-profiles/{ref}` | admin | → the StorageProfile. `409` while a cluster uses it |
+| `POST /v0/storage-profiles/{ref}/test` | admin | Test now → StorageProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/storage-profiles/{ref}/credentials` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key, version}`. The only response with the secret |
+
 ### Clusters
 
 | Route | Who | |
 |---|---|---|
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
-| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, admin_token}` → `201` ClusterDetail. A failed required check → `412` with the checks in `details` |
+| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, admin_token}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `stop_policy` is `keep` or `archive`; `archive_local_retention` is `instant` (default), `1h`, `1d`, `7d` or `never`; `archive_snapshot_name` is `id` (default) or `name`. A failed required check → `412` with the checks in `details`; `archive` without a storage profile or on Firecracker, or a bad policy, retention or name style, → `400` |
+| `PATCH /v0/clusters/{ref}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. An empty body, a domain outside the profile's zone, a bad record mode, policy, retention or name style, `archive` without a profile, or clearing the profile while `archive` is set → `400`. → ClusterDetail |
 | `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
+| `GET /v0/clusters/{ref}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, stop_policy, archive_local_retention, storage, dns}`. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
 | `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
 | `GET /v0/clusters/{ref}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
 | `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
@@ -133,6 +163,17 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `GET /v0/nodes/{ref}` | admin | Node |
 | `DELETE /v0/nodes/{ref}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
+| `PUT /v0/nodes/{ref}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention}`: the versions a node applied, a name or `null` for each profile, and the `archive_local_retention` it applied with its storage (`null` counts as `instant`). A version below 1 with a profile → `400`; a node in no cluster → `412`. → the Node |
+
+### Access tokens
+
+An account's tokens for the API. `?user=` (an ID or email) names another account: instance admins only, and required in local mode. Without it, the routes act on the caller's own account.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/access-tokens` | signed in (not an API key) | `{data: [AccessToken]}`, newest first, revoked ones included |
+| `POST /v0/access-tokens` | signed in, not with a token | `{name, expires_in, user}` → `201` AccessToken plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `user` is optional, as `?user=`. A token can't create another (`403`); a disabled account gets `409` |
+| `DELETE /v0/access-tokens/{ref}` | signed in (not an API key) | Revoke by ID or live name → the AccessToken. A token may revoke itself |
 
 ### Accounts
 
@@ -142,7 +183,7 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `POST /v0/users` | admin | `{email, password, instance_admin}` → `201` User |
 | `GET /v0/users/{ref}` | admin, or themselves | User |
 | `DELETE /v0/users/{ref}` | admin | → the User |
-| `POST /v0/users/{ref}/disable` | admin | Ends their sessions → User |
+| `POST /v0/users/{ref}/disable` | admin | Ends their sessions and revokes their access tokens → User |
 | `POST /v0/users/{ref}/enable` | admin | → User |
 | `PUT /v0/users/{ref}/password` | admin, or themselves | `{password}` → User |
 
@@ -180,7 +221,11 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 | `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
 | `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. Lists the workspace's snapshots on every node of each subscribed region; `partial_nodes` names nodes that did not answer. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
-| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot |
+| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot. An `archive-…` name is `400`: delete it through the archive routes |
+| `GET /v0/archives?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Archive]}`, newest first. Only `pending`, `pushing`, `archived` and `failed` rows; `cancelled` and `deleted` are gone. Without `org`, an instance admin gets every workspace's, with `org` set on each |
+| `GET /v0/archives/{id}` | its members, admins, its keys | Archive. Another workspace's is `404`, like a missing one; a non-UUID ID is `400` |
+| `POST /v0/archives/{id}/restore` | owner, admin or member, admins, its keys | Create a new sandbox from the archive's registry ref, with its name, tags and size, and the tag `lewbox.restored_from=<old sandbox id>` → `{archive, sandbox}`. The archive is kept. `412` if the workspace is suspended, has no subscription in that region, or the archive is not `archived` |
+| `DELETE /v0/archives/{id}` | same | Delete the snapshot and its keys in the bucket, then mark the row deleted → Archive, with `status: "deleted"` |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
 
@@ -223,6 +268,13 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "admin_url": "http://10.0.0.5:21212",
   "endpoint_url": "http://10.0.0.5:21212",
   "runtime": "docker",
+  "domain": "eu.api.example.com",
+  "dns_profile": "cf-prod",
+  "dns_records": "auto",
+  "storage_profile": "s3-main",
+  "stop_policy": "archive",
+  "archive_local_retention": "1d",
+  "archive_snapshot_name": "id",
   "admin_token_last4": "9f3a",
   "status": "ready",
   "version": "v0.7.0",
@@ -232,7 +284,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned.
+`status` is `ready`, `degraded` or `unreachable`; `status_detail` explains anything but `ready`. The admin token itself is never returned. `domain` is `""` when the cluster has none, `dns_profile` and `storage_profile` are the profiles' **names** or `null`, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`, `archive_local_retention` is how long nodes keep local copies of archived sandboxes (`instant`, `1h`, `1d`, `7d` or `never`), and `archive_snapshot_name` is `id` (`archive-<sandbox id>`) or `name` (`archive-<sandbox name>-<sandbox id>`). See [Storage profiles](../clusters/storage-profiles.md#local-copies-of-archives).
 
 **ClusterDetail** is a Cluster plus `checks` (a list of `{name, ok, fatal, detail}`) and `node_list` (a list of Nodes).
 
@@ -249,9 +301,16 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "version": "v0.7.0",
   "alive": true,
   "last_seen_at": "2026-11-11T15:22:51.1Z",
-  "created_at": "2026-11-11T15:22:51.1Z"
+  "created_at": "2026-11-11T15:22:51.1Z",
+  "settings": {
+    "applied_at": "2026-11-13T09:15:04.2Z",
+    "outdated": true,
+    "reasons": ["storage profile s3-main is at version 3; this node has version 2"]
+  }
 }
 ```
+
+`settings` is `null` for a node in no cluster. Otherwise `applied_at` is the last report (`null` when it never reported), `outdated` says its applied profile versions are behind its cluster's, and `reasons` (never `null`) lists why.
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 
@@ -274,11 +333,15 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 `status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is the workspace's single subscribed region, or `null` when it has none. `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
 
-**Region**: `{slug, name, endpoint_url, runtime, status}` for a cluster customers can use. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
+**Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a cluster customers can use. `stop_policy` is `keep` or `archive`. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 
 **Subscription**: `{region, plan, limits, overrides, created_at}`. `region` is a Region; `limits` are the effective limits (the plan's, with the override); `overrides` (`{sandboxes, vcpus, memory_mb}`) is only present for instance admins. A `null` limit is unlimited or, on an override, the plan's value.
 
 **Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, subscriptions, default, created_at}`. A `null` limit is unlimited; `subscriptions` is how many subscriptions use it.
+
+**DNSProfile**: `{id, name, provider, zone, zone_id, token_last4, acme_email, version, clusters, tested_at, test_error, created_at, updated_at}`. `provider` is `cloudflare`; `version` goes up when the zone or token changes, so nodes can tell they are out of date. The token itself is never in it.
+
+**StorageProfile**: `{id, name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_last4, version, clusters, tested_at, test_error, created_at, updated_at}`. `provider` is `s3` and an empty `endpoint` means AWS S3; `version` goes up when anything but the name changes, so nodes can tell they are out of date. The secret access key itself is never in it.
 
 **Settings**: `{instance_name, signup, default_plan, default_region}`. `signup` is `open`, `approval` or `closed`; `default_plan` and `default_region` are a plan and cluster slug, or `null`.
 
@@ -288,7 +351,9 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **Instance**: `{name, signup}`; public.
 
-**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. For an API key it is `{organization, admin_key, via}` instead.
+**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. `via` is `session`, or `access_token` with the token in `access_token`. For an API key it is `{organization, admin_key, via}` instead.
+
+**AccessToken**: `{id, user_id, name, prefix, last4, status, created_at, last_used_at, expires_at, revoked_at}`. `status` is `active`, `expired` or `revoked`. The token is only in the create response.
 
 **Member**: `{id, organization_id, user_id, email, role, created_at}`.
 
@@ -299,3 +364,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 **JoinToken**: `{cluster_id, cluster, runtime, version, role, token_role, token, ca_cert_hash, join_urls, expires_at, command}`. `token` is single-use and is shown only in this response.
 
 **Snapshot**: `{name, region, organization?, node?, source_sandbox_id, image, created_at, cpu, memory_mb, disk_gb, push_state}`. `organization` (`{slug, name}`) and `node` (the member that holds it) are only included for instance admins. `push_state` describes a push to an image registry. AerolVM reports no owner and no size, so a snapshot is attributed to its workspace's team and is not billed.
+
+**Archive**: `{id, org?, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `org` is the workspace slug, only on an instance admin's fleet list. `region` is the cluster slug; `status` is `pending`, `pushing`, `archived` or `failed` (a `GET` may show `cancelled` or `deleted`); `registry_ref` is empty until the push is active. `tags` is always an object. `archived_at` and `last_restored_at` are `null` when they do not apply.
+
+**RestoredArchive**: `{archive, sandbox}`. `sandbox` is `{id, name, status, region}`: a **new** sandbox, with the archive's name (plus a short suffix when that name is taken) and `region` (the cluster slug).

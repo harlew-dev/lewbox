@@ -2,6 +2,8 @@
 package aerolvmtest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,6 +26,9 @@ type Server struct {
 	// AdminToken is a token that is always accepted.
 	AdminToken string
 
+	// ClusterID names this cluster in snapshot registry refs.
+	ClusterID string
+
 	mu          sync.Mutex
 	version     string
 	members     []aerolvm.Member
@@ -43,6 +48,7 @@ type Server struct {
 	sandboxTeams map[string]string
 	sandboxNodes map[string]string
 	snapshots    map[string][]aerolvm.Snapshot
+	autoPush     bool
 	partial      bool
 	pageLimit    int
 	quotas       map[string]aerolvm.TeamQuota
@@ -63,6 +69,7 @@ func New(t testing.TB) *Server {
 		t:            t,
 		version:      "v0.7.0",
 		clusterOn:    true,
+		ClusterID:    "01a00000-0000-7000-8000-000000000001",
 		tokenByVal:   make(map[string]aerolvm.Token),
 		failures:     make(map[string]*failure),
 		sandboxTeams: make(map[string]string),
@@ -176,6 +183,57 @@ func (s *Server) Snapshots(team string) []aerolvm.Snapshot {
 	return append([]aerolvm.Snapshot(nil), s.snapshots[team]...)
 }
 
+// SetSandboxStatus changes a sandbox's status, such as started after a stop.
+func (s *Server) SetSandboxStatus(id, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.sandboxes {
+		if s.sandboxes[i].ID == id {
+			// AerolVM bumps updated_at on every start and stop.
+			s.sandboxes[i].Status = status
+			s.sandboxes[i].UpdatedAt = time.Now().UTC()
+			return
+		}
+	}
+}
+
+// Sandbox returns a copy of one sandbox.
+func (s *Server) Sandbox(id string) (aerolvm.Sandbox, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sandbox := range s.sandboxes {
+		if sandbox.ID == id {
+			return sandbox, true
+		}
+	}
+	return aerolvm.Sandbox{}, false
+}
+
+// SetSnapshotPush changes a snapshot's push state. For an active push it
+// records the registry ref, as a real cluster does.
+func (s *Server) SetSnapshotPush(team, name, state, registryRef string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.snapshots[team] {
+		if s.snapshots[team][i].Name != name {
+			continue
+		}
+		s.snapshots[team][i].PushState = state
+		if state == "active" {
+			s.snapshots[team][i].ImageRegistryRef = registryRef
+		}
+		return
+	}
+}
+
+// AutoPush makes new snapshots active at once, with a registry ref, instead
+// of waiting for a test to advance the push.
+func (s *Server) AutoPush(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoPush = on
+}
+
 // AcceptToken makes a token minted on another fake node valid here, the way
 // AerolVM replicates tokens across a cluster.
 func (s *Server) AcceptToken(token aerolvm.Token) {
@@ -273,9 +331,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/cluster/nodes/{id}/drain", s.handleDrainNode)
 	mux.HandleFunc("DELETE /v1/cluster/nodes/{id}", s.handleDeleteNode)
 	mux.HandleFunc("GET /v1/sandboxes", s.handleListSandboxes)
+	mux.HandleFunc("POST /v1/sandboxes", s.handleCreateSandbox)
+	mux.HandleFunc("GET /v1/sandboxes/{id}", s.handleGetSandbox)
 	mux.HandleFunc("POST /v1/sandboxes/{id}/stop", s.handleStopSandbox)
+	mux.HandleFunc("POST /v1/sandboxes/{id}/snapshot", s.handleCreateSnapshot)
 	mux.HandleFunc("DELETE /v1/sandboxes/{id}", s.handleDeleteSandbox)
 	mux.HandleFunc("GET /v1/snapshots", s.handleListSnapshots)
+	mux.HandleFunc("GET /v1/snapshots/{name}", s.handleGetSnapshot)
 	mux.HandleFunc("DELETE /v1/snapshots/{name}", s.handleDeleteSnapshot)
 	mux.HandleFunc("GET /v1/cluster/sandbox-index", s.handleSandboxIndex)
 	mux.HandleFunc("GET /v1/teams/{team}/quota", s.handleGetTeamQuota)
@@ -594,6 +656,195 @@ func (s *Server) handleSandboxIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	s.writeJSON(w, http.StatusOK, map[string]any{"placements": page, "next_page_token": next})
+}
+
+func (s *Server) handleCreateSandbox(w http.ResponseWriter, r *http.Request) {
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req aerolvm.CreateSandboxRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Image) == "" {
+		s.writeError(w, http.StatusBadRequest, "image is required")
+		return
+	}
+	owner := team
+	if owner == "*" {
+		owner = ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if req.Name != "" {
+		for _, existing := range s.sandboxes {
+			if s.sandboxTeams[existing.ID] == owner && existing.Name == req.Name {
+				s.writeError(w, http.StatusConflict, "a sandbox with this name already exists")
+				return
+			}
+		}
+	}
+	// Snapshot refs stay with the team that took the snapshot, as on a real
+	// cluster (docs/design/snapshot-archive.md, finding 9).
+	for other, snapshots := range s.snapshots {
+		if other == owner {
+			continue
+		}
+		for _, snapshot := range snapshots {
+			if snapshot.ImageRegistryRef != "" && snapshot.ImageRegistryRef == req.Image {
+				s.writeError(w, http.StatusBadRequest, fmt.Sprintf("sandbox not found: image %q", req.Image))
+				return
+			}
+		}
+	}
+	s.nextID++
+	sandbox := aerolvm.Sandbox{
+		ID:        fmt.Sprintf("sb-%d", s.nextID),
+		Name:      req.Name,
+		Image:     req.Image,
+		Status:    "started",
+		Runtime:   req.Runtime,
+		CPU:       req.CPU,
+		MemoryMB:  req.MemoryMB,
+		DiskGB:    req.DiskGB,
+		Tags:      req.Tags,
+		CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}
+	s.addSandboxLocked(owner, "", sandbox)
+	s.writeJSON(w, http.StatusCreated, sandbox)
+}
+
+func (s *Server) handleGetSandbox(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sandbox := range s.sandboxes {
+		if sandbox.ID != id {
+			continue
+		}
+		if team != "*" && s.sandboxTeams[id] != team {
+			break
+		}
+		s.writeJSON(w, http.StatusOK, sandbox)
+		return
+	}
+	s.writeError(w, http.StatusNotFound, "sandbox not found")
+}
+
+// snapshotImage names the local image a snapshot stores, one per sandbox and
+// name as on a real node.
+func snapshotImage(sandboxID, name string) string {
+	sum := sha256.Sum256([]byte(sandboxID + "\x00" + name))
+	return "aerolvm-snapshot/" + hex.EncodeToString(sum[:8]) + ":latest"
+}
+
+func (s *Server) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		s.writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var sandbox aerolvm.Sandbox
+	found := false
+	for _, candidate := range s.sandboxes {
+		if candidate.ID != id || (team != "*" && s.sandboxTeams[id] != team) {
+			continue
+		}
+		sandbox = candidate
+		found = true
+		break
+	}
+	if !found {
+		s.writeError(w, http.StatusNotFound, "sandbox not found")
+		return
+	}
+	if sandbox.Status != "stopped" && sandbox.Status != "started" {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("sandbox in status %s cannot be snapshotted", sandbox.Status))
+		return
+	}
+	owner := team
+	if owner == "*" {
+		owner = s.sandboxTeams[id]
+	}
+	for _, snapshot := range s.snapshots[owner] {
+		if snapshot.Name == req.Name {
+			s.writeError(w, http.StatusConflict, "a snapshot with this name already exists")
+			return
+		}
+	}
+	snapshot := aerolvm.Snapshot{
+		Name:            req.Name,
+		Image:           snapshotImage(id, req.Name),
+		SourceSandboxID: id,
+		CreatedAt:       time.Now().UTC(),
+		CPU:             sandbox.CPU,
+		MemoryMB:        sandbox.MemoryMB,
+		DiskGB:          sandbox.DiskGB,
+		PushState:       "pending",
+	}
+	if s.autoPush {
+		snapshot.PushState = "active"
+		snapshot.ImageRegistryRef = "127.0.0.1:5000/cluster/" + s.ClusterID + "/snapshots/tenant-" + tenantHash(owner) + "/" + req.Name + ":latest"
+	}
+	s.snapshots[owner] = append(s.snapshots[owner], snapshot)
+	s.writeJSON(w, http.StatusCreated, snapshot)
+}
+
+// tenantHash is the path segment a team's snapshots live under.
+func tenantHash(team string) string {
+	sum := sha256.Sum256([]byte(team))
+	return hex.EncodeToString(sum[:8])
+}
+
+func (s *Server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	team, ok := s.requestTeam(r)
+	if !ok {
+		s.writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if team == "*" {
+		for _, snapshots := range s.snapshots {
+			for _, snapshot := range snapshots {
+				if snapshot.Name == name {
+					s.writeJSON(w, http.StatusOK, snapshot)
+					return
+				}
+			}
+		}
+	} else {
+		for _, snapshot := range s.snapshots[team] {
+			if snapshot.Name == name {
+				s.writeJSON(w, http.StatusOK, snapshot)
+				return
+			}
+		}
+	}
+	s.writeError(w, http.StatusNotFound, "snapshot not found")
 }
 
 func (s *Server) handleStopSandbox(w http.ResponseWriter, r *http.Request) {

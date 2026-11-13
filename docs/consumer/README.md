@@ -24,6 +24,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: create
 | [AerolVM SDK](sandboxes/aerolvm-sdk.md) | Create, use and destroy sandboxes from TypeScript or Python |
 | [E2B SDK](sandboxes/e2b.md) | Use the E2B SDK against the compatible endpoint |
 | [Sandboxes and snapshots](sandboxes/sandboxes-and-snapshots.md) | See, stop and delete sandboxes, and manage snapshots |
+| [Archived sandboxes](sandboxes/archived-sandboxes.md) | Restore a sandbox that stopped on an archive region |
 
 ## Usage
 

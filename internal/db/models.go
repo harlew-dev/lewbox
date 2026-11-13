@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+type AccessToken struct {
+	ID         string
+	UserID     string
+	Name       string
+	Prefix     string
+	TokenHash  string
+	Last4      string
+	CreatedAt  time.Time
+	LastUsedAt sql.NullTime
+	ExpiresAt  sql.NullTime
+	RevokedAt  sql.NullTime
+}
+
 type AdminKey struct {
 	ID         string
 	OrgID      string
@@ -23,24 +36,57 @@ type AdminKey struct {
 	RevokedAt  sql.NullTime
 }
 
+type Archive struct {
+	ID                    string
+	OrgID                 string
+	ClusterID             string
+	SandboxID             string
+	SandboxName           string
+	Image                 string
+	Runtime               string
+	Cpu                   float64
+	MemoryMb              int64
+	DiskGb                int64
+	Tags                  string
+	SnapshotName          string
+	RegistryRef           string
+	Status                string
+	Error                 string
+	Attempts              int64
+	NextAttemptAt         sql.NullTime
+	PushingSince          sql.NullTime
+	CreatedAt             time.Time
+	ArchivedAt            sql.NullTime
+	DeletedAt             sql.NullTime
+	LastRestoredSandboxID string
+	LastRestoredAt        sql.NullTime
+}
+
 type Cluster struct {
-	ID              string
-	Slug            string
-	Name            string
-	AdminURL        string
-	EndpointURL     string
-	Runtime         string
-	AdminTokenEnc   []byte
-	AdminTokenID    string
-	AdminTokenLast4 string
-	Status          string
-	StatusDetail    string
-	Version         string
-	Checks          string
-	CheckedAt       sql.NullTime
-	CreatedAt       time.Time
-	SyncedAt        sql.NullTime
-	SyncError       string
+	ID                    string
+	Slug                  string
+	Name                  string
+	AdminURL              string
+	EndpointURL           string
+	Runtime               string
+	AdminTokenEnc         []byte
+	AdminTokenID          string
+	AdminTokenLast4       string
+	Status                string
+	StatusDetail          string
+	Version               string
+	Checks                string
+	CheckedAt             sql.NullTime
+	CreatedAt             time.Time
+	SyncedAt              sql.NullTime
+	SyncError             string
+	Domain                string
+	DnsProfileID          sql.NullString
+	DnsRecords            string
+	StorageProfileID      sql.NullString
+	StopPolicy            string
+	ArchiveLocalRetention string
+	ArchiveSnapshotName   string
 }
 
 type ClusterSample struct {
@@ -48,6 +94,35 @@ type ClusterSample struct {
 	At        time.Time
 	Status    string
 	LatencyMs int64
+}
+
+type DnsProfile struct {
+	ID          string
+	Name        string
+	Provider    string
+	Zone        string
+	ZoneID      string
+	ApiTokenEnc []byte
+	TokenLast4  string
+	AcmeEmail   string
+	Version     int64
+	TestedAt    sql.NullTime
+	TestError   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type DnsRecord struct {
+	ID        string
+	ClusterID string
+	ProfileID string
+	ZoneID    string
+	Node      string
+	Name      string
+	Type      string
+	Content   string
+	RecordID  string
+	CreatedAt time.Time
 }
 
 type Membership struct {
@@ -59,15 +134,21 @@ type Membership struct {
 }
 
 type Node struct {
-	ID         string
-	Name       string
-	URL        string
-	CreatedAt  time.Time
-	ClusterID  sql.NullString
-	Role       string
-	Version    string
-	Alive      sql.NullInt64
-	LastSeenAt sql.NullTime
+	ID                       string
+	Name                     string
+	URL                      string
+	CreatedAt                time.Time
+	ClusterID                sql.NullString
+	Role                     string
+	Version                  string
+	Alive                    sql.NullInt64
+	LastSeenAt               sql.NullTime
+	SettingsAppliedAt        sql.NullTime
+	SettingsStorageProfileID sql.NullString
+	SettingsStorageVersion   sql.NullInt64
+	SettingsDnsProfileID     sql.NullString
+	SettingsDnsVersion       sql.NullInt64
+	SettingsArchiveRetention sql.NullString
 }
 
 type NodeSample struct {
@@ -172,6 +253,25 @@ type SetupLink struct {
 	ClaimedAt sql.NullTime
 	UsedAt    sql.NullTime
 	OrgID     sql.NullString
+}
+
+type StorageProfile struct {
+	ID           string
+	Name         string
+	Provider     string
+	Endpoint     string
+	Region       string
+	Bucket       string
+	Prefix       string
+	PathStyle    int64
+	AccessKeyID  string
+	SecretKeyEnc []byte
+	SecretLast4  string
+	Version      int64
+	TestedAt     sql.NullTime
+	TestError    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type Subscription struct {

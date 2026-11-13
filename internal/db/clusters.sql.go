@@ -46,27 +46,36 @@ func (q *Queries) CountNodesByCluster(ctx context.Context) ([]CountNodesByCluste
 const createCluster = `-- name: CreateCluster :one
 INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc,
                       admin_token_id, admin_token_last4, status, status_detail, version,
+                      domain, dns_profile_id, dns_records, storage_profile_id, stop_policy,
+                      archive_local_retention, archive_snapshot_name,
                       checks, checked_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name
 `
 
 type CreateClusterParams struct {
-	ID              string
-	Slug            string
-	Name            string
-	AdminURL        string
-	EndpointURL     string
-	Runtime         string
-	AdminTokenEnc   []byte
-	AdminTokenID    string
-	AdminTokenLast4 string
-	Status          string
-	StatusDetail    string
-	Version         string
-	Checks          string
-	CheckedAt       sql.NullTime
-	CreatedAt       time.Time
+	ID                    string
+	Slug                  string
+	Name                  string
+	AdminURL              string
+	EndpointURL           string
+	Runtime               string
+	AdminTokenEnc         []byte
+	AdminTokenID          string
+	AdminTokenLast4       string
+	Status                string
+	StatusDetail          string
+	Version               string
+	Domain                string
+	DnsProfileID          sql.NullString
+	DnsRecords            string
+	StorageProfileID      sql.NullString
+	StopPolicy            string
+	ArchiveLocalRetention string
+	ArchiveSnapshotName   string
+	Checks                string
+	CheckedAt             sql.NullTime
+	CreatedAt             time.Time
 }
 
 func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error) {
@@ -83,6 +92,13 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		arg.Status,
 		arg.StatusDetail,
 		arg.Version,
+		arg.Domain,
+		arg.DnsProfileID,
+		arg.DnsRecords,
+		arg.StorageProfileID,
+		arg.StopPolicy,
+		arg.ArchiveLocalRetention,
+		arg.ArchiveSnapshotName,
 		arg.Checks,
 		arg.CheckedAt,
 		arg.CreatedAt,
@@ -106,6 +122,13 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
+		&i.StorageProfileID,
+		&i.StopPolicy,
+		&i.ArchiveLocalRetention,
+		&i.ArchiveSnapshotName,
 	)
 	return i, err
 }
@@ -123,7 +146,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id string) (int64, error) {
 }
 
 const getClusterByID = `-- name: GetClusterByID :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE id = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters WHERE id = ?
 `
 
 func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error) {
@@ -147,12 +170,19 @@ func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
+		&i.StorageProfileID,
+		&i.StopPolicy,
+		&i.ArchiveLocalRetention,
+		&i.ArchiveSnapshotName,
 	)
 	return i, err
 }
 
 const getClusterBySlug = `-- name: GetClusterBySlug :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE slug = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters WHERE slug = ?
 `
 
 func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, error) {
@@ -176,12 +206,19 @@ func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, e
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
+		&i.StorageProfileID,
+		&i.StopPolicy,
+		&i.ArchiveLocalRetention,
+		&i.ArchiveSnapshotName,
 	)
 	return i, err
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters ORDER BY slug
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters ORDER BY slug
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -211,6 +248,13 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.CreatedAt,
 			&i.SyncedAt,
 			&i.SyncError,
+			&i.Domain,
+			&i.DnsProfileID,
+			&i.DnsRecords,
+			&i.StorageProfileID,
+			&i.StopPolicy,
+			&i.ArchiveLocalRetention,
+			&i.ArchiveSnapshotName,
 		); err != nil {
 			return nil, err
 		}
@@ -278,4 +322,64 @@ func (q *Queries) UpdateClusterCheck(ctx context.Context, arg UpdateClusterCheck
 		arg.ID,
 	)
 	return err
+}
+
+const updateClusterSettings = `-- name: UpdateClusterSettings :one
+UPDATE clusters
+SET domain = ?, dns_profile_id = ?, dns_records = ?, storage_profile_id = ?, stop_policy = ?,
+    archive_local_retention = ?, archive_snapshot_name = ?
+WHERE id = ?
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name
+`
+
+type UpdateClusterSettingsParams struct {
+	Domain                string
+	DnsProfileID          sql.NullString
+	DnsRecords            string
+	StorageProfileID      sql.NullString
+	StopPolicy            string
+	ArchiveLocalRetention string
+	ArchiveSnapshotName   string
+	ID                    string
+}
+
+func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSettingsParams) (Cluster, error) {
+	row := q.db.QueryRowContext(ctx, updateClusterSettings,
+		arg.Domain,
+		arg.DnsProfileID,
+		arg.DnsRecords,
+		arg.StorageProfileID,
+		arg.StopPolicy,
+		arg.ArchiveLocalRetention,
+		arg.ArchiveSnapshotName,
+		arg.ID,
+	)
+	var i Cluster
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.AdminURL,
+		&i.EndpointURL,
+		&i.Runtime,
+		&i.AdminTokenEnc,
+		&i.AdminTokenID,
+		&i.AdminTokenLast4,
+		&i.Status,
+		&i.StatusDetail,
+		&i.Version,
+		&i.Checks,
+		&i.CheckedAt,
+		&i.CreatedAt,
+		&i.SyncedAt,
+		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
+		&i.StorageProfileID,
+		&i.StopPolicy,
+		&i.ArchiveLocalRetention,
+		&i.ArchiveSnapshotName,
+	)
+	return i, err
 }

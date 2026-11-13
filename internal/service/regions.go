@@ -17,6 +17,7 @@ type Region struct {
 	EndpointURL string   `json:"endpoint_url"`
 	Runtime     string   `json:"runtime"`
 	Status      string   `json:"status"`
+	StopPolicy  string   `json:"stop_policy"`
 	Plan        *PlanRef `json:"plan,omitempty"`
 	Limits      *Limits  `json:"limits,omitempty"`
 }
@@ -92,5 +93,6 @@ func toRegion(c db.Cluster) Region {
 		EndpointURL: c.EndpointURL,
 		Runtime:     c.Runtime,
 		Status:      c.Status,
+		StopPolicy:  c.StopPolicy,
 	}
 }

@@ -141,6 +141,9 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	if name == "" {
 		return Snapshot{}, invalid("a snapshot name is required")
 	}
+	if isArchiveSnapshot(name) {
+		return Snapshot{}, invalid("%s is an archived sandbox: delete it with the archive API", name)
+	}
 	var org *db.Organization
 	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
 		c, err := s.orgFor(ctx, req.Org, accessUse)
@@ -386,7 +389,9 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 				return
 			}
 			for _, snapshot := range snapshots {
-				if seen[snapshot.Name] {
+				// Archives are listed and deleted through the archive API,
+				// not as customer snapshots.
+				if seen[snapshot.Name] || isArchiveSnapshot(snapshot.Name) {
 					continue
 				}
 				seen[snapshot.Name] = true
@@ -408,11 +413,23 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 // snapshotToken returns a cached viewer token for a workspace's team, minting
 // one for an hour when the cache has no live entry.
 func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.Organization) (snapshotToken, error) {
+	return s.teamToken(ctx, cluster, org, "view", "viewer", s.snapshotTokens)
+}
+
+// archiveToken returns a cached runner token for a workspace's team, so the
+// archiver can read, snapshot and delete that workspace's sandboxes only.
+func (s *Service) archiveToken(ctx context.Context, cluster db.Cluster, org db.Organization) (snapshotToken, error) {
+	return s.teamToken(ctx, cluster, org, "arch", "runner", s.archiveTokens)
+}
+
+// teamToken returns a cached token for a workspace's team, minting one for an
+// hour when cache has no live entry.
+func (s *Service) teamToken(ctx context.Context, cluster db.Cluster, org db.Organization, kind, role string, cache map[snapshotKey]snapshotToken) (snapshotToken, error) {
 	team := org.Team.String
 	key := snapshotKey{cluster.ID, team}
 
 	s.snapshotMu.Lock()
-	if cached, ok := s.snapshotTokens[key]; ok && s.now().Before(cached.expires) {
+	if cached, ok := cache[key]; ok && s.now().Before(cached.expires) {
 		s.snapshotMu.Unlock()
 		return cached, nil
 	}
@@ -424,8 +441,8 @@ func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.
 	}
 	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
 	token, err := mintSandboxToken(mintCtx, client, aerolvm.CreateTokenRequest{
-		Name:      tempTokenName("view", org.ID, s.now()),
-		Role:      "viewer",
+		Name:      tempTokenName(kind, org.ID, s.now()),
+		Role:      role,
 		Team:      team,
 		ExpiresIn: "1h",
 	})
@@ -441,13 +458,19 @@ func (s *Service) snapshotToken(ctx context.Context, cluster db.Cluster, org db.
 	s.snapshotMu.Lock()
 	// A concurrent request may have stored one already; keep it and let this
 	// one expire unused.
-	if cached, ok := s.snapshotTokens[key]; ok && now.Before(cached.expires) {
+	if cached, ok := cache[key]; ok && now.Before(cached.expires) {
 		minted = cached
 	} else {
-		s.snapshotTokens[key] = minted
+		cache[key] = minted
 	}
 	s.snapshotMu.Unlock()
 	return minted, nil
+}
+
+// isArchiveSnapshot names the snapshots the archiver takes for stopped
+// sandboxes. They belong to the archive API, not to the customer's snapshots.
+func isArchiveSnapshot(name string) bool {
+	return strings.HasPrefix(name, "archive-")
 }
 
 // toSnapshot converts one node's snapshot. node is the member that holds it;

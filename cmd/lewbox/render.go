@@ -42,12 +42,24 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderRegions(w, data.Data)
 	case service.PlanList:
 		return renderPlans(w, data.Data)
+	case service.DNSProfileList:
+		return renderDNSProfiles(w, data.Data, now)
+	case service.DNSProfile:
+		return renderObject(w, data, now)
+	case service.StorageProfileList:
+		return renderStorageProfiles(w, data.Data, now)
+	case service.StorageProfile:
+		return renderObject(w, data, now)
 	case service.SubscriptionList:
 		return renderSubscriptions(w, data.Data)
 	case service.Subscription:
 		return renderSubscription(w, data)
 	case service.MemberList:
 		return renderMembers(w, data.Data, now)
+	case service.AccessTokenList:
+		return renderAccessTokens(w, data.Data, now)
+	case service.NewAccessToken:
+		return renderNewToken(w, data.AccessToken, data.Token, now)
 	case service.AdminKeyList:
 		return renderAdminKeys(w, data.Data, now)
 	case service.NewAdminKey:
@@ -62,6 +74,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderSandboxes(w, data.Data, now)
 	case service.SnapshotList:
 		return renderSnapshots(w, data, now)
+	case service.ArchiveList:
+		return renderArchives(w, data.Data, now)
+	case service.RestoredArchive:
+		return renderRestoredArchive(w, data)
 	case service.Usage:
 		return renderUsage(w, data)
 	case service.LimitsReport:
@@ -70,6 +86,8 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderClusterHealth(w, data)
 	case service.ClusterMetrics:
 		return renderClusterMetrics(w, data)
+	case service.NodeSettings:
+		return renderNodeSettings(w, data, now)
 	case service.Overview:
 		return renderOverview(w, data)
 	case contextList:
@@ -185,6 +203,57 @@ func renderPlans(w io.Writer, plans []service.Plan) error {
 	return tw.Flush()
 }
 
+// renderDNSProfiles prints a DNS profile table. The token column is only the
+// last four characters.
+func renderDNSProfiles(w io.Writer, profiles []service.DNSProfile, _ time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tZONE\tTOKEN\tCLUSTERS\tTESTED")
+	for _, p := range profiles {
+		fmt.Fprintf(tw, "%s\t%s\t…%s\t%d\t%s\n", p.Name, p.Zone, p.TokenLast4, p.Clusters, dnsTestText(p))
+	}
+	return tw.Flush()
+}
+
+// dnsTestText says how a profile's last test went.
+func dnsTestText(p service.DNSProfile) string {
+	switch {
+	case p.TestError != "":
+		return "failed: " + p.TestError
+	case p.TestedAt != nil:
+		return "ok"
+	default:
+		return "never"
+	}
+}
+
+// renderStorageProfiles prints a storage profile table. The key column is
+// only the secret's last four characters, and an empty endpoint means AWS.
+func renderStorageProfiles(w io.Writer, profiles []service.StorageProfile, _ time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tBUCKET\tENDPOINT\tPREFIX\tKEY\tCLUSTERS\tTESTED")
+	for _, p := range profiles {
+		endpoint := p.Endpoint
+		if endpoint == "" {
+			endpoint = "aws"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t…%s\t%d\t%s\n",
+			p.Name, p.Bucket, endpoint, dash(p.Prefix), p.SecretLast4, p.Clusters, storageTestText(p))
+	}
+	return tw.Flush()
+}
+
+// storageTestText says how a storage profile's last test went.
+func storageTestText(p service.StorageProfile) string {
+	switch {
+	case p.TestError != "":
+		return "failed: " + p.TestError
+	case p.TestedAt != nil:
+		return "ok"
+	default:
+		return "never"
+	}
+}
+
 // renderSubscriptions prints one organization's subscriptions by region.
 func renderSubscriptions(w io.Writer, subs []service.Subscription) error {
 	tw := newTable(w)
@@ -235,12 +304,31 @@ func renderAdminKeys(w io.Writer, keys []service.AdminKey, now time.Time) error 
 // renderNewAdminKey prints a new key with its token, which can't be shown
 // again.
 func renderNewAdminKey(w io.Writer, k service.NewAdminKey, now time.Time) error {
-	if err := renderObject(w, k.AdminKey, now); err != nil {
+	return renderNewToken(w, k.AdminKey, k.Token, now)
+}
+
+// renderNewToken prints a new admin key or access token and the token
+// itself, which can't be shown again.
+func renderNewToken(w io.Writer, record any, token string, now time.Time) error {
+	if err := renderObject(w, record, now); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\ntoken: %s\n", k.Token)
+	fmt.Fprintf(w, "\ntoken: %s\n", token)
 	fmt.Fprintln(w, "Save the token now: Lewbox keeps only its hash and cannot show it again.")
 	return nil
+}
+
+// renderAccessTokens prints an access token table; the token column is what
+// is left of the token to recognise it by.
+func renderAccessTokens(w io.Writer, tokens []service.AccessToken, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tTOKEN\tSTATUS\tCREATED\tLAST_USED\tEXPIRES")
+	for _, t := range tokens {
+		fmt.Fprintf(tw, "%s\t%s…%s\t%s\t%s\t%s\t%s\n",
+			t.Name, t.Prefix, t.Last4, t.Status, relativeTime(t.CreatedAt, now),
+			optionalTime(t.LastUsedAt, now, "never"), optionalTime(t.ExpiresAt, now, "never"))
+	}
+	return tw.Flush()
 }
 
 func optionalTime(t *time.Time, now time.Time, none string) string {
@@ -378,6 +466,64 @@ func renderSnapshots(w io.Writer, list service.SnapshotList, now time.Time) erro
 	return nil
 }
 
+// renderArchives prints an archived sandbox table. An instance admin listing
+// every workspace also gets the owner column.
+func renderArchives(w io.Writer, archives []service.Archive, now time.Time) error {
+	fleet := false
+	for _, a := range archives {
+		if a.Org != nil {
+			fleet = true
+			break
+		}
+	}
+	tw := newTable(w)
+	if fleet {
+		fmt.Fprint(tw, "WORKSPACE\t")
+	}
+	fmt.Fprintln(tw, "ID\tSANDBOX\tREGION\tSTATUS\tARCHIVED\tSIZE\tRESTORED")
+	for _, a := range archives {
+		if fleet {
+			workspace := "-"
+			if a.Org != nil {
+				workspace = *a.Org
+			}
+			fmt.Fprintf(tw, "%s\t", workspace)
+		}
+		archived := "-"
+		if a.ArchivedAt != nil {
+			archived = relativeTime(*a.ArchivedAt, now)
+		}
+		name := a.SandboxName
+		if name == "" {
+			name = a.SandboxID
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			shortID(a.ID), name, a.Region, a.Status, archived, archiveSize(a), dash(a.LastRestoredSandboxID))
+	}
+	return tw.Flush()
+}
+
+// renderRestoredArchive prints what the restore created and where it came from.
+func renderRestoredArchive(w io.Writer, r service.RestoredArchive) error {
+	fmt.Fprintf(w, "id: %s\n", r.Sandbox.ID)
+	fmt.Fprintf(w, "name: %s\n", dash(r.Sandbox.Name))
+	fmt.Fprintf(w, "restored from %s\n", r.Archive.SandboxID)
+	return nil
+}
+
+// archiveSize is the archived sandbox's original size: "1 vCPU · 1 GiB · 10 GB".
+func archiveSize(a service.Archive) string {
+	return fmt.Sprintf("%g vCPU · %g GiB · %d GB", a.CPU, float64(a.MemoryMB)/1024, a.DiskGB)
+}
+
+// shortID shows the first 8 characters of an ID, enough to tell rows apart.
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
 // renderUsage prints the totals and one row per bucket.
 func renderUsage(w io.Writer, u service.Usage) error {
 	fmt.Fprintf(w, "from: %s\n", u.From.UTC().Format(time.RFC3339))
@@ -454,6 +600,23 @@ func renderFirewall(w io.Writer, f firewallOutput) error {
 		fmt.Fprintf(w, "kept: %s\n", strings.Join(f.Kept, ", "))
 	}
 	return nil
+}
+
+// renderNodeSettings prints what a cluster's nodes must apply. The text form
+// masks the bucket secret and the DNS token; --json shows them.
+func renderNodeSettings(w io.Writer, s service.NodeSettings, now time.Time) error {
+	masked := s
+	if s.Storage != nil {
+		storage := *s.Storage
+		storage.SecretAccessKey = "******"
+		masked.Storage = &storage
+	}
+	if s.DNS != nil {
+		dns := *s.DNS
+		dns.APIToken = "******"
+		masked.DNS = &dns
+	}
+	return renderObject(w, masked, now)
 }
 
 // renderObject prints any JSON object as aligned key: value lines. Nested

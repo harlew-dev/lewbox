@@ -58,6 +58,20 @@ cmd_fetch() {
 	(cd "$dir" && for f in "${files[@]}"; do [[ $f == checksums.txt ]] && continue; grep -E "  $f\$" checksums.txt; done | sha256sum -c --quiet -) \
 		|| die "checksum mismatch in $dir; delete it and fetch again"
 	say "AerolVM $v ready in $dir"
+
+	# The node registry (CNCF Distribution) for clusters with a storage
+	# profile. `node configure` reads it from $LEWBOX_AEROLVM_FROM/registry.
+	local rv=3.1.2 ra rdir="$CACHE/registry"
+	ra="registry_${rv}_linux_${arch}.tar.gz"
+	mkdir -p "$rdir"
+	if [[ ! -s "$rdir/$ra" ]]; then
+		say "downloading the registry $rv"
+		curl -fsSL -o "$rdir/$ra.part" "https://github.com/distribution/distribution/releases/download/v$rv/$ra"
+		curl -fsSL -o "$rdir/$ra.sha256" "https://github.com/distribution/distribution/releases/download/v$rv/$ra.sha256"
+		echo "$(tr -d ' \n' <"$rdir/$ra.sha256")  $ra.part" | (cd "$rdir" && sha256sum -c --quiet -) \
+			|| die "registry checksum mismatch; delete $rdir and fetch again"
+		mv "$rdir/$ra.part" "$rdir/$ra"
+	fi
 }
 
 cmd_build() {

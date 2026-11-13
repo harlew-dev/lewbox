@@ -27,6 +27,17 @@ ON CONFLICT(name) DO UPDATE SET
     last_seen_at = excluded.last_seen_at
 RETURNING *;
 
+-- name: ReportNodeSettings :one
+UPDATE nodes
+SET settings_applied_at = ?,
+    settings_storage_profile_id = ?,
+    settings_storage_version = ?,
+    settings_dns_profile_id = ?,
+    settings_dns_version = ?,
+    settings_archive_retention = ?
+WHERE id = ?
+RETURNING *;
+
 -- name: DeleteNode :execrows
 DELETE FROM nodes WHERE id = ?;
 

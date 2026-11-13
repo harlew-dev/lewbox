@@ -142,6 +142,82 @@ func TestClientMethods(t *testing.T) {
 	}
 }
 
+func TestSandboxAndSnapshotMethods(t *testing.T) {
+	ctx := context.Background()
+	fake := newFake(t)
+	admin := aerolvm.New(fake.URL(), adminToken, aerolvm.WithRetry(0))
+
+	token, err := admin.CreateToken(ctx, aerolvm.CreateTokenRequest{Name: "runner", Role: "runner", Team: "team-a", ExpiresIn: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := aerolvm.New(fake.URL(), token.Token, aerolvm.WithRetry(0))
+
+	created, err := team.CreateSandbox(ctx, aerolvm.CreateSandboxRequest{
+		Image: "ubuntu:22.04", Name: "box", Tags: map[string]string{"a": "b"},
+		CPU: 1, MemoryMB: 512, DiskGB: 10, Runtime: "docker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(created.ID, "sb-") || created.Status != "started" || created.Name != "box" ||
+		created.Tags["a"] != "b" || created.CPU != 1 || created.MemoryMB != 512 || created.DiskGB != 10 || created.Runtime != "docker" {
+		t.Fatalf("CreateSandbox = %+v", created)
+	}
+	got, err := team.GetSandbox(ctx, created.ID)
+	if err != nil || got.ID != created.ID {
+		t.Fatalf("GetSandbox = %+v, %v", got, err)
+	}
+
+	snapshot, err := team.CreateSnapshot(ctx, created.ID, "archive-"+created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Name != "archive-"+created.ID || snapshot.PushState != "pending" ||
+		snapshot.SourceSandboxID != created.ID || !strings.HasPrefix(snapshot.Image, "aerolvm-snapshot/") {
+		t.Fatalf("CreateSnapshot = %+v", snapshot)
+	}
+	if _, err := team.CreateSnapshot(ctx, created.ID, snapshot.Name); err == nil {
+		t.Fatal("a second snapshot with the same name was accepted")
+	} else if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != http.StatusConflict {
+		t.Errorf("duplicate snapshot = %v", err)
+	}
+	fetched, err := team.GetSnapshot(ctx, snapshot.Name)
+	if err != nil || fetched.Name != snapshot.Name {
+		t.Fatalf("GetSnapshot = %+v, %v", fetched, err)
+	}
+
+	ref := "127.0.0.1:5000/cluster/c1/snapshots/tenant-x/" + snapshot.Name + ":latest"
+	fake.SetSnapshotPush("team-a", snapshot.Name, "active", ref)
+	other, err := admin.CreateToken(ctx, aerolvm.CreateTokenRequest{Name: "other", Role: "runner", Team: "team-b", ExpiresIn: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherClient := aerolvm.New(fake.URL(), other.Token, aerolvm.WithRetry(0))
+	if _, err := otherClient.GetSandbox(ctx, created.ID); err == nil {
+		t.Fatal("another team saw the sandbox")
+	}
+	fetched, err = team.GetSnapshot(ctx, snapshot.Name)
+	if err != nil || fetched.ImageRegistryRef != ref {
+		t.Fatalf("pushed snapshot = %+v, %v", fetched, err)
+	}
+	_, err = otherClient.CreateSandbox(ctx, aerolvm.CreateSandboxRequest{Image: ref})
+	if err == nil {
+		t.Fatal("another team restored from the snapshot ref")
+	} else if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Message, "sandbox not found") {
+		t.Errorf("another team's restore = %v", err)
+	}
+
+	_, err = team.GetSnapshot(ctx, "missing")
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != http.StatusNotFound {
+		t.Errorf("missing snapshot = %v", err)
+	}
+	_, err = team.GetSandbox(ctx, "missing")
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); !ok || apiErr.Status != http.StatusNotFound {
+		t.Errorf("missing sandbox = %v", err)
+	}
+}
+
 func TestNodeCertExpiry(t *testing.T) {
 	ctx := context.Background()
 	fake := newFake(t)

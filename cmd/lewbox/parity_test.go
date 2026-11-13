@@ -21,7 +21,9 @@ import (
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
 	"github.com/harlew-dev/lewbox/internal/db"
+	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
+	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
@@ -40,6 +42,13 @@ const adminPassword = "admin-password-1"
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvWith(t)
+}
+
+// newEnvWith is newEnv with extra service options, such as a test Cloudflare
+// API URL.
+func newEnvWith(t *testing.T, opts ...service.Option) *env {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "lewbox.db")
 	conn, err := db.Open(context.Background(), path)
 	if err != nil {
@@ -50,7 +59,8 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(httpapi.NewRouter(service.New(db.New(conn), service.WithKeyring(keyring)), slog.New(slog.DiscardHandler)))
+	opts = append([]service.Option{service.WithKeyring(keyring)}, opts...)
+	srv := httptest.NewServer(httpapi.NewRouter(service.New(db.New(conn), opts...), slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 	e := &env{t: t, dbPath: path, srv: srv}
 
@@ -309,6 +319,61 @@ func TestUsers(t *testing.T) {
 		t.Fatalf("user create: exit %d: %s", code, errOut)
 	}
 	e.same([]string{"user", "get", "second@example.com"}, "GET", "/v0/users/second@example.com", "", 200)
+}
+
+func TestClusterSet(t *testing.T) {
+	cf := cloudflaretest.New(t)
+	cf.AddZone("example.com")
+	e := newEnvWith(t, service.WithCloudflareURL(cf.URL))
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", cf.URL)
+	if _, errOut, code := e.cliIn(cf.Token+"\n", "dns-profile", "create", "cf-prod",
+		"--zone", "example.com", "--api-token-stdin"); code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_cluster_set_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		PublicHost: "203.0.113.10", Role: "mixed", Version: "v0.7.0",
+		Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+
+	out := e.same([]string{"cluster", "set", "eu-west", "--domain", "eu.example.com",
+		"--dns-profile", "cf-prod", "--dns-records", "off"},
+		"PATCH", "/v0/clusters/eu-west",
+		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"off"}`, 200)
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Domain != "eu.example.com" || detail.DNSProfile == nil ||
+		*detail.DNSProfile != "cf-prod" || detail.DNSRecords != "off" {
+		t.Errorf("cluster = %+v", detail.Cluster)
+	}
+
+	out = e.same([]string{"cluster", "set", "eu-west", "--domain", "", "--dns-profile", "none"},
+		"PATCH", "/v0/clusters/eu-west", `{"domain":"","dns_profile":"none"}`, 200)
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Domain != "" || detail.DNSProfile != nil {
+		t.Errorf("cleared cluster = %+v", detail.Cluster)
+	}
+
+	// A domain outside the profile's zone and a bad record mode are refused
+	// the same way by both entry points.
+	e.sameError([]string{"cluster", "set", "eu-west", "--domain", "eu.example.com", "--dns-profile", "cf-prod", "--dns-records", "sometimes"},
+		"PATCH", "/v0/clusters/eu-west",
+		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"sometimes"}`, 400)
+	if status, body := e.http("PATCH", "/v0/clusters/eu-west", `{}`); status != 400 || !strings.Contains(body, "nothing to change") {
+		t.Errorf("empty update: status %d body %s", status, body)
+	}
 }
 
 func TestClusters(t *testing.T) {
@@ -807,6 +872,165 @@ func TestSnapshots(t *testing.T) {
 	}
 }
 
+// TestArchives exercises listing, showing, restoring and deleting archived
+// sandboxes through the CLI and HTTP.
+func TestArchives(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_archive_parity"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}},
+	}})
+	if _, errOut, code := e.cliIn(token+"\n", "cluster", "add", "eu-west",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	out, errOut, code := e.cli("org", "create", "acme")
+	if code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	var org service.Organization
+	if err := json.Unmarshal([]byte(out), &org); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
+		t.Fatalf("subscription set: %s", errOut)
+	}
+
+	bucket := objstoretest.New(t)
+	bucket.AddBucket("assets")
+	profileOut, errOut, code := e.cliIn(bucket.SecretAccessKey+"\n", "storage-profile", "create", "archive",
+		"--endpoint", bucket.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--access-key-id", bucket.AccessKeyID, "--secret-access-key-stdin")
+	if code != 0 {
+		t.Fatalf("storage profile create: exit %d: %s", code, errOut)
+	}
+	var profile service.StorageProfile
+	if err := json.Unmarshal([]byte(profileOut), &profile); err != nil {
+		t.Fatal(err)
+	}
+	clusterOut, errOut, code := e.cli("cluster", "get", "eu-west")
+	if code != 0 {
+		t.Fatalf("cluster get: %s", errOut)
+	}
+	var cluster service.ClusterDetail
+	if err := json.Unmarshal([]byte(clusterOut), &cluster); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := db.Open(ctx, e.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE clusters SET stop_policy = 'archive', storage_profile_id = ? WHERE id = ?`,
+		profile.ID, cluster.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		fake.AddSandbox(org.Team, aerolvm.Sandbox{
+			ID: sandboxID, Name: "box", Image: "ubuntu:22.04", Status: "stopped", Runtime: "docker",
+			CPU: 2, MemoryMB: 1024, DiskGB: 20, Tags: map[string]string{"app": "demo"},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	}
+
+	// Run the sync loop and the archiver through a second service on the
+	// same database, as TestSandboxesAndUsage does.
+	keyring, err := secrets.LoadOrCreate(filepath.Join(filepath.Dir(e.dbPath), "keyring.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(db.New(conn), service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
+	if err := svc.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ArchivePass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		ref := "127.0.0.1:5000/cluster/" + cluster.ID + "/snapshots/tenant-x/archive-" + sandboxID + ":latest"
+		fake.SetSnapshotPush(org.Team, "archive-"+sandboxID, "active", ref)
+	}
+	if err := svc.ArchivePass(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := make(map[string]string)
+	for _, sandboxID := range []string{"sb-1", "sb-2"} {
+		var id string
+		if err := conn.QueryRowContext(ctx, `SELECT id FROM archives WHERE sandbox_id = ?`, sandboxID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids[sandboxID] = id
+	}
+
+	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
+	e.sameOrg("acme", []string{"archive", "list", "--region", "eu-west", "--org", "acme"},
+		"GET", "/v0/archives?region=eu-west", 200)
+	e.sameOrg("acme", []string{"archive", "show", ids["sb-1"], "--org", "acme"},
+		"GET", "/v0/archives/"+ids["sb-1"], 200)
+
+	// Restore both archives, one through each entry point.
+	restored, errOut, code := e.cli("archive", "restore", ids["sb-1"], "--org", "acme")
+	if code != 0 {
+		t.Fatalf("archive restore: exit %d: %s", code, errOut)
+	}
+	var first service.RestoredArchive
+	if err := json.Unmarshal([]byte(restored), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Sandbox.ID == "" || first.Sandbox.Name != "box" || first.Sandbox.Region != "eu-west" ||
+		first.Archive.SandboxID != "sb-1" || first.Archive.LastRestoredSandboxID != first.Sandbox.ID {
+		t.Errorf("restored = %+v", first)
+	}
+	if sandbox, ok := fake.Sandbox(first.Sandbox.ID); !ok || sandbox.Tags["lewbox.restored_from"] != "sb-1" {
+		t.Errorf("restored sandbox = %+v, %v", sandbox, ok)
+	}
+
+	status, body := e.httpOrg("acme", "POST", "/v0/archives/"+ids["sb-2"]+"/restore", "")
+	if status != http.StatusOK {
+		t.Fatalf("HTTP restore: status %d: %s", status, body)
+	}
+	var second service.RestoredArchive
+	if err := json.Unmarshal([]byte(body), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Sandbox.ID == "" || second.Sandbox.ID == first.Sandbox.ID || second.Archive.SandboxID != "sb-2" {
+		t.Errorf("HTTP restored = %+v", second)
+	}
+
+	// Delete both archives, one through each entry point.
+	deleted, errOut, code := e.cli("archive", "delete", ids["sb-1"], "--org", "acme", "--yes")
+	if code != 0 {
+		t.Fatalf("archive delete: exit %d: %s", code, errOut)
+	}
+	var firstDeleted service.Archive
+	if err := json.Unmarshal([]byte(deleted), &firstDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if firstDeleted.ID != ids["sb-1"] || firstDeleted.Status != "deleted" {
+		t.Errorf("deleted = %+v", firstDeleted)
+	}
+
+	status, body = e.httpOrg("acme", "DELETE", "/v0/archives/"+ids["sb-2"], "")
+	if status != http.StatusOK {
+		t.Fatalf("HTTP delete: status %d: %s", status, body)
+	}
+	var secondDeleted service.Archive
+	if err := json.Unmarshal([]byte(body), &secondDeleted); err != nil {
+		t.Fatal(err)
+	}
+	if secondDeleted.ID != ids["sb-2"] || secondDeleted.Status != "deleted" {
+		t.Errorf("HTTP deleted = %+v", secondDeleted)
+	}
+	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
+}
+
 func TestMonitoring(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)
@@ -1003,6 +1227,302 @@ func TestSubscriptions(t *testing.T) {
 	}
 }
 
+func TestDNSProfiles(t *testing.T) {
+	fake := cloudflaretest.New(t)
+	const token = "cf_parity_token"
+	fake.Token = token
+	zoneID := fake.AddZone("example.com")
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", fake.URL)
+	e := newEnvWith(t, service.WithCloudflareURL(fake.URL))
+
+	// Create through the CLI with a token on stdin; HTTP sees the same
+	// profile, without the token.
+	out, errOut, code := e.cliIn(token+"\n", "dns-profile", "create", "cf-eu",
+		"--zone", "example.com", "--api-token-stdin", "--acme-email", "ops@example.com")
+	if code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+	var created service.DNSProfile
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "cf-eu" || created.ZoneID != zoneID || created.Version != 1 ||
+		created.TestedAt == nil || created.TestError != "" || created.ACMEEmail != "ops@example.com" {
+		t.Fatalf("created = %+v", created)
+	}
+	if strings.Contains(out, token) {
+		t.Errorf("the create output carries the token: %s", out)
+	}
+	if got := e.same([]string{"dns-profile", "show", "cf-eu"}, "GET", "/v0/dns-profiles/cf-eu", "", 200); got != out {
+		t.Errorf("show = %s, want the create output %s", got, out)
+	}
+	e.same([]string{"dns-profile", "show", created.ID}, "GET", "/v0/dns-profiles/"+created.ID, "", 200)
+	e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200)
+
+	// Create a second one over HTTP; the CLI's list sees it.
+	status, body := e.http("POST", "/v0/dns-profiles",
+		`{"name":"cf-us","zone":"example.com","api_token":"`+token+`"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST dns-profiles: status %d body %s", status, body)
+	}
+	var remote service.DNSProfile
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Name != "cf-us" || remote.ZoneID != zoneID || remote.TestedAt == nil {
+		t.Errorf("remote profile = %+v", remote)
+	}
+	list := e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200)
+	if !strings.Contains(list, `"name":"cf-eu"`) || !strings.Contains(list, `"token_last4"`) || strings.Contains(list, token) {
+		t.Errorf("list = %s", list)
+	}
+
+	// Update through the CLI; the same row comes back from HTTP.
+	updated, errOut, code := e.cli("dns-profile", "update", "cf-eu", "--name", "cf-eu-2")
+	if code != 0 {
+		t.Fatalf("dns-profile update: exit %d: %s", code, errOut)
+	}
+	if got := e.same([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 200); got != updated {
+		t.Errorf("show after update = %s, want the update output %s", got, updated)
+	}
+	if !strings.Contains(updated, `"version":1`) {
+		t.Errorf("a name-only update bumped the version: %s", updated)
+	}
+	status, body = e.http("PATCH", "/v0/dns-profiles/cf-us", `{"acme_email":"dns@example.com"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH dns-profile: status %d body %s", status, body)
+	}
+
+	// Test: a failing test shows in test_error either way.
+	fake.FailNext("GET", "/zones", 500, 1)
+	tested, errOut, code := e.cli("dns-profile", "test", "cf-eu-2")
+	if code != 0 {
+		t.Fatalf("dns-profile test: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
+		t.Errorf("failed test = %s", tested)
+	}
+	status, body = e.http("POST", "/v0/dns-profiles/cf-us/test", "")
+	if status != http.StatusOK {
+		t.Fatalf("POST dns-profile test: status %d body %s", status, body)
+	}
+	e.same([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 200)
+
+	// Credentials are the only response with the token, and agree.
+	creds := e.same([]string{"dns-profile", "credentials", "cf-eu-2"}, "POST", "/v0/dns-profiles/cf-eu-2/credentials", "", 200)
+	if !strings.Contains(creds, token) {
+		t.Errorf("credentials = %s", creds)
+	}
+
+	// Delete through the CLI, then through HTTP.
+	deleted, errOut, code := e.cli("dns-profile", "delete", "cf-eu-2", "--yes")
+	if code != 0 || !strings.Contains(deleted, `"name":"cf-eu-2"`) {
+		t.Fatalf("dns-profile delete: exit %d stdout %s stderr %s", code, deleted, errOut)
+	}
+	e.sameError([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 404)
+	if status, body := e.http("DELETE", "/v0/dns-profiles/cf-us", ""); status != http.StatusOK {
+		t.Fatalf("DELETE dns-profile: status %d body %s", status, body)
+	}
+	if got := e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("list after delete = %q", got)
+	}
+
+	// A bad zone fails the test as a precondition, and nothing is saved.
+	badOut, badErr, badCode := e.cliIn(token+"\n", "dns-profile", "create", "cf-bad",
+		"--zone", "missing.example", "--api-token-stdin")
+	if badCode != 1 || badOut != "" {
+		t.Fatalf("dns-profile create with a bad zone: exit %d stdout %q", badCode, badOut)
+	}
+	status, body = e.http("POST", "/v0/dns-profiles",
+		`{"name":"cf-bad","zone":"missing.example","api_token":"`+token+`"}`)
+	if status != http.StatusPreconditionFailed || badErr != body {
+		t.Errorf("bad zone error = %d %q, want 412 %q", status, badErr, body)
+	}
+}
+
+func TestStorageProfiles(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_parity_secret"
+	e := newEnv(t)
+
+	// Create through the CLI with a secret on stdin; HTTP sees the same
+	// profile, without the secret.
+	out, errOut, code := e.cliIn(secret+"\n", "storage-profile", "create", "backups",
+		"--endpoint", fake.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--prefix", "clusters", "--access-key-id", fake.AccessKeyID, "--secret-access-key-stdin")
+	if code != 0 {
+		t.Fatalf("storage-profile create: exit %d: %s", code, errOut)
+	}
+	var created service.StorageProfile
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "backups" || created.Endpoint != fake.URL || created.Bucket != "assets" ||
+		created.Prefix != "clusters" || !created.PathStyle || created.Version != 1 ||
+		created.TestedAt == nil || created.TestError != "" || created.SecretLast4 != "cret" {
+		t.Fatalf("created = %+v", created)
+	}
+	if strings.Contains(out, secret) {
+		t.Errorf("the create output carries the secret: %s", out)
+	}
+	if got := e.same([]string{"storage-profile", "show", "backups"}, "GET", "/v0/storage-profiles/backups", "", 200); got != out {
+		t.Errorf("show = %s, want the create output %s", got, out)
+	}
+	e.same([]string{"storage-profile", "show", created.ID}, "GET", "/v0/storage-profiles/"+created.ID, "", 200)
+	e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200)
+
+	// Create a second one over HTTP; the CLI's list sees it.
+	status, body := e.http("POST", "/v0/storage-profiles",
+		`{"name":"backups-2","endpoint":"`+fake.URL+`","bucket":"assets","access_key_id":"`+
+			fake.AccessKeyID+`","secret_access_key":"`+secret+`"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST storage-profiles: status %d body %s", status, body)
+	}
+	var remote service.StorageProfile
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Name != "backups-2" || remote.Region != "us-east-1" || !remote.PathStyle || remote.TestedAt == nil {
+		t.Errorf("remote profile = %+v", remote)
+	}
+	list := e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200)
+	if !strings.Contains(list, `"name":"backups"`) || !strings.Contains(list, `"secret_last4"`) || strings.Contains(list, secret) {
+		t.Errorf("list = %s", list)
+	}
+
+	// Update through the CLI; the same row comes back from HTTP.
+	updated, errOut, code := e.cli("storage-profile", "update", "backups", "--name", "backups-1")
+	if code != 0 {
+		t.Fatalf("storage-profile update: exit %d: %s", code, errOut)
+	}
+	if got := e.same([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 200); got != updated {
+		t.Errorf("show after update = %s, want the update output %s", got, updated)
+	}
+	if !strings.Contains(updated, `"version":1`) {
+		t.Errorf("a name-only update bumped the version: %s", updated)
+	}
+	status, body = e.http("PATCH", "/v0/storage-profiles/backups-2", `{"prefix":"clusters/eu"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH storage-profile: status %d body %s", status, body)
+	}
+	if !strings.Contains(body, `"prefix":"clusters/eu"`) || !strings.Contains(body, `"version":2`) {
+		t.Errorf("prefix update = %s", body)
+	}
+
+	// Test: a failing test shows in test_error either way.
+	fake.FailNext("GET", "clusters/lewbox-test/", 500, "InternalError", 1)
+	tested, errOut, code := e.cli("storage-profile", "test", "backups-1")
+	if code != 0 {
+		t.Fatalf("storage-profile test: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
+		t.Errorf("failed test = %s", tested)
+	}
+	status, body = e.http("POST", "/v0/storage-profiles/backups-2/test", "")
+	if status != http.StatusOK {
+		t.Fatalf("POST storage-profile test: status %d body %s", status, body)
+	}
+	e.same([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 200)
+
+	// Credentials are the only response with the secret, and agree.
+	creds := e.same([]string{"storage-profile", "credentials", "backups-1"}, "POST", "/v0/storage-profiles/backups-1/credentials", "", 200)
+	if !strings.Contains(creds, secret) {
+		t.Errorf("credentials = %s", creds)
+	}
+
+	// Delete through the CLI, then through HTTP.
+	deleted, errOut, code := e.cli("storage-profile", "delete", "backups-1", "--yes")
+	if code != 0 || !strings.Contains(deleted, `"name":"backups-1"`) {
+		t.Fatalf("storage-profile delete: exit %d stdout %s stderr %s", code, deleted, errOut)
+	}
+	e.sameError([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 404)
+	if status, body := e.http("DELETE", "/v0/storage-profiles/backups-2", ""); status != http.StatusOK {
+		t.Fatalf("DELETE storage-profile: status %d body %s", status, body)
+	}
+	if got := e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("list after delete = %q", got)
+	}
+
+	// A bucket that does not exist fails the test as a precondition, and
+	// nothing is saved.
+	badOut, badErr, badCode := e.cliIn(secret+"\n", "storage-profile", "create", "backups-bad",
+		"--endpoint", fake.URL, "--bucket", "missing", "--region", "us-east-1",
+		"--access-key-id", fake.AccessKeyID, "--secret-access-key-stdin")
+	if badCode != 1 || badOut != "" {
+		t.Fatalf("storage-profile create with a missing bucket: exit %d stdout %q", badCode, badOut)
+	}
+	status, body = e.http("POST", "/v0/storage-profiles",
+		`{"name":"backups-bad","endpoint":"`+fake.URL+`","bucket":"missing","access_key_id":"`+
+			fake.AccessKeyID+`","secret_access_key":"`+secret+`"}`)
+	if status != http.StatusPreconditionFailed || badErr != body {
+		t.Errorf("missing bucket error = %d %q, want 412 %q", status, badErr, body)
+	}
+}
+
+func TestClusterStorageSettingsAndNodeSettings(t *testing.T) {
+	storage := objstoretest.New(t)
+	storage.AddBucket("assets")
+	const secret = "objstore_node_settings_parity_secret"
+	e := newEnv(t)
+
+	if _, errOut, code := e.cliIn(secret+"\n", "storage-profile", "create", "s3-main",
+		"--endpoint", storage.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--prefix", "lewbox", "--access-key-id", storage.AccessKeyID, "--secret-access-key-stdin"); code != 0 {
+		t.Fatalf("storage-profile create: exit %d: %s", code, errOut)
+	}
+
+	fake := aerolvmtest.New(t)
+	const token = "avm_admin_storage_parity_token"
+	fake.AdminToken = token
+	fake.SetMembers([]aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	})
+	out, errOut, code := e.cliIn(token+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(), "--admin-token-stdin")
+	if code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	var added service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.StorageProfile != nil || added.StopPolicy != "keep" {
+		t.Errorf("new cluster = %+v", added.Cluster)
+	}
+
+	updated := e.same([]string{"cluster", "set", "lab", "--storage-profile", "s3-main", "--stop-policy", "archive"},
+		"PATCH", "/v0/clusters/lab", `{"storage_profile":"s3-main","stop_policy":"archive"}`, 200)
+	if !strings.Contains(updated, `"storage_profile":"s3-main"`) || !strings.Contains(updated, `"stop_policy":"archive"`) {
+		t.Errorf("cluster set = %s", updated)
+	}
+	e.same([]string{"cluster", "get", "lab"}, "GET", "/v0/clusters/lab", "", 200)
+	e.same([]string{"cluster", "set", "lab", "--stop-policy", "keep"},
+		"PATCH", "/v0/clusters/lab", `{"stop_policy":"keep"}`, 200)
+
+	// The node settings carry the bucket secret and the cluster's prefix.
+	settings := e.same([]string{"cluster", "node-settings", "lab"}, "GET", "/v0/clusters/lab/node-settings", "", 200)
+	for _, want := range []string{
+		`"cluster":"lab"`, `"stop_policy":"keep"`, `"profile":"s3-main"`,
+		`"root_directory":"/lewbox/clusters/` + added.ID + `"`, secret,
+	} {
+		if !strings.Contains(settings, want) {
+			t.Errorf("node settings %s is missing %q", settings, want)
+		}
+	}
+	if !strings.Contains(settings, `"dns":null`) {
+		t.Errorf("node settings have DNS without a profile: %s", settings)
+	}
+
+	// Clearing the profile gives a cluster with none.
+	cleared := e.same([]string{"cluster", "set", "lab", "--storage-profile", "none"},
+		"PATCH", "/v0/clusters/lab", `{"storage_profile":"none"}`, 200)
+	if !strings.Contains(cleared, `"storage_profile":null`) {
+		t.Errorf("cleared cluster = %s", cleared)
+	}
+	e.same([]string{"cluster", "node-settings", "lab"}, "GET", "/v0/clusters/lab/node-settings", "", 200)
+}
+
 func TestLoginWithAdminKey(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -1039,5 +1559,127 @@ func TestLoginWithAdminKey(t *testing.T) {
 	}
 	if _, _, code := e.cli("org", "use", "acme"); code != 2 {
 		t.Errorf("org use in local mode: exit %d, want 2", code)
+	}
+}
+
+func TestAccessTokenParity(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	// Local mode has no account of its own, so it names one.
+	if _, errOut, code := e.cli("token", "create", "ci"); code != 1 || !strings.Contains(errOut, "--user") {
+		t.Errorf("token create without --user in local mode: exit %d stderr %s", code, errOut)
+	}
+	out, errOut, code := e.cli("token", "create", "ci", "--user", adminEmail, "--expires-in", "30d")
+	if code != 0 {
+		t.Fatalf("token create: %s", errOut)
+	}
+	var tok service.NewAccessToken
+	if err := json.Unmarshal([]byte(out), &tok); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(tok.Token, "lbp_") || tok.ExpiresAt == nil {
+		t.Fatalf("token = %+v", tok)
+	}
+	list := e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens", "", 200)
+	if strings.Contains(list, tok.Token) || strings.Contains(list, `"token"`) {
+		t.Errorf("the token list shows the token: %s", list)
+	}
+	e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens?user="+adminEmail, "", 200)
+	e.sameError([]string{"token", "list", "--user", "nobody@example.com"}, "GET", "/v0/access-tokens?user=nobody@example.com", "", 404)
+	e.sameError([]string{"token", "revoke", "missing", "--user", adminEmail, "--yes"}, "DELETE", "/v0/access-tokens/missing", "", 404)
+
+	// The admin's token manages the instance over HTTP.
+	if status, body := e.httpWith("GET", "/v0/nodes", "", tok.Token); status != 200 {
+		t.Errorf("nodes with an admin's token: %d %s", status, body)
+	}
+	if status, body := e.httpWith("POST", "/v0/access-tokens", `{"name":"more"}`, tok.Token); status != 403 {
+		t.Errorf("a token creates a token: %d %s", status, body)
+	}
+
+	if _, errOut, code := e.cli("token", "revoke", "ci", "--user", adminEmail, "--yes"); code != 0 {
+		t.Fatalf("token revoke: %s", errOut)
+	}
+	if status, _ := e.httpWith("GET", "/v0/nodes", "", tok.Token); status != 401 {
+		t.Errorf("revoked token: status %d", status)
+	}
+	e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens", "", 200)
+}
+
+func TestLoginWithAccessToken(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, errOut, code := e.cli("token", "create", "laptop", "--user", adminEmail, "--never-expires")
+	if code != 0 {
+		t.Fatalf("token create: %s", errOut)
+	}
+	var tok service.NewAccessToken
+	if err := json.Unmarshal([]byte(out), &tok); err != nil {
+		t.Fatal(err)
+	}
+
+	// Remote commands: no --context local, so the saved context is used.
+	remote := func(input string, args ...string) (string, string, int) {
+		var stdout, stderr bytes.Buffer
+		code := runWithInput(context.Background(), append([]string{"--json"}, args...), strings.NewReader(input), &stdout, &stderr)
+		return stdout.String(), stderr.String(), code
+	}
+
+	// --token alone reads stdin.
+	out, errOut, code = remote(tok.Token+"\n", "login", e.srv.URL, "--token", "--context-name", "ops")
+	if code != 0 || !strings.Contains(out, `"via":"access_token"`) || strings.Contains(out, tok.Token) {
+		t.Fatalf("login --token: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if strings.Contains(errOut, "warning") {
+		t.Errorf("piped token warned: %s", errOut)
+	}
+	// An instance admin's token runs operator commands.
+	if out, errOut, code := remote("", "cluster", "list"); code != 0 || out != `{"data":[]}`+"\n" {
+		t.Errorf("cluster list with a token: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if out, errOut, code := remote("", "whoami"); code != 0 || !strings.Contains(out, `"name":"laptop"`) {
+		t.Errorf("whoami: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+	if _, errOut, code := remote("", "token", "create", "more"); code != 1 || !strings.Contains(errOut, "cannot create another") {
+		t.Errorf("token create with a token: exit %d stderr %s", code, errOut)
+	}
+
+	// Logout forgets the token and says it still works.
+	if _, errOut, code := remote("", "logout"); code != 0 || !strings.Contains(errOut, "still works") {
+		t.Errorf("logout: exit %d stderr %s", code, errOut)
+	}
+	if status, _ := e.httpWith("GET", "/v0/me", "", tok.Token); status != 200 {
+		t.Errorf("token after logout: status %d", status)
+	}
+
+	// --token=<token> works, with a warning about shell history.
+	out, errOut, code = remote("", "login", e.srv.URL, "--token="+tok.Token, "--context-name", "ops")
+	if code != 0 || !strings.Contains(out, `"via":"access_token"`) || !strings.Contains(errOut, "shell history") {
+		t.Fatalf("login --token=: exit %d stdout %s stderr %s", code, out, errOut)
+	}
+
+	// A token after a space would be taken as the URL: refuse it.
+	for _, args := range [][]string{
+		{"login", e.srv.URL, "--token", tok.Token},
+		{"login", "--token", tok.Token},
+	} {
+		if _, errOut, code := remote("", args...); code != 2 || !strings.Contains(errOut, "looks like a token") {
+			t.Errorf("lewbox %v: exit %d stderr %s", args[:2], code, errOut)
+		}
+	}
+	for _, args := range [][]string{
+		{"login", e.srv.URL, "--token", "--email", adminEmail},
+		{"login", e.srv.URL, "--token", "--password-stdin"},
+		{"login", e.srv.URL, "--token", "--key-stdin"},
+	} {
+		if _, _, code := remote(tok.Token, args...); code != 2 {
+			t.Errorf("lewbox %v: exit %d, want 2", args, code)
+		}
+	}
+	if _, errOut, code := remote("", "login", e.srv.URL, "--token"); code != 1 || !strings.Contains(errOut, "no token") {
+		t.Errorf("login --token with empty stdin: exit %d stderr %s", code, errOut)
+	}
+	if _, errOut, code := remote("lbp_nope\n", "login", e.srv.URL, "--token"); code != 1 || !strings.Contains(errOut, "unauthorized") {
+		t.Errorf("login with a bad token: exit %d stderr %s", code, errOut)
 	}
 }

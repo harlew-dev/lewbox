@@ -113,3 +113,12 @@ export function renderAt(path: string, routes: ReactNode) {
 export function renderApp(path: string) {
   return renderAt(path, <Route path="*" element={<App />} />)
 }
+
+// Picks `option` in the Listbox named `label`.
+export async function choose(label: string | RegExp, option: string | RegExp) {
+  const { fireEvent, screen } = await import('@testing-library/react')
+  fireEvent.click(await screen.findByRole('combobox', { name: label }))
+  const item = await screen.findByRole('option', { name: option })
+  fireEvent.pointerDown(item)
+  fireEvent.click(item)
+}

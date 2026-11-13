@@ -199,7 +199,7 @@ func (a *app) updateAerolVM(ctx context.Context, o *updateOptions) error {
 	if err := a.runInstaller(ctx, a.host().runner, run, false); err != nil {
 		return err
 	}
-	if err := a.applySettings(ctx, a.host().runner); err != nil {
+	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
 		return err
 	}
 	if _, err := machine.WaitHealth(ctx, a.host().localAPIURL, installer.Version, a.host().sleep); err != nil {

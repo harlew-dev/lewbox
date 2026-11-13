@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/harlew-dev/lewbox/internal/machine"
+	"github.com/harlew-dev/lewbox/internal/service"
 )
 
 // installOutput is printed by `lewbox install`.
@@ -30,6 +31,7 @@ type installOptions struct {
 	version    string
 	from       string
 	acmeEmail  string
+	dnsProfile string
 	dnsStdin   bool
 	dryRun     bool
 }
@@ -51,6 +53,7 @@ func newInstallCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&o.name, "name", "", "the node name (default: the short hostname, lowercased)")
 	cmd.Flags().StringVar(&o.mode, "mode", "", "local, domain or public-host (default: local without --domain or --public-host)")
 	cmd.Flags().StringVar(&o.domain, "domain", "", "the domain this node serves, with wildcard TLS")
+	cmd.Flags().StringVar(&o.dnsProfile, "dns-profile", "", "the DNS profile whose Cloudflare token gets the certificate")
 	cmd.Flags().BoolVar(&o.dnsStdin, "dns-api-token-stdin", false, "read the Cloudflare DNS token from stdin")
 	cmd.Flags().StringVar(&o.acmeEmail, "acme-email", "", "the ACME account email")
 	cmd.Flags().StringVar(&o.publicHost, "public-host", "", "the public host or IP, without TLS")
@@ -78,6 +81,12 @@ func (a *app) runInstall(cmd *cobra.Command, o *installOptions, passthrough []st
 	if o.dnsStdin && mode != machine.ModeDomain {
 		return usagef("--dns-api-token-stdin only makes sense with --domain")
 	}
+	if o.dnsProfile != "" && mode != machine.ModeDomain {
+		return usagef("--dns-profile only makes sense with --domain")
+	}
+	if o.dnsProfile != "" && o.dnsStdin {
+		return usagef("--dns-profile and --dns-api-token-stdin cannot be used together")
+	}
 	dnsToken := ""
 	if o.dnsStdin {
 		data, err := io.ReadAll(cmd.InOrStdin())
@@ -91,11 +100,33 @@ func (a *app) runInstall(cmd *cobra.Command, o *installOptions, passthrough []st
 	}
 
 	ctx := cmd.Context()
+	// A profile supplies the token the installer writes for Caddy, so fetch
+	// it (even for a dry run) and check its zone before anything else runs.
+	var profile service.DNSProfileCredentials
+	if o.dnsProfile != "" {
+		b, _, err := a.resolve(ctx)
+		if err != nil {
+			return err
+		}
+		profile, err = b.DNSProfileCredentials(ctx, o.dnsProfile)
+		if err != nil {
+			return err
+		}
+		if !service.DomainInZone(o.domain, profile.Zone) {
+			return usagef("--domain %s is not in DNS profile %q's zone %s", o.domain, profile.Name, profile.Zone)
+		}
+		if o.acmeEmail == "" {
+			o.acmeEmail = profile.ACMEEmail
+		}
+		dnsToken = profile.APIToken
+	}
+
 	checks := machine.Check(ctx, a.host().env, machine.CheckOptions{
 		Mode:          mode,
 		Runtime:       o.runtime,
 		Domain:        o.domain,
 		DNSTokenStdin: o.dnsStdin,
+		DNSProfile:    o.dnsProfile != "",
 	})
 	a.say("Checking this machine")
 	a.printChecks(checks)
@@ -136,14 +167,16 @@ func (a *app) runInstall(cmd *cobra.Command, o *installOptions, passthrough []st
 	}
 
 	state := machine.State{
-		Name:           o.name,
-		Mode:           mode,
-		Domain:         o.domain,
-		PublicHost:     o.publicHost,
-		Runtime:        o.runtime,
-		AerolVMVersion: installer.Version,
-		From:           source.From,
-		InstalledAt:    a.host().now().UTC().Truncate(time.Millisecond),
+		Name:              o.name,
+		Mode:              mode,
+		Domain:            o.domain,
+		PublicHost:        o.publicHost,
+		DNSProfile:        profile.Name,
+		DNSProfileVersion: profile.Version,
+		Runtime:           o.runtime,
+		AerolVMVersion:    installer.Version,
+		From:              source.From,
+		InstalledAt:       a.host().now().UTC().Truncate(time.Millisecond),
 	}
 	state.StoredAPIURL = state.APIURL()
 

@@ -217,6 +217,40 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, bool, error) {
 	}
 }
 
+// GetSandbox calls GET /v1/sandboxes/{id}. A missing sandbox is an *APIError
+// with status 404, because callers have to tell it from a failure.
+func (c *Client) GetSandbox(ctx context.Context, id string) (Sandbox, error) {
+	var out Sandbox
+	err := c.do(ctx, http.MethodGet, "/v1/sandboxes/"+url.PathEscape(id), nil, &out, true)
+	return out, err
+}
+
+// CreateSandbox calls POST /v1/sandboxes.
+func (c *Client) CreateSandbox(ctx context.Context, req CreateSandboxRequest) (Sandbox, error) {
+	var out Sandbox
+	err := c.do(ctx, http.MethodPost, "/v1/sandboxes", req, &out, true)
+	return out, err
+}
+
+// CreateSnapshot calls POST /v1/sandboxes/{id}/snapshot. A name the team
+// already uses is a 409.
+func (c *Client) CreateSnapshot(ctx context.Context, sandboxID, name string) (Snapshot, error) {
+	var out Snapshot
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	err := c.do(ctx, http.MethodPost, "/v1/sandboxes/"+url.PathEscape(sandboxID)+"/snapshot", body, &out, true)
+	return out, err
+}
+
+// GetSnapshot calls GET /v1/snapshots/{name}. A missing snapshot is an
+// *APIError with status 404.
+func (c *Client) GetSnapshot(ctx context.Context, name string) (Snapshot, error) {
+	var out Snapshot
+	err := c.do(ctx, http.MethodGet, "/v1/snapshots/"+url.PathEscape(name), nil, &out, true)
+	return out, err
+}
+
 // ListSnapshots reads every page of GET /v1/snapshots. It is node-local: a
 // team-bound token sees only that team's snapshots on the node that answers.
 func (c *Client) ListSnapshots(ctx context.Context) ([]Snapshot, error) {

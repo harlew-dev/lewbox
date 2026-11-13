@@ -245,7 +245,7 @@ function CreateKey({
                 <CodeBlock code={`curl -H "Authorization: Bearer $LEWBOX_KEY" ${serverURL()}/v0/organization`} />
               </Step>
               <Step title="Or sign in the CLI with it">
-                <CodeBlock code={`lewbox login ${serverURL()} --key-stdin`} />
+                <CodeBlock code={`lewbox login ${serverURL()} --token`} />
               </Step>
             </Steps>
           </SecretReveal>

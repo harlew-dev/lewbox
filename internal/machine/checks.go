@@ -54,6 +54,7 @@ type CheckOptions struct {
 	Runtime       string
 	Domain        string
 	DNSTokenStdin bool
+	DNSProfile    bool // a DNS profile supplies the Cloudflare token
 }
 
 // Check runs every precondition for an install. A failed check's Detail says
@@ -78,9 +79,13 @@ func Check(ctx context.Context, env Env, opts CheckOptions) []service.Check {
 	checks = append(checks, checkPorts(ctx, env, opts))
 	if opts.Mode == ModeDomain {
 		check := service.Check{Name: "dns_token", OK: true, Detail: "a Cloudflare token will be read from stdin"}
-		if !opts.DNSTokenStdin {
+		switch {
+		case opts.DNSProfile:
+			check.Detail = "the DNS profile supplies the Cloudflare token"
+		case opts.DNSTokenStdin:
+		default:
 			check.OK = false
-			check.Detail = "domain mode needs --dns-api-token-stdin: pipe a Cloudflare token with Zone:Read and DNS:Edit on stdin"
+			check.Detail = "domain mode needs --dns-profile or --dns-api-token-stdin: use a saved DNS profile, or pipe a Cloudflare token with Zone:Read and DNS:Edit on stdin"
 		}
 		checks = append(checks, check)
 	}

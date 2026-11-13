@@ -123,7 +123,8 @@ Details in [aerolvm.md](aerolvm-integration.md).
 
 | Command | What it does | API | Status |
 |---|---|---|---|
-| `lewbox login [<url>] [--email <e> --password-stdin] [--key-stdin]` | Signs in to a Lewbox server and saves a context. It prompts for email and password. `--key-stdin` saves a token read from stdin instead, for CI (admin keys, `lba_…`, come with organizations). A browser and device-code flow comes later | `POST /v0/auth/login` | ✅ |
+| `lewbox login [<url>] [--email <e> --password-stdin] [--token[=<t>]]` | Signs in to a Lewbox server and saves a context. It prompts for email and password. `--token` saves an access token (`lbp_…`) or admin key (`lba_…`) instead, read from stdin or a no-echo prompt (`--key-stdin` is the old name). A browser and device-code flow comes later | `POST /v0/auth/login` | ✅ |
+| `lewbox token create\|list\|revoke [--user <email>]` | An account's access tokens (D38) | `/v0/access-tokens` | ✅ |
 | `lewbox logout [--all]` | Ends the session and deletes the saved token, for the current context (or all of them) | `POST /v0/auth/logout` | ✅ |
 | `lewbox whoami` | Account, whether it is an instance admin, how you're signed in (session or local) and the context. Organizations and roles come later | `GET /v0/me` | ✅ |
 | `lewbox context list\|use <name>\|remove <name>` | One context per Lewbox server you use (for example `local`, `prod`). `--context` and `LEWBOX_CONTEXT` choose one for a single command | local only | ✅ |
