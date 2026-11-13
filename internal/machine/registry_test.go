@@ -180,6 +180,11 @@ func TestApplyRegistryWritesConfigOnceAndMasksSecrets(t *testing.T) {
 	if files[machine.RegistryUnitFile] != machine.RegistryUnit {
 		t.Error("unit not written")
 	}
+	// skopeo, which builds Firecracker disks, needs to be told the registry
+	// is plain HTTP.
+	if conf := files[machine.RegistriesConfFile]; !strings.Contains(conf, `location = "127.0.0.1:5000"`) || !strings.Contains(conf, "insecure = true") {
+		t.Errorf("registries.conf drop-in = %q", conf)
+	}
 
 	runner.Reset()
 	changed, err = machine.ApplyRegistry(context.Background(), runner, []byte("bin"), st, nil)
@@ -188,6 +193,21 @@ func TestApplyRegistryWritesConfigOnceAndMasksSecrets(t *testing.T) {
 	}
 	if runner.Ran("systemctl", "restart", "lewbox-registry") {
 		t.Error("an unchanged registry was restarted")
+	}
+
+	// A node configured before the drop-in existed gets it, without a
+	// registry restart.
+	delete(files, machine.RegistriesConfFile)
+	runner.Reset()
+	changed, err = machine.ApplyRegistry(context.Background(), runner, []byte("bin"), st, nil)
+	if err != nil || !changed {
+		t.Fatalf("apply without the drop-in: changed=%v err=%v, want a change", changed, err)
+	}
+	if files[machine.RegistriesConfFile] != machine.RegistriesConf {
+		t.Error("the drop-in was not written again")
+	}
+	if runner.Ran("systemctl", "restart", "lewbox-registry") {
+		t.Error("the registry was restarted for the drop-in alone")
 	}
 }
 

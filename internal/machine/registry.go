@@ -43,6 +43,12 @@ const (
 	// RegistryTokenFile is what AerolVM sends the registry as a password. The
 	// registry has no auth, so it holds random bytes and never the PAT.
 	RegistryTokenFile = "/etc/sandboxd/lewbox-registry.token"
+	// RegistriesConfDir and RegistriesConfFile tell containers/image tools
+	// (skopeo) that the node registry speaks plain HTTP. Docker trusts a
+	// loopback registry by itself, but AerolVM builds a Firecracker VM's disk
+	// with skopeo, which tries HTTPS and fails without this.
+	RegistriesConfDir  = "/etc/containers/registries.conf.d"
+	RegistriesConfFile = RegistriesConfDir + "/50-lewbox-registry.conf"
 
 	// RegistryReleaseURL is where Distribution publishes its releases.
 	RegistryReleaseURL = "https://github.com/distribution/distribution/releases/download"
@@ -325,6 +331,13 @@ LockPersonality=true
 WantedBy=multi-user.target
 `
 
+// RegistriesConf marks the node registry as plain HTTP for containers/image.
+const RegistriesConf = `# Written by lewbox node configure: the node registry is plain HTTP on loopback.
+[[registry]]
+location = "` + RegistryAddr + `"
+insecure = true
+`
+
 // PushEnv is the part of Lewbox's env file that turns on AerolVM's snapshot
 // push to the node registry.
 func PushEnv(clusterID string) string {
@@ -412,6 +425,19 @@ func ApplyRegistry(ctx context.Context, runner Runner, binary []byte, st Registr
 		changed = true
 	}
 
+	// The registries.conf drop-in only matters to skopeo, so a change to it
+	// alone doesn't restart the registry.
+	confChanged := false
+	if conf, _ := readFile(output, RegistriesConfFile); conf != RegistriesConf {
+		if err := run(Cmd{Name: "install", Args: []string{"-d", "-m", "0755", RegistriesConfDir}, Sudo: true}); err != nil {
+			return false, err
+		}
+		if err := writeFile(run, RegistriesConfFile, "0644", RegistriesConf); err != nil {
+			return false, err
+		}
+		confChanged = true
+	}
+
 	if _, err := output(Cmd{Name: "test", Args: []string{"-s", RegistryTokenFile}, Sudo: true}); err != nil {
 		token, err := randomToken(32)
 		if err != nil {
@@ -435,7 +461,7 @@ func ApplyRegistry(ctx context.Context, runner Runner, binary []byte, st Registr
 			return changed, err
 		}
 	}
-	return changed, nil
+	return changed || confChanged, nil
 }
 
 // RemoveRegistry stops and removes the registry, when it is installed.
@@ -451,7 +477,7 @@ func RemoveRegistry(ctx context.Context, runner Runner, report func(Cmd)) (bool,
 	}
 	steps := []Cmd{
 		{Name: "systemctl", Args: []string{"disable", "--now", "lewbox-registry"}, Sudo: true},
-		{Name: "rm", Args: []string{"-f", RegistryUnitFile, RegistryBinary, RegistryTokenFile}, Sudo: true},
+		{Name: "rm", Args: []string{"-f", RegistryUnitFile, RegistryBinary, RegistryTokenFile, RegistriesConfFile}, Sudo: true},
 		{Name: "rm", Args: []string{"-rf", RegistryConfigDir}, Sudo: true},
 		{Name: "systemctl", Args: []string{"daemon-reload"}, Sudo: true},
 	}
