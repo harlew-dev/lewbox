@@ -124,6 +124,20 @@ Instance admins only. A DNS profile is a saved Cloudflare token, kept sealed and
 | `POST /v0/dns-profiles/{ref}/test` | admin | Test now → DNSProfile. A failure is recorded in `test_error`, not returned as an error |
 | `POST /v0/dns-profiles/{ref}/credentials` | admin | `{name, provider, zone, zone_id, api_token, acme_email, version}`. The only response with the token |
 
+### Storage profiles
+
+Instance admins only. A storage profile is a saved S3-compatible bucket and access key, kept sealed and shown only by its last four characters. Creating one, or changing anything but its name, tests it first and saves nothing when the test fails. See [Storage profiles](../clusters/storage-profiles.md).
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/storage-profiles` | admin | `{data: [StorageProfile]}`, ordered by name |
+| `POST /v0/storage-profiles` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key}` → `201` StorageProfile. A failed test → `412`, with `details.step` set to `write`, `read`, `list` or `delete` |
+| `GET /v0/storage-profiles/{ref}` | admin | StorageProfile, by ID or name |
+| `PATCH /v0/storage-profiles/{ref}` | admin | Any of `name`, `endpoint`, `region`, `bucket`, `prefix`, `path_style`, `access_key_id` and `secret_access_key`. A change other than the name is tested before it is saved and bumps `version` |
+| `DELETE /v0/storage-profiles/{ref}` | admin | → the StorageProfile. `409` while a cluster uses it |
+| `POST /v0/storage-profiles/{ref}/test` | admin | Test now → StorageProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/storage-profiles/{ref}/credentials` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key, version}`. The only response with the secret |
+
 ### Clusters
 
 | Route | Who | |
@@ -295,6 +309,8 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 **Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, subscriptions, default, created_at}`. A `null` limit is unlimited; `subscriptions` is how many subscriptions use it.
 
 **DNSProfile**: `{id, name, provider, zone, zone_id, token_last4, acme_email, version, clusters, tested_at, test_error, created_at, updated_at}`. `provider` is `cloudflare`; `version` goes up when the zone or token changes, so nodes can tell they are out of date. The token itself is never in it.
+
+**StorageProfile**: `{id, name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_last4, version, clusters, tested_at, test_error, created_at, updated_at}`. `provider` is `s3` and an empty `endpoint` means AWS S3; `version` goes up when anything but the name changes, so nodes can tell they are out of date. The secret access key itself is never in it.
 
 **Settings**: `{instance_name, signup, default_plan, default_region}`. `signup` is `open`, `approval` or `closed`; `default_plan` and `default_region` are a plan and cluster slug, or `null`.
 

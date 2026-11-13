@@ -19,6 +19,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/db"
 	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
+	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
@@ -991,6 +992,86 @@ func TestDNSProfileBackendsAgree(t *testing.T) {
 		both("a refused token", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.CreateDNSProfile(ctx, service.CreateDNSProfileRequest{
 				Name: "cf-bad", Zone: "example.com", APIToken: "wrong",
+			})
+		}),
+	})
+}
+
+func TestStorageProfileBackendsAgree(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_backend_secret"
+	h := newHarness(t)
+
+	create := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+			Name: "backups", Endpoint: fake.URL, Region: "us-east-1", Bucket: "assets",
+			AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
+		})
+	}
+	get := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetStorageProfile(ctx, "backups")
+	}
+	list := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListStorageProfiles(ctx)
+	}
+	test := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.TestStorageProfile(ctx, "backups")
+	}
+
+	runSteps(t, h, []step{
+		{
+			name:    "create a storage profile",
+			local:   create,
+			remote:  get,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				p, ok := v.(service.StorageProfile)
+				if !ok || p.Version != 1 || p.TestedAt == nil || !p.PathStyle ||
+					p.SecretLast4 != "cret" || p.Region != "us-east-1" {
+					t.Errorf("profile = %+v", v)
+				}
+			},
+		},
+		both("list storage profiles", list),
+		{
+			name:    "test a storage profile",
+			local:   test,
+			remote:  get,
+			compare: true,
+		},
+		both("storage profile credentials", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.StorageProfileCredentials(ctx, "backups")
+		}),
+		{
+			name: "rename a storage profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				name := "backups-west"
+				return b.UpdateStorageProfile(ctx, "backups", service.UpdateStorageProfileRequest{Name: &name})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetStorageProfile(ctx, "backups-west")
+			},
+			compare: true,
+		},
+		{
+			name: "delete a storage profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetStorageProfile(ctx, "backups-west")
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteStorageProfile(ctx, "backups-west")
+			},
+			compare: true,
+		},
+		both("list storage profiles after delete", list),
+		both("missing storage profile", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetStorageProfile(ctx, "backups-west")
+		}),
+		both("a missing bucket", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateStorageProfile(ctx, service.CreateStorageProfileRequest{
+				Name: "bad", Endpoint: fake.URL, Region: "us-east-1", Bucket: "missing",
+				AccessKeyID: fake.AccessKeyID, SecretAccessKey: secret,
 			})
 		}),
 	})

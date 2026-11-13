@@ -416,3 +416,27 @@ Prints the profile's name, zone, zone ID, ACME email, version and **API token**.
 ### `lewbox dns-profile delete ID|NAME [--yes]`
 
 Deletes a profile no cluster uses. Asks to confirm; a profile in use is refused with `409`.
+
+### `lewbox storage-profile list` · `lewbox storage-profile show ID|NAME`
+
+Every saved S3-compatible profile with its bucket, endpoint (`aws` when the endpoint is empty), prefix, the secret's last four characters, how many clusters use it and its last test result, or one profile. Instance admins only. The secret is never shown, only `…abcd`.
+
+### `lewbox storage-profile create NAME --bucket BUCKET [--endpoint URL] [--region R] [--prefix P] [--path-style=true|false] --access-key-id ID --secret-access-key-stdin`
+
+Saves and tests an S3-compatible bucket. The secret access key is read from stdin, never from a flag. `--endpoint` is empty for AWS S3, `https://<account id>.r2.cloudflarestorage.com` for Cloudflare R2, or any S3-compatible URL. `--region` is required for AWS and defaults to `us-east-1` when an endpoint is set. `--path-style` defaults to true when an endpoint is set. The test puts, gets, lists and deletes a small object under `<prefix>/lewbox-test/`, and a failure saves nothing: it exits with a precondition error whose details name the `write`, `read`, `list` or `delete` step. See [Storage profiles](../clusters/storage-profiles.md).
+
+### `lewbox storage-profile update ID|NAME [--name NAME] [--endpoint URL] [--region R] [--bucket B] [--prefix P] [--path-style=true|false] [--access-key-id ID] [--secret-access-key-stdin]`
+
+Changes only the flags given. A changed endpoint, region, bucket, prefix, path style, key ID or secret is tested before it is saved, and bumps the profile's `version`. `--prefix ""` clears the prefix.
+
+### `lewbox storage-profile test ID|NAME`
+
+Runs the test again now. A failure is recorded in `test_error` and is not an error exit.
+
+### `lewbox storage-profile credentials ID|NAME`
+
+Prints the profile's name, provider, endpoint, region, bucket, prefix, path style, access key ID, **secret access key** and version. It is the only command that returns the secret, and it exists to configure a node. Instance admins only.
+
+### `lewbox storage-profile delete ID|NAME [--yes]`
+
+Deletes a profile no cluster uses. Asks to confirm; a profile in use is refused with `409`.

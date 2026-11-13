@@ -65,6 +65,14 @@ type Backend interface {
 	TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
 	DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error)
 
+	ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error)
+	GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error)
+	UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error)
+	DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error)
+	StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error)
+
 	ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error)
 	SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error)
 	DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error)
@@ -330,6 +338,42 @@ func (l Local) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfi
 // DNSProfileCredentials returns a DNS profile's token, for a node.
 func (l Local) DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error) {
 	return l.Svc.DNSProfileCredentials(l.withPrincipal(ctx), ref)
+}
+
+// ListStorageProfiles returns every storage profile.
+func (l Local) ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error) {
+	return l.Svc.ListStorageProfiles(l.withPrincipal(ctx))
+}
+
+// GetStorageProfile returns a storage profile by ID or name.
+func (l Local) GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.GetStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// CreateStorageProfile saves and tests a storage profile.
+func (l Local) CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error) {
+	return l.Svc.CreateStorageProfile(l.withPrincipal(ctx), req)
+}
+
+// UpdateStorageProfile changes a storage profile.
+func (l Local) UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error) {
+	return l.Svc.UpdateStorageProfile(l.withPrincipal(ctx), ref, req)
+}
+
+// DeleteStorageProfile removes a storage profile no cluster uses.
+func (l Local) DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.DeleteStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// TestStorageProfile tests a storage profile's bucket and key now.
+func (l Local) TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	return l.Svc.TestStorageProfile(l.withPrincipal(ctx), ref)
+}
+
+// StorageProfileCredentials returns a storage profile's secret key, for a
+// node.
+func (l Local) StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error) {
+	return l.Svc.StorageProfileCredentials(l.withPrincipal(ctx), ref)
 }
 
 // ListSubscriptions returns an organization's subscriptions.

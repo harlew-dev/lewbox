@@ -394,6 +394,56 @@ func (c *Client) DNSProfileCredentials(ctx context.Context, ref string) (service
 	return out, err
 }
 
+// ListStorageProfiles returns every storage profile.
+func (c *Client) ListStorageProfiles(ctx context.Context) (service.StorageProfileList, error) {
+	var out service.StorageProfileList
+	err := c.do(ctx, http.MethodGet, "/v0/storage-profiles", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetStorageProfile returns a storage profile by ID or name.
+func (c *Client) GetStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodGet, "/v0/storage-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// CreateStorageProfile saves and tests a storage profile.
+func (c *Client) CreateStorageProfile(ctx context.Context, req service.CreateStorageProfileRequest) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles", req, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdateStorageProfile changes a storage profile.
+func (c *Client) UpdateStorageProfile(ctx context.Context, ref string, req service.UpdateStorageProfileRequest) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPatch, "/v0/storage-profiles/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// DeleteStorageProfile removes a storage profile no cluster uses.
+func (c *Client) DeleteStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodDelete, "/v0/storage-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// TestStorageProfile tests a storage profile's bucket and key now.
+func (c *Client) TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
+	var out service.StorageProfile
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// StorageProfileCredentials returns a storage profile's secret key, for a
+// node.
+func (c *Client) StorageProfileCredentials(ctx context.Context, ref string) (service.StorageProfileCredentials, error) {
+	var out service.StorageProfileCredentials
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/credentials", nil, &out, defaultTimeout)
+	return out, err
+}
+
 // ListSubscriptions returns an organization's subscriptions.
 func (c *Client) ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error) {
 	var out service.SubscriptionList

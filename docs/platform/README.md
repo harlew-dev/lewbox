@@ -42,6 +42,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Register an existing cluster](clusters/register-an-existing-cluster.md) | Manage a cluster you set up without Lewbox |
 | [Health and checks](clusters/health-and-checks.md) | What Lewbox checks, statuses, and fixes |
 | [DNS profiles](clusters/dns-profiles.md) | Save and test a Cloudflare token for a cluster in domain mode |
+| [Storage profiles](clusters/storage-profiles.md) | Save and test an S3-compatible bucket for archiving stopped sandboxes |
 | [Remove nodes and clusters](clusters/remove-nodes-and-clusters.md) | Take a node out, or stop managing a cluster |
 
 ## Accounts

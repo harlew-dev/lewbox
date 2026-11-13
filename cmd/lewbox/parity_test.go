@@ -23,6 +23,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/db"
 	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
+	"github.com/harlew-dev/lewbox/internal/objstore/objstoretest"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
@@ -1122,6 +1123,126 @@ func TestDNSProfiles(t *testing.T) {
 		`{"name":"cf-bad","zone":"missing.example","api_token":"`+token+`"}`)
 	if status != http.StatusPreconditionFailed || badErr != body {
 		t.Errorf("bad zone error = %d %q, want 412 %q", status, badErr, body)
+	}
+}
+
+func TestStorageProfiles(t *testing.T) {
+	fake := objstoretest.New(t)
+	fake.AddBucket("assets")
+	const secret = "objstore_parity_secret"
+	e := newEnv(t)
+
+	// Create through the CLI with a secret on stdin; HTTP sees the same
+	// profile, without the secret.
+	out, errOut, code := e.cliIn(secret+"\n", "storage-profile", "create", "backups",
+		"--endpoint", fake.URL, "--region", "us-east-1", "--bucket", "assets",
+		"--prefix", "clusters", "--access-key-id", fake.AccessKeyID, "--secret-access-key-stdin")
+	if code != 0 {
+		t.Fatalf("storage-profile create: exit %d: %s", code, errOut)
+	}
+	var created service.StorageProfile
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "backups" || created.Endpoint != fake.URL || created.Bucket != "assets" ||
+		created.Prefix != "clusters" || !created.PathStyle || created.Version != 1 ||
+		created.TestedAt == nil || created.TestError != "" || created.SecretLast4 != "cret" {
+		t.Fatalf("created = %+v", created)
+	}
+	if strings.Contains(out, secret) {
+		t.Errorf("the create output carries the secret: %s", out)
+	}
+	if got := e.same([]string{"storage-profile", "show", "backups"}, "GET", "/v0/storage-profiles/backups", "", 200); got != out {
+		t.Errorf("show = %s, want the create output %s", got, out)
+	}
+	e.same([]string{"storage-profile", "show", created.ID}, "GET", "/v0/storage-profiles/"+created.ID, "", 200)
+	e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200)
+
+	// Create a second one over HTTP; the CLI's list sees it.
+	status, body := e.http("POST", "/v0/storage-profiles",
+		`{"name":"backups-2","endpoint":"`+fake.URL+`","bucket":"assets","access_key_id":"`+
+			fake.AccessKeyID+`","secret_access_key":"`+secret+`"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST storage-profiles: status %d body %s", status, body)
+	}
+	var remote service.StorageProfile
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Name != "backups-2" || remote.Region != "us-east-1" || !remote.PathStyle || remote.TestedAt == nil {
+		t.Errorf("remote profile = %+v", remote)
+	}
+	list := e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200)
+	if !strings.Contains(list, `"name":"backups"`) || !strings.Contains(list, `"secret_last4"`) || strings.Contains(list, secret) {
+		t.Errorf("list = %s", list)
+	}
+
+	// Update through the CLI; the same row comes back from HTTP.
+	updated, errOut, code := e.cli("storage-profile", "update", "backups", "--name", "backups-1")
+	if code != 0 {
+		t.Fatalf("storage-profile update: exit %d: %s", code, errOut)
+	}
+	if got := e.same([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 200); got != updated {
+		t.Errorf("show after update = %s, want the update output %s", got, updated)
+	}
+	if !strings.Contains(updated, `"version":1`) {
+		t.Errorf("a name-only update bumped the version: %s", updated)
+	}
+	status, body = e.http("PATCH", "/v0/storage-profiles/backups-2", `{"prefix":"clusters/eu"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH storage-profile: status %d body %s", status, body)
+	}
+	if !strings.Contains(body, `"prefix":"clusters/eu"`) || !strings.Contains(body, `"version":2`) {
+		t.Errorf("prefix update = %s", body)
+	}
+
+	// Test: a failing test shows in test_error either way.
+	fake.FailNext("GET", "clusters/lewbox-test/", 500, "InternalError", 1)
+	tested, errOut, code := e.cli("storage-profile", "test", "backups-1")
+	if code != 0 {
+		t.Fatalf("storage-profile test: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
+		t.Errorf("failed test = %s", tested)
+	}
+	status, body = e.http("POST", "/v0/storage-profiles/backups-2/test", "")
+	if status != http.StatusOK {
+		t.Fatalf("POST storage-profile test: status %d body %s", status, body)
+	}
+	e.same([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 200)
+
+	// Credentials are the only response with the secret, and agree.
+	creds := e.same([]string{"storage-profile", "credentials", "backups-1"}, "POST", "/v0/storage-profiles/backups-1/credentials", "", 200)
+	if !strings.Contains(creds, secret) {
+		t.Errorf("credentials = %s", creds)
+	}
+
+	// Delete through the CLI, then through HTTP.
+	deleted, errOut, code := e.cli("storage-profile", "delete", "backups-1", "--yes")
+	if code != 0 || !strings.Contains(deleted, `"name":"backups-1"`) {
+		t.Fatalf("storage-profile delete: exit %d stdout %s stderr %s", code, deleted, errOut)
+	}
+	e.sameError([]string{"storage-profile", "show", "backups-1"}, "GET", "/v0/storage-profiles/backups-1", "", 404)
+	if status, body := e.http("DELETE", "/v0/storage-profiles/backups-2", ""); status != http.StatusOK {
+		t.Fatalf("DELETE storage-profile: status %d body %s", status, body)
+	}
+	if got := e.same([]string{"storage-profile", "list"}, "GET", "/v0/storage-profiles", "", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("list after delete = %q", got)
+	}
+
+	// A bucket that does not exist fails the test as a precondition, and
+	// nothing is saved.
+	badOut, badErr, badCode := e.cliIn(secret+"\n", "storage-profile", "create", "backups-bad",
+		"--endpoint", fake.URL, "--bucket", "missing", "--region", "us-east-1",
+		"--access-key-id", fake.AccessKeyID, "--secret-access-key-stdin")
+	if badCode != 1 || badOut != "" {
+		t.Fatalf("storage-profile create with a missing bucket: exit %d stdout %q", badCode, badOut)
+	}
+	status, body = e.http("POST", "/v0/storage-profiles",
+		`{"name":"backups-bad","endpoint":"`+fake.URL+`","bucket":"missing","access_key_id":"`+
+			fake.AccessKeyID+`","secret_access_key":"`+secret+`"}`)
+	if status != http.StatusPreconditionFailed || badErr != body {
+		t.Errorf("missing bucket error = %d %q, want 412 %q", status, badErr, body)
 	}
 }
 

@@ -24,26 +24,28 @@ type AdminKey struct {
 }
 
 type Cluster struct {
-	ID              string
-	Slug            string
-	Name            string
-	AdminURL        string
-	EndpointURL     string
-	Runtime         string
-	AdminTokenEnc   []byte
-	AdminTokenID    string
-	AdminTokenLast4 string
-	Status          string
-	StatusDetail    string
-	Version         string
-	Checks          string
-	CheckedAt       sql.NullTime
-	CreatedAt       time.Time
-	SyncedAt        sql.NullTime
-	SyncError       string
-	Domain          string
-	DnsProfileID    sql.NullString
-	DnsRecords      string
+	ID               string
+	Slug             string
+	Name             string
+	AdminURL         string
+	EndpointURL      string
+	Runtime          string
+	AdminTokenEnc    []byte
+	AdminTokenID     string
+	AdminTokenLast4  string
+	Status           string
+	StatusDetail     string
+	Version          string
+	Checks           string
+	CheckedAt        sql.NullTime
+	CreatedAt        time.Time
+	SyncedAt         sql.NullTime
+	SyncError        string
+	Domain           string
+	DnsProfileID     sql.NullString
+	DnsRecords       string
+	StorageProfileID sql.NullString
+	StopPolicy       string
 }
 
 type ClusterSample struct {
@@ -191,6 +193,25 @@ type SetupLink struct {
 	ClaimedAt sql.NullTime
 	UsedAt    sql.NullTime
 	OrgID     sql.NullString
+}
+
+type StorageProfile struct {
+	ID           string
+	Name         string
+	Provider     string
+	Endpoint     string
+	Region       string
+	Bucket       string
+	Prefix       string
+	PathStyle    int64
+	AccessKeyID  string
+	SecretKeyEnc []byte
+	SecretLast4  string
+	Version      int64
+	TestedAt     sql.NullTime
+	TestError    string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type Subscription struct {

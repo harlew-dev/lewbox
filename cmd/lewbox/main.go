@@ -383,6 +383,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newRegionCmd(a),
 		newPlanCmd(a),
 		newDNSProfileCmd(a),
+		newStorageProfileCmd(a),
 		newSubscriptionCmd(a),
 		newSettingsCmd(a),
 		newSetupLinkCmd(a),

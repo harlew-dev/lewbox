@@ -46,6 +46,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderDNSProfiles(w, data.Data, now)
 	case service.DNSProfile:
 		return renderObject(w, data, now)
+	case service.StorageProfileList:
+		return renderStorageProfiles(w, data.Data, now)
+	case service.StorageProfile:
+		return renderObject(w, data, now)
 	case service.SubscriptionList:
 		return renderSubscriptions(w, data.Data)
 	case service.Subscription:
@@ -202,6 +206,34 @@ func renderDNSProfiles(w io.Writer, profiles []service.DNSProfile, _ time.Time) 
 
 // dnsTestText says how a profile's last test went.
 func dnsTestText(p service.DNSProfile) string {
+	switch {
+	case p.TestError != "":
+		return "failed: " + p.TestError
+	case p.TestedAt != nil:
+		return "ok"
+	default:
+		return "never"
+	}
+}
+
+// renderStorageProfiles prints a storage profile table. The key column is
+// only the secret's last four characters, and an empty endpoint means AWS.
+func renderStorageProfiles(w io.Writer, profiles []service.StorageProfile, _ time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tBUCKET\tENDPOINT\tPREFIX\tKEY\tCLUSTERS\tTESTED")
+	for _, p := range profiles {
+		endpoint := p.Endpoint
+		if endpoint == "" {
+			endpoint = "aws"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t…%s\t%d\t%s\n",
+			p.Name, p.Bucket, endpoint, dash(p.Prefix), p.SecretLast4, p.Clusters, storageTestText(p))
+	}
+	return tw.Flush()
+}
+
+// storageTestText says how a storage profile's last test went.
+func storageTestText(p service.StorageProfile) string {
 	switch {
 	case p.TestError != "":
 		return "failed: " + p.TestError

@@ -438,6 +438,53 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// Storage profiles are saved S3-compatible bucket credentials. {ref} is
+	// an ID or name.
+	mux.HandleFunc("GET "+Prefix+"/storage-profiles", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListStorageProfiles(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateStorageProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateStorageProfile(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("PATCH "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateStorageProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateStorageProfile(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/storage-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles/{ref}/test", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.TestStorageProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/storage-profiles/{ref}/credentials", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.StorageProfileCredentials(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	// Organizations. The member and admin-key routes act on the organization
 	// named by the Lewbox-Organization header (an ID or slug), or on an
 	// admin key's own organization when the header is absent.
