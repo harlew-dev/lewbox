@@ -48,7 +48,7 @@ Branch `feat/dns-storage-archive`. Plan: [08-dns-storage-archive.md](08-dns-stor
   - The cluster check keeps `<domain>` and `*.<domain>` A/AAAA records pointing at live ingress nodes, and deletes only records Lewbox made.
 - **Storage profiles** (S3, R2, MinIO and other S3-compatible stores): saved, sealed, tested (write, read, list, delete), with a standard-library SigV4 client.
 - **Node settings:**
-  - `lewbox node configure` (also run by `node add`) installs the pinned CNCF Distribution registry on the bucket, AerolVM's snapshot push settings and the archive cleanup timer.
+  - `lewbox node configure` (also run by `node add`) installs the pinned CNCF Distribution registry on the bucket, AerolVM's snapshot push settings and the archive cleanup timer, set by the cluster's `archive_local_retention` (D37: `instant`, `1h`, `1d`, `7d` or `never`). `archive_snapshot_name` names archive snapshots `archive-<id>` or `archive-<name>-<id>`.
   - It re-runs the installer when a DNS token changed.
   - Nodes report what they applied, and outdated nodes are flagged on the cluster.
 - **Archiving:**
@@ -73,8 +73,9 @@ Branch `feat/dns-storage-archive`. Plan: [08-dns-storage-archive.md](08-dns-stor
   - `updated_at` unchanged by a snapshot.
 - The new console screens, in a browser.
 
+- `deploy/dev-cluster/archives.sh`, inside the full `e2e.sh` on real AerolVM v0.7.0 (2026-11-13, all 18 steps): registry install on real nodes, archive as `archive-<name>-<id>`, local copies kept under a 1d retention and freed under `instant`, restore on any node, delete from the bucket, and back to `keep`. That run found and fixed a bug: `node add` in local mode reported settings for a node the orchestrator calls `standalone`.
+
 **Not verified yet:**
-- `deploy/dev-cluster/archives.sh` (registry install on real nodes, archive, restore, cleanup, delete) hasn't run end to end. The host's disk was full (3.5 GB free), and AerolVM's preflight refused to start.
 - Domain mode with a real Cloudflare zone hasn't been run.
 
 **Gaps:**

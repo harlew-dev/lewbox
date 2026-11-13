@@ -39,6 +39,8 @@
 | 11 | Does deleting the snapshot retire its manifest in the bucket? | **No.** Two minutes and several push sweeps later (`retired=0` in sandboxd's log), all three manifest links and both blobs were still in the bucket |
 | 12 | Cordon and uncordon | `POST /v1/cluster/nodes/{id}/cordon` and `/uncordon` exist (204); `drain` too |
 | 13 | A full node | The dev host was short of memory. Placement refused with `503 host capacity exceeded: live memory floor breached` rather than choosing the other node. Not specific to archives |
+| 14 | A snapshot named `archive-<name>-<id>` (`archive-keeper-sb-…`) | Accepted: pushed, archived and restored like `archive-<id>` (e2e, 2026-11-13) |
+| 15 | When did a node pull an image? (Docker 29.1.3, containerd image store) | `docker image inspect` gives `Created` = when the snapshot was committed and `Metadata.LastTagTime` = when this node pulled it (13:42:57 and 13:43:10 for a restore). So a pulled copy's age can be read from its last tag time |
 
 ## What Lewbox does with this
 
@@ -48,6 +50,8 @@
   - lists the node's snapshots with the PAT over loopback;
   - for each `archive-*` snapshot whose `push_state` is `active`, removes its local `image`;
   - removes pulled `127.0.0.1:5000/cluster/<id>/snapshots/*/archive-*` images.
+
+  The cluster's `archive_local_retention` (D37) can hold copies back: `--older-than` ages a snapshot's copy from the snapshot's `created_at` and a pulled one from its last tag time (finding 15); `never` installs no timer.
 
   `docker rmi` fails, harmlessly, for an image a container still uses. Customers' own snapshots (not `archive-*`) are left alone, so restoring them by name keeps working on their node.
 - **Deleting an archive:**
