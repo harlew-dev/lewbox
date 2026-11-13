@@ -23,6 +23,16 @@ Every error Lewbox prints says what failed. Add `--json` to get the machine-read
 
 ## Installing
 
+**`lewbox: command not found` after you reconnect**: the binary is still in `~/.local/bin`, but that folder isn't on your `PATH` in the new shell. An `export PATH=…` typed in a terminal only lasts for that session. Add it to your shell's startup files once, then open a new shell:
+
+```bash
+LINE='export PATH="$HOME/.local/bin:$PATH"'
+for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
+source ~/.profile && which lewbox && lewbox version
+```
+
+If `which` still finds nothing, check that the binary exists with `ls -l ~/.local/bin/lewbox`. If it doesn't, you installed it as another user (often root, in `/root/.local/bin`): [install it again](../setup/install-the-cli.md) as this user.
+
 **`running as root is not supported`**: run `lewbox` as a normal user that can use `sudo`. It uses `sudo` for the steps that need root. On a server that only has `root`, [create a user](../setup/install-the-cli.md#first-a-normal-user-with-sudo), log in as it, and install `lewbox` there. To override, the variable must be on the same command: `LEWBOX_ALLOW_ROOT=1 lewbox install …`, not `LEWBOX_ALLOW_ROOT=1 && lewbox …`.
 
 **``sudo -n true` failed``**: outside a terminal, `sudo` can't prompt for a password. Run `sudo -v` in a terminal first, or allow passwordless `sudo` for this user.

@@ -39,9 +39,13 @@ cd "$(mktemp -d)" &&
   sha256sum --check --ignore-missing checksums.txt &&
   install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox &&
   cd - >/dev/null
+LINE='export PATH="$HOME/.local/bin:$PATH"'
+for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
 export PATH="$HOME/.local/bin:$PATH"
 lewbox version
 ```
+
+The `for` line keeps `~/.local/bin` on your `PATH` for good: `~/.profile` covers SSH logins and `~/.bashrc` covers new terminals. It adds the line only once, so running it again is safe. Without it, `lewbox` works in this shell but is `command not found` after you reconnect. On zsh, add the same line to `~/.zshrc`.
 
 ## With Go
 
@@ -49,7 +53,8 @@ You need **Go 1.21 or later** already installed. From 1.21, Go downloads the Go 
 
 ```bash
 export PATH="$PATH:$HOME/go/bin" && go install github.com/harlew-dev/lewbox/cmd/lewbox@latest && lewbox version
-echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bashrc     # keep it on PATH in new shells
+LINE='export PATH="$PATH:$HOME/go/bin"'      # keep it on PATH after you reconnect
+for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
 ```
 
 | System | `golang-go` / `golang` package | |

@@ -57,7 +57,10 @@ Download a release (amd64 and arm64):
 curl -fLO https://github.com/harlew-dev/lewbox/releases/latest/download/lewbox_linux_amd64
 curl -fLO https://github.com/harlew-dev/lewbox/releases/latest/download/checksums.txt
 sha256sum --ignore-missing -c checksums.txt
-install -m 755 lewbox_linux_amd64 ~/.local/bin/lewbox
+install -D -m 755 lewbox_linux_amd64 ~/.local/bin/lewbox
+LINE='export PATH="$HOME/.local/bin:$PATH"'      # keep it on PATH after you reconnect
+for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Or build from source (needs Go 1.27+ and Node 24+):

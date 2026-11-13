@@ -19,9 +19,13 @@ cd "$(mktemp -d)" &&
   sha256sum --check --ignore-missing checksums.txt &&
   install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox &&
   cd - >/dev/null
+LINE='export PATH="$HOME/.local/bin:$PATH"'
+for f in ~/.profile ~/.bashrc; do grep -qxF "$LINE" "$f" 2>/dev/null || echo "$LINE" >> "$f"; done
 export PATH="$HOME/.local/bin:$PATH"
 lewbox version
 ```
+
+The `for` line keeps `lewbox` on your `PATH` after you log out and back in; the `export` puts it there now.
 
 The release includes the web console, which this machine needs because it runs the orchestrator. Install it the same way on every node. `go install` also works on nodes, but only with Go 1.21 or later, which Ubuntu 22.04's `golang-go` isn't (see [Install the CLI](../setup/install-the-cli.md#with-go)).
 
