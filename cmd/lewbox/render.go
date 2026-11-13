@@ -42,6 +42,10 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderRegions(w, data.Data)
 	case service.PlanList:
 		return renderPlans(w, data.Data)
+	case service.DNSProfileList:
+		return renderDNSProfiles(w, data.Data, now)
+	case service.DNSProfile:
+		return renderObject(w, data, now)
 	case service.SubscriptionList:
 		return renderSubscriptions(w, data.Data)
 	case service.Subscription:
@@ -183,6 +187,29 @@ func renderPlans(w io.Writer, plans []service.Plan) error {
 			p.Subscriptions, yesNo(p.Default))
 	}
 	return tw.Flush()
+}
+
+// renderDNSProfiles prints a DNS profile table. The token column is only the
+// last four characters.
+func renderDNSProfiles(w io.Writer, profiles []service.DNSProfile, _ time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "NAME\tZONE\tTOKEN\tCLUSTERS\tTESTED")
+	for _, p := range profiles {
+		fmt.Fprintf(tw, "%s\t%s\t…%s\t%d\t%s\n", p.Name, p.Zone, p.TokenLast4, p.Clusters, dnsTestText(p))
+	}
+	return tw.Flush()
+}
+
+// dnsTestText says how a profile's last test went.
+func dnsTestText(p service.DNSProfile) string {
+	switch {
+	case p.TestError != "":
+		return "failed: " + p.TestError
+	case p.TestedAt != nil:
+		return "ok"
+	default:
+		return "never"
+	}
 }
 
 // renderSubscriptions prints one organization's subscriptions by region.

@@ -41,6 +41,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Add nodes](clusters/add-nodes.md) | Join more machines, one command each |
 | [Register an existing cluster](clusters/register-an-existing-cluster.md) | Manage a cluster you set up without Lewbox |
 | [Health and checks](clusters/health-and-checks.md) | What Lewbox checks, statuses, and fixes |
+| [DNS profiles](clusters/dns-profiles.md) | Save and test a Cloudflare token for a cluster in domain mode |
 | [Remove nodes and clusters](clusters/remove-nodes-and-clusters.md) | Take a node out, or stop managing a cluster |
 
 ## Accounts

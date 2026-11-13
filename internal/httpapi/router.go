@@ -392,6 +392,52 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		respond(w, log, http.StatusOK, resp, err)
 	})
 
+	// DNS profiles are saved Cloudflare credentials. {ref} is an ID or name.
+	mux.HandleFunc("GET "+Prefix+"/dns-profiles", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.ListDNSProfiles(r.Context())
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles", func(w http.ResponseWriter, r *http.Request) {
+		var req service.CreateDNSProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.CreateDNSProfile(r.Context(), req)
+		respond(w, log, http.StatusCreated, resp, err)
+	})
+
+	mux.HandleFunc("GET "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.GetDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("PATCH "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		var req service.UpdateDNSProfileRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+		resp, err := svc.UpdateDNSProfile(r.Context(), r.PathValue("ref"), req)
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("DELETE "+Prefix+"/dns-profiles/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DeleteDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles/{ref}/test", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.TestDNSProfile(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
+	mux.HandleFunc("POST "+Prefix+"/dns-profiles/{ref}/credentials", func(w http.ResponseWriter, r *http.Request) {
+		resp, err := svc.DNSProfileCredentials(r.Context(), r.PathValue("ref"))
+		respond(w, log, http.StatusOK, resp, err)
+	})
+
 	// Organizations. The member and admin-key routes act on the organization
 	// named by the Lewbox-Organization header (an ID or slug), or on an
 	// admin key's own organization when the header is absent.

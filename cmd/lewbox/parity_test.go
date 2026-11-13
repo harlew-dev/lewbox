@@ -21,6 +21,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/aerolvm/aerolvmtest"
 	"github.com/harlew-dev/lewbox/internal/db"
+	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
@@ -40,6 +41,13 @@ const adminPassword = "admin-password-1"
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvWith(t)
+}
+
+// newEnvWith is newEnv with extra service options, such as a test Cloudflare
+// API URL.
+func newEnvWith(t *testing.T, opts ...service.Option) *env {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "lewbox.db")
 	conn, err := db.Open(context.Background(), path)
 	if err != nil {
@@ -50,7 +58,8 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(httpapi.NewRouter(service.New(db.New(conn), service.WithKeyring(keyring)), slog.New(slog.DiscardHandler)))
+	opts = append([]service.Option{service.WithKeyring(keyring)}, opts...)
+	srv := httptest.NewServer(httpapi.NewRouter(service.New(db.New(conn), opts...), slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 	e := &env{t: t, dbPath: path, srv: srv}
 
@@ -1000,6 +1009,119 @@ func TestSubscriptions(t *testing.T) {
 	}
 	if got := e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200); got != `{"data":[]}`+"\n" {
 		t.Errorf("subscription list after remove = %q", got)
+	}
+}
+
+func TestDNSProfiles(t *testing.T) {
+	fake := cloudflaretest.New(t)
+	const token = "cf_parity_token"
+	fake.Token = token
+	zoneID := fake.AddZone("example.com")
+	t.Setenv("LEWBOX_CLOUDFLARE_API_URL", fake.URL)
+	e := newEnvWith(t, service.WithCloudflareURL(fake.URL))
+
+	// Create through the CLI with a token on stdin; HTTP sees the same
+	// profile, without the token.
+	out, errOut, code := e.cliIn(token+"\n", "dns-profile", "create", "cf-eu",
+		"--zone", "example.com", "--api-token-stdin", "--acme-email", "ops@example.com")
+	if code != 0 {
+		t.Fatalf("dns-profile create: exit %d: %s", code, errOut)
+	}
+	var created service.DNSProfile
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "cf-eu" || created.ZoneID != zoneID || created.Version != 1 ||
+		created.TestedAt == nil || created.TestError != "" || created.ACMEEmail != "ops@example.com" {
+		t.Fatalf("created = %+v", created)
+	}
+	if strings.Contains(out, token) {
+		t.Errorf("the create output carries the token: %s", out)
+	}
+	if got := e.same([]string{"dns-profile", "show", "cf-eu"}, "GET", "/v0/dns-profiles/cf-eu", "", 200); got != out {
+		t.Errorf("show = %s, want the create output %s", got, out)
+	}
+	e.same([]string{"dns-profile", "show", created.ID}, "GET", "/v0/dns-profiles/"+created.ID, "", 200)
+	e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200)
+
+	// Create a second one over HTTP; the CLI's list sees it.
+	status, body := e.http("POST", "/v0/dns-profiles",
+		`{"name":"cf-us","zone":"example.com","api_token":"`+token+`"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("POST dns-profiles: status %d body %s", status, body)
+	}
+	var remote service.DNSProfile
+	if err := json.Unmarshal([]byte(body), &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Name != "cf-us" || remote.ZoneID != zoneID || remote.TestedAt == nil {
+		t.Errorf("remote profile = %+v", remote)
+	}
+	list := e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200)
+	if !strings.Contains(list, `"name":"cf-eu"`) || !strings.Contains(list, `"token_last4"`) || strings.Contains(list, token) {
+		t.Errorf("list = %s", list)
+	}
+
+	// Update through the CLI; the same row comes back from HTTP.
+	updated, errOut, code := e.cli("dns-profile", "update", "cf-eu", "--name", "cf-eu-2")
+	if code != 0 {
+		t.Fatalf("dns-profile update: exit %d: %s", code, errOut)
+	}
+	if got := e.same([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 200); got != updated {
+		t.Errorf("show after update = %s, want the update output %s", got, updated)
+	}
+	if !strings.Contains(updated, `"version":1`) {
+		t.Errorf("a name-only update bumped the version: %s", updated)
+	}
+	status, body = e.http("PATCH", "/v0/dns-profiles/cf-us", `{"acme_email":"dns@example.com"}`)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH dns-profile: status %d body %s", status, body)
+	}
+
+	// Test: a failing test shows in test_error either way.
+	fake.FailNext("GET", "/zones", 500, 1)
+	tested, errOut, code := e.cli("dns-profile", "test", "cf-eu-2")
+	if code != 0 {
+		t.Fatalf("dns-profile test: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
+		t.Errorf("failed test = %s", tested)
+	}
+	status, body = e.http("POST", "/v0/dns-profiles/cf-us/test", "")
+	if status != http.StatusOK {
+		t.Fatalf("POST dns-profile test: status %d body %s", status, body)
+	}
+	e.same([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 200)
+
+	// Credentials are the only response with the token, and agree.
+	creds := e.same([]string{"dns-profile", "credentials", "cf-eu-2"}, "POST", "/v0/dns-profiles/cf-eu-2/credentials", "", 200)
+	if !strings.Contains(creds, token) {
+		t.Errorf("credentials = %s", creds)
+	}
+
+	// Delete through the CLI, then through HTTP.
+	deleted, errOut, code := e.cli("dns-profile", "delete", "cf-eu-2", "--yes")
+	if code != 0 || !strings.Contains(deleted, `"name":"cf-eu-2"`) {
+		t.Fatalf("dns-profile delete: exit %d stdout %s stderr %s", code, deleted, errOut)
+	}
+	e.sameError([]string{"dns-profile", "show", "cf-eu-2"}, "GET", "/v0/dns-profiles/cf-eu-2", "", 404)
+	if status, body := e.http("DELETE", "/v0/dns-profiles/cf-us", ""); status != http.StatusOK {
+		t.Fatalf("DELETE dns-profile: status %d body %s", status, body)
+	}
+	if got := e.same([]string{"dns-profile", "list"}, "GET", "/v0/dns-profiles", "", 200); got != `{"data":[]}`+"\n" {
+		t.Errorf("list after delete = %q", got)
+	}
+
+	// A bad zone fails the test as a precondition, and nothing is saved.
+	badOut, badErr, badCode := e.cliIn(token+"\n", "dns-profile", "create", "cf-bad",
+		"--zone", "missing.example", "--api-token-stdin")
+	if badCode != 1 || badOut != "" {
+		t.Fatalf("dns-profile create with a bad zone: exit %d stdout %q", badCode, badOut)
+	}
+	status, body = e.http("POST", "/v0/dns-profiles",
+		`{"name":"cf-bad","zone":"missing.example","api_token":"`+token+`"}`)
+	if status != http.StatusPreconditionFailed || badErr != body {
+		t.Errorf("bad zone error = %d %q, want 412 %q", status, badErr, body)
 	}
 }
 

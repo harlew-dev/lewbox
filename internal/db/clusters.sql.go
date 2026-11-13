@@ -48,7 +48,7 @@ INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_to
                       admin_token_id, admin_token_last4, status, status_detail, version,
                       checks, checked_at, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records
 `
 
 type CreateClusterParams struct {
@@ -106,6 +106,9 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
 	)
 	return i, err
 }
@@ -123,7 +126,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id string) (int64, error) {
 }
 
 const getClusterByID = `-- name: GetClusterByID :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE id = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records FROM clusters WHERE id = ?
 `
 
 func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error) {
@@ -147,12 +150,15 @@ func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
 	)
 	return i, err
 }
 
 const getClusterBySlug = `-- name: GetClusterBySlug :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters WHERE slug = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records FROM clusters WHERE slug = ?
 `
 
 func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, error) {
@@ -176,12 +182,15 @@ func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, e
 		&i.CreatedAt,
 		&i.SyncedAt,
 		&i.SyncError,
+		&i.Domain,
+		&i.DnsProfileID,
+		&i.DnsRecords,
 	)
 	return i, err
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error FROM clusters ORDER BY slug
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records FROM clusters ORDER BY slug
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -211,6 +220,9 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.CreatedAt,
 			&i.SyncedAt,
 			&i.SyncError,
+			&i.Domain,
+			&i.DnsProfileID,
+			&i.DnsRecords,
 		); err != nil {
 			return nil, err
 		}

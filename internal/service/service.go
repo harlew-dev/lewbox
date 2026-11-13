@@ -25,6 +25,7 @@ type Service struct {
 
 	keyring        *secrets.Keyring
 	aerolvmOptions []aerolvm.Option
+	cloudflareURL  string
 
 	limiter       *loginLimiter
 	signupLimiter *loginLimiter
@@ -53,6 +54,12 @@ func WithKeyring(k *secrets.Keyring) Option {
 // creates, such as a short retry budget in tests.
 func WithAerolVMOptions(opts ...aerolvm.Option) Option {
 	return func(s *Service) { s.aerolvmOptions = append(s.aerolvmOptions, opts...) }
+}
+
+// WithCloudflareURL points every Cloudflare client the service creates at u,
+// such as a test server. An empty u keeps Cloudflare's API.
+func WithCloudflareURL(u string) Option {
+	return func(s *Service) { s.cloudflareURL = u }
 }
 
 // WithClock replaces the service's clock, which tests use for fixed times.

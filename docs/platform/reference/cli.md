@@ -392,3 +392,27 @@ Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB
 ### `lewbox plan delete ID|SLUG`
 
 Deletes a plan no subscription uses and that is not the default. Asks to confirm.
+
+### `lewbox dns-profile list` · `lewbox dns-profile show ID|NAME`
+
+Every saved Cloudflare profile with its zone, the token's last four characters, how many clusters use it and its last test result, or one profile. Instance admins only. The token is never shown, only `…abcd`.
+
+### `lewbox dns-profile create NAME --zone ZONE --api-token-stdin [--acme-email EMAIL]`
+
+Saves and tests a Cloudflare profile. The token is read from stdin, never from a flag. The test finds the zone, creates and deletes the TXT record `_lewbox-test.<zone>`, and a failure saves nothing: it exits with a precondition error whose details name the `zone` or `write` step. See [DNS profiles](../clusters/dns-profiles.md).
+
+### `lewbox dns-profile update ID|NAME [--name NAME] [--zone ZONE] [--api-token-stdin] [--acme-email EMAIL]`
+
+Changes only the flags given. A new zone or token is tested before it is saved; either changes the profile's `version`. `--acme-email ""` clears the address.
+
+### `lewbox dns-profile test ID|NAME`
+
+Runs the test again now. A failure is recorded in `test_error` and is not an error exit.
+
+### `lewbox dns-profile credentials ID|NAME`
+
+Prints the profile's name, zone, zone ID, ACME email, version and **API token**. It is the only command that returns the token, and it exists to configure a node. Instance admins only.
+
+### `lewbox dns-profile delete ID|NAME [--yes]`
+
+Deletes a profile no cluster uses. Asks to confirm; a profile in use is refused with `409`.

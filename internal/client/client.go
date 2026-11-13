@@ -345,6 +345,55 @@ func (c *Client) DeletePlan(ctx context.Context, ref string) (service.Plan, erro
 	return out, err
 }
 
+// ListDNSProfiles returns every DNS profile.
+func (c *Client) ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error) {
+	var out service.DNSProfileList
+	err := c.do(ctx, http.MethodGet, "/v0/dns-profiles", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// GetDNSProfile returns a DNS profile by ID or name.
+func (c *Client) GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodGet, "/v0/dns-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// CreateDNSProfile saves and tests a DNS profile.
+func (c *Client) CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles", req, &out, defaultTimeout)
+	return out, err
+}
+
+// UpdateDNSProfile changes a DNS profile.
+func (c *Client) UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPatch, "/v0/dns-profiles/"+url.PathEscape(ref), req, &out, defaultTimeout)
+	return out, err
+}
+
+// DeleteDNSProfile removes a DNS profile no cluster uses.
+func (c *Client) DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodDelete, "/v0/dns-profiles/"+url.PathEscape(ref), nil, &out, defaultTimeout)
+	return out, err
+}
+
+// TestDNSProfile tests a DNS profile's token now.
+func (c *Client) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	var out service.DNSProfile
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// DNSProfileCredentials returns a DNS profile's token, for a node.
+func (c *Client) DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error) {
+	var out service.DNSProfileCredentials
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/credentials", nil, &out, defaultTimeout)
+	return out, err
+}
+
 // ListSubscriptions returns an organization's subscriptions.
 func (c *Client) ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error) {
 	var out service.SubscriptionList

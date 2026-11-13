@@ -183,7 +183,8 @@ func (a *app) service(ctx context.Context) (*service.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.svc = service.New(db.New(conn), service.WithKeyring(keyring))
+	a.svc = service.New(db.New(conn), service.WithKeyring(keyring),
+		service.WithCloudflareURL(os.Getenv("LEWBOX_CLOUDFLARE_API_URL")))
 	return a.svc, nil
 }
 
@@ -381,6 +382,7 @@ func newRootCmd(a *app) *cobra.Command {
 		newLimitsCmd(a),
 		newRegionCmd(a),
 		newPlanCmd(a),
+		newDNSProfileCmd(a),
 		newSubscriptionCmd(a),
 		newSettingsCmd(a),
 		newSetupLinkCmd(a),

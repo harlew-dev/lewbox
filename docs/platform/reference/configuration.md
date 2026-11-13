@@ -33,6 +33,7 @@ Flags win over environment variables, which win over saved settings, which win o
 | `LEWBOX_BOOTSTRAP_ADMIN_PASSWORD_FILE` | | Or read the password from this file |
 | `LEWBOX_DOCS_DIR` | | Development only: serve the docs from this folder instead of the embedded copy. It holds the `consumer/` and `platform/` books. Restart after editing |
 | `LEWBOX_WEB_DIR` | | Development only: serve the web console from this folder instead of the embedded build |
+| `LEWBOX_CLOUDFLARE_API_URL` | | Development only: send DNS profile tests to this Cloudflare API base instead of `https://api.cloudflare.com/client/v4`. Tests point it at a fake |
 
 ### Machines (`install`, `node add`, `update`)
 

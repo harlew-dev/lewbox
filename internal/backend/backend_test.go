@@ -17,6 +17,7 @@ import (
 	"github.com/harlew-dev/lewbox/internal/backend"
 	"github.com/harlew-dev/lewbox/internal/client"
 	"github.com/harlew-dev/lewbox/internal/db"
+	"github.com/harlew-dev/lewbox/internal/dns/cloudflaretest"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 	"github.com/harlew-dev/lewbox/internal/service"
@@ -37,7 +38,7 @@ type harness struct {
 	url    string
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...service.Option) *harness {
 	t.Helper()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -50,10 +51,11 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(db.New(conn),
+	svcOpts := append([]service.Option{
 		service.WithKeyring(keyring),
 		service.WithAerolVMOptions(aerolvm.WithRetry(0)),
-	)
+	}, opts...)
+	svc := service.New(db.New(conn), svcOpts...)
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 
@@ -912,6 +914,84 @@ func TestSetupLinkBackendsAgree(t *testing.T) {
 		both("list onboarding links after revoke", listLinks),
 		both("revoke a missing link", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.RevokeSetupLink(ctx, "missing")
+		}),
+	})
+}
+
+func TestDNSProfileBackendsAgree(t *testing.T) {
+	fake := cloudflaretest.New(t)
+	const token = "cf_backend_agree_token"
+	fake.Token = token
+	zoneID := fake.AddZone("example.com")
+	h := newHarness(t, service.WithCloudflareURL(fake.URL))
+
+	create := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.CreateDNSProfile(ctx, service.CreateDNSProfileRequest{
+			Name: "cf-eu", Zone: "example.com", APIToken: token, ACMEEmail: "ops@example.com",
+		})
+	}
+	get := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.GetDNSProfile(ctx, "cf-eu")
+	}
+	list := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListDNSProfiles(ctx)
+	}
+	test := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.TestDNSProfile(ctx, "cf-eu")
+	}
+
+	runSteps(t, h, []step{
+		{
+			name:    "create a DNS profile",
+			local:   create,
+			remote:  get,
+			compare: true,
+			check: func(t *testing.T, v any) {
+				p, ok := v.(service.DNSProfile)
+				if !ok || p.ZoneID != zoneID || p.Version != 1 || p.TestedAt == nil || p.TokenLast4 != "oken" {
+					t.Errorf("profile = %+v", v)
+				}
+			},
+		},
+		both("list DNS profiles", list),
+		{
+			name:    "test a DNS profile",
+			local:   test,
+			remote:  get,
+			compare: true,
+		},
+		both("DNS profile credentials", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.DNSProfileCredentials(ctx, "cf-eu")
+		}),
+		{
+			name: "rename a DNS profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				name := "cf-west"
+				return b.UpdateDNSProfile(ctx, "cf-eu", service.UpdateDNSProfileRequest{Name: &name})
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetDNSProfile(ctx, "cf-west")
+			},
+			compare: true,
+		},
+		{
+			name: "delete a DNS profile",
+			local: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.GetDNSProfile(ctx, "cf-west")
+			},
+			remote: func(ctx context.Context, b backend.Backend) (any, error) {
+				return b.DeleteDNSProfile(ctx, "cf-west")
+			},
+			compare: true,
+		},
+		both("list DNS profiles after delete", list),
+		both("missing DNS profile", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.GetDNSProfile(ctx, "cf-west")
+		}),
+		both("a refused token", func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.CreateDNSProfile(ctx, service.CreateDNSProfileRequest{
+				Name: "cf-bad", Zone: "example.com", APIToken: "wrong",
+			})
 		}),
 	})
 }

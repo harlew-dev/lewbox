@@ -110,6 +110,20 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 | `PATCH /v0/plans/{ref}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
 | `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while a subscription uses it or it is the default plan |
 
+### DNS profiles
+
+Instance admins only. A DNS profile is a saved Cloudflare token, kept sealed and shown only by its last four characters. Creating one, or changing its zone or token, tests it first and saves nothing when the test fails. See [DNS profiles](../clusters/dns-profiles.md).
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/dns-profiles` | admin | `{data: [DNSProfile]}`, ordered by name |
+| `POST /v0/dns-profiles` | admin | `{name, provider, zone, api_token, acme_email}` → `201` DNSProfile. A failed test → `412`, with `details.step` set to `zone` or `write` |
+| `GET /v0/dns-profiles/{ref}` | admin | DNSProfile, by ID or name |
+| `PATCH /v0/dns-profiles/{ref}` | admin | Any of `name`, `zone`, `api_token` and `acme_email`. A new zone or token is tested before it is saved and bumps `version` |
+| `DELETE /v0/dns-profiles/{ref}` | admin | → the DNSProfile. `409` while a cluster uses it |
+| `POST /v0/dns-profiles/{ref}/test` | admin | Test now → DNSProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/dns-profiles/{ref}/credentials` | admin | `{name, provider, zone, zone_id, api_token, acme_email, version}`. The only response with the token |
+
 ### Clusters
 
 | Route | Who | |
@@ -279,6 +293,8 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 **Subscription**: `{region, plan, limits, overrides, created_at}`. `region` is a Region; `limits` are the effective limits (the plan's, with the override); `overrides` (`{sandboxes, vcpus, memory_mb}`) is only present for instance admins. A `null` limit is unlimited or, on an override, the plan's value.
 
 **Plan**: `{id, slug, name, max_sandboxes, max_vcpus, max_memory_mb, subscriptions, default, created_at}`. A `null` limit is unlimited; `subscriptions` is how many subscriptions use it.
+
+**DNSProfile**: `{id, name, provider, zone, zone_id, token_last4, acme_email, version, clusters, tested_at, test_error, created_at, updated_at}`. `provider` is `cloudflare`; `version` goes up when the zone or token changes, so nodes can tell they are out of date. The token itself is never in it.
 
 **Settings**: `{instance_name, signup, default_plan, default_region}`. `signup` is `open`, `approval` or `closed`; `default_plan` and `default_region` are a plan and cluster slug, or `null`.
 

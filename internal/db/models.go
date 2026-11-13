@@ -41,6 +41,9 @@ type Cluster struct {
 	CreatedAt       time.Time
 	SyncedAt        sql.NullTime
 	SyncError       string
+	Domain          string
+	DnsProfileID    sql.NullString
+	DnsRecords      string
 }
 
 type ClusterSample struct {
@@ -48,6 +51,22 @@ type ClusterSample struct {
 	At        time.Time
 	Status    string
 	LatencyMs int64
+}
+
+type DnsProfile struct {
+	ID          string
+	Name        string
+	Provider    string
+	Zone        string
+	ZoneID      string
+	ApiTokenEnc []byte
+	TokenLast4  string
+	AcmeEmail   string
+	Version     int64
+	TestedAt    sql.NullTime
+	TestError   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Membership struct {

@@ -57,6 +57,14 @@ type Backend interface {
 	UpdatePlan(ctx context.Context, ref string, req service.UpdatePlanRequest) (service.Plan, error)
 	DeletePlan(ctx context.Context, ref string) (service.Plan, error)
 
+	ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error)
+	GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error)
+	UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error)
+	DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error)
+	DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error)
+
 	ListSubscriptions(ctx context.Context, org string) (service.SubscriptionList, error)
 	SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error)
 	DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error)
@@ -287,6 +295,41 @@ func (l Local) UpdatePlan(ctx context.Context, ref string, req service.UpdatePla
 // DeletePlan removes a plan that no subscription uses.
 func (l Local) DeletePlan(ctx context.Context, ref string) (service.Plan, error) {
 	return l.Svc.DeletePlan(l.withPrincipal(ctx), ref)
+}
+
+// ListDNSProfiles returns every DNS profile.
+func (l Local) ListDNSProfiles(ctx context.Context) (service.DNSProfileList, error) {
+	return l.Svc.ListDNSProfiles(l.withPrincipal(ctx))
+}
+
+// GetDNSProfile returns a DNS profile by ID or name.
+func (l Local) GetDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.GetDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// CreateDNSProfile saves and tests a DNS profile.
+func (l Local) CreateDNSProfile(ctx context.Context, req service.CreateDNSProfileRequest) (service.DNSProfile, error) {
+	return l.Svc.CreateDNSProfile(l.withPrincipal(ctx), req)
+}
+
+// UpdateDNSProfile changes a DNS profile.
+func (l Local) UpdateDNSProfile(ctx context.Context, ref string, req service.UpdateDNSProfileRequest) (service.DNSProfile, error) {
+	return l.Svc.UpdateDNSProfile(l.withPrincipal(ctx), ref, req)
+}
+
+// DeleteDNSProfile removes a DNS profile no cluster uses.
+func (l Local) DeleteDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.DeleteDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// TestDNSProfile tests a DNS profile's token now.
+func (l Local) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
+	return l.Svc.TestDNSProfile(l.withPrincipal(ctx), ref)
+}
+
+// DNSProfileCredentials returns a DNS profile's token, for a node.
+func (l Local) DNSProfileCredentials(ctx context.Context, ref string) (service.DNSProfileCredentials, error) {
+	return l.Svc.DNSProfileCredentials(l.withPrincipal(ctx), ref)
 }
 
 // ListSubscriptions returns an organization's subscriptions.
