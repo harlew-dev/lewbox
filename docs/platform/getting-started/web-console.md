@@ -75,7 +75,7 @@ The sidebar starts with the **workspace menu**: Workspace settings, every worksp
 
 An account that belongs to no workspace goes to **onboarding** (`/onboarding`) to create one, then sees a short getting-started tour. Someone you send a [setup link](../accounts/customers-and-plans.md) to opens `/setup/<token>`, creates an account there (even when sign-up is closed), and then creates a workspace that starts on the link's plan and cluster.
 
-Every page also has **Account settings** (your email and password) and the documentation, in the account menu at the bottom of the sidebar.
+Every page also has **Account settings** (your email, password and [access tokens](../accounts/access-tokens.md)) and the documentation, in the account menu at the bottom of the sidebar.
 
 Customers only see their workspace's region, never clusters, nodes or other workspaces. The API enforces the same rules as the pages. Lewbox refuses to remove or disable the last enabled instance admin.
 

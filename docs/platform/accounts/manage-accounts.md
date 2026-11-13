@@ -45,14 +45,14 @@ lewbox user set-password alice@example.com     # admins, for anyone
 lewbox user set-password you@example.com       # anyone, for themselves
 ```
 
-This ends the account's other sessions, so a leaked password stops working everywhere at once. Email-based resets come with email support.
+This ends the account's other sessions, so a leaked password stops working everywhere at once. It doesn't revoke the account's [access tokens](access-tokens.md); revoke those with `lewbox token revoke`. Email-based resets come with email support.
 
 ## Disable or remove
 
 ```bash
-lewbox user disable alice@example.com     # blocks sign-in and ends every session
+lewbox user disable alice@example.com     # blocks sign-in, ends every session, revokes every access token
 lewbox user enable alice@example.com
-lewbox user remove alice@example.com      # deletes the account and its sessions
+lewbox user remove alice@example.com      # deletes the account, its sessions and its access tokens
 ```
 
 `disable` and `remove` ask you to confirm (`--yes` skips the question). Lewbox never lets you disable or remove the last enabled instance admin, so you can't lock yourself out.

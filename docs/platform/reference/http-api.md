@@ -21,7 +21,7 @@ TOKEN=$(curl -fsS -X POST https://lewbox.example.com/v0/auth/login \
 curl -fsS -H "Authorization: Bearer $TOKEN" https://lewbox.example.com/v0/clusters
 ```
 
-Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
+Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An [access token](../accounts/access-tokens.md) (`lbp_…`, see [below](#access-tokens)) works the same way and acts as its account; use one for scripts and CI. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
 
 Browsers use `POST /v0/auth/session` instead. It takes the same body and sets an `HttpOnly` session cookie, so the token never reaches JavaScript:
 
@@ -69,8 +69,8 @@ API responses carry `Cache-Control: no-store`.
 | `POST /v0/auth/login` | anyone | `{email, password}` → `{token, expires_at, user}` |
 | `POST /v0/auth/session` | anyone | Same body, sets the browser session cookie → `{expires_at, user}`. The token is only in the cookie |
 | `POST /v0/auth/signup` | anyone | `{email, password, setup_token}` → the same body and cookie as `POST /v0/auth/session`. It creates only the account, with no workspace. A valid, unused `setup_token` allows sign-up in any mode and claims the link; without one, `403` when sign-up is closed. An invalid or used token is `400`; a taken email is `409` |
-| `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}` |
-| `GET /v0/me` | signed in | `{user, organizations, via}` for an account; `{organization, admin_key, via}` for an API key |
+| `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}`. `400` for an access token or API key, which have no session |
+| `GET /v0/me` | signed in | `{user, organizations, via}` for an account, plus `access_token` when `via` is `access_token`; `{organization, admin_key, via}` for an API key |
 | `GET /v0/setup/{token}` | anyone | The public setup page for an unused, unexpired link: `{instance_name, plan: {name}, region: {name}, expires_at}`. Never a slug or who claimed it. `404` (`this setup link is invalid or has expired`) for an unknown, used or expired link |
 
 ### Regions
@@ -165,6 +165,16 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
 | `PUT /v0/nodes/{ref}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention}`: the versions a node applied, a name or `null` for each profile, and the `archive_local_retention` it applied with its storage (`null` counts as `instant`). A version below 1 with a profile → `400`; a node in no cluster → `412`. → the Node |
 
+### Access tokens
+
+An account's tokens for the API. `?user=` (an ID or email) names another account: instance admins only, and required in local mode. Without it, the routes act on the caller's own account.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/access-tokens` | signed in (not an API key) | `{data: [AccessToken]}`, newest first, revoked ones included |
+| `POST /v0/access-tokens` | signed in, not with a token | `{name, expires_in, user}` → `201` AccessToken plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `user` is optional, as `?user=`. A token can't create another (`403`); a disabled account gets `409` |
+| `DELETE /v0/access-tokens/{ref}` | signed in (not an API key) | Revoke by ID or live name → the AccessToken. A token may revoke itself |
+
 ### Accounts
 
 | Route | Who | |
@@ -173,7 +183,7 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | `POST /v0/users` | admin | `{email, password, instance_admin}` → `201` User |
 | `GET /v0/users/{ref}` | admin, or themselves | User |
 | `DELETE /v0/users/{ref}` | admin | → the User |
-| `POST /v0/users/{ref}/disable` | admin | Ends their sessions → User |
+| `POST /v0/users/{ref}/disable` | admin | Ends their sessions and revokes their access tokens → User |
 | `POST /v0/users/{ref}/enable` | admin | → User |
 | `PUT /v0/users/{ref}/password` | admin, or themselves | `{password}` → User |
 
@@ -341,7 +351,9 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **Instance**: `{name, signup}`; public.
 
-**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. For an API key it is `{organization, admin_key, via}` instead.
+**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. `via` is `session`, or `access_token` with the token in `access_token`. For an API key it is `{organization, admin_key, via}` instead.
+
+**AccessToken**: `{id, user_id, name, prefix, last4, status, created_at, last_used_at, expires_at, revoked_at}`. `status` is `active`, `expired` or `revoked`. The token is only in the create response.
 
 **Member**: `{id, organization_id, user_id, email, role, created_at}`.
 

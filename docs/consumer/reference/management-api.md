@@ -25,6 +25,8 @@ A browser signs in with `POST /v0/auth/session`, which sets an `HttpOnly` cookie
 
 For a backend, create a **management API key** (`lba_…`) instead of storing a person's password. Owners and admins can create them in **Workspace settings → API keys**, or over HTTP with `POST /v0/admin-keys`. The token is shown once; Lewbox keeps only its prefix and last characters. A key lasts 90 days by default, or with no expiry if you leave `expires_in` empty. Revoke it with `DELETE /v0/admin-keys/{id or name}`.
 
+For your own scripts across every workspace you belong to, create a personal **access token** (`lbp_…`) in **Account settings → Access tokens**, or with `POST /v0/access-tokens` and `{"name": "…", "expires_in": "90d"}`. It acts as you, with your role in each workspace, so send `Lewbox-Organization` to pick one. List yours with `GET /v0/access-tokens`, and revoke one with `DELETE /v0/access-tokens/{id or name}`. A token can't create another token.
+
 Routes that act on a workspace take it from the `Lewbox-Organization` header (its slug or ID). A management key acts for its own workspace, so it can leave the header out; naming a different workspace gets `404`.
 
 ## Workspace and members

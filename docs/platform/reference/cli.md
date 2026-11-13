@@ -3,7 +3,7 @@ title: CLI reference
 description: Every lewbox command, its flags, and what it does.
 ---
 
-`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `subscriptions`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
+`lewbox <noun> <verb> [args] [flags]`. Nouns also work in the plural (`nodes`, `clusters`, `users`, `tokens`, `orgs`, `members`, `admin-keys`, `keys`, `plans`, `subscriptions`, `regions`), and `list` has the alias `ls`; `remove` has `rm` and `delete`. Commands that take an `ID|NAME` accept either.
 
 ***
 
@@ -55,18 +55,26 @@ Signs in and saves a context, then makes it current. Prompts for email and passw
 |---|---|
 | `--email EMAIL` | The account's email |
 | `--password-stdin` | Read the password from stdin |
-| `--key-stdin` | Save a token read from stdin instead of signing in. With an API key (`lba_…`), its organization becomes the context's default |
+| `--token` | Save a token instead of signing in: an [access token](../accounts/access-tokens.md) (`lbp_…`) or an organization's API key (`lba_…`). On its own it reads the token from stdin, or asks for it without echo on a terminal. `--token=TOKEN` also works, with a warning that it stays in your shell history; `--token TOKEN` with a space is refused (exit 2). With an API key, its organization becomes the context's default. `--key-stdin` is an older name for `--token` on its own |
 | `--context-name NAME` | Save it under this name. Default: the URL's host |
 
-The URL defaults to `--api-url`. The output never contains the token.
+The URL defaults to `--api-url`. The output never contains the token. `--token` can't be combined with `--email` or `--password-stdin`.
 
 ### `lewbox logout [--all]`
 
-Ends the session on the server and deletes the saved token, for the current context or (with `--all`) every context.
+Ends the session on the server and deletes the saved token, for the current context or (with `--all`) every context. A context saved with `--token` has no session: `logout` only deletes the saved token and says that the token still works until it expires or is revoked.
 
 ### `lewbox whoami`
 
-The signed-in account, how you're signed in (`session` or `local`), and the context.
+The signed-in account, how you're signed in (`session`, `access_token`, `admin_key` or `local`), and the context. With an access token it also shows the token.
+
+### `lewbox token create NAME [--expires-in DUR | --never-expires] [--user EMAIL]`
+
+Creates an [access token](../accounts/access-tokens.md) and prints its `lbp_…` token, once. The token acts as the account, with its rights: an instance admin's token can run every operator command. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Any account can create its own tokens, but not while signed in with a token. `--user` names another account (instance admins only); it is required in local mode, which has no account. Aliases: `tokens`, `access-token`, `access-tokens`.
+
+### `lewbox token list [--user EMAIL]` · `lewbox token revoke ID|NAME [--user EMAIL]`
+
+Lists the account's tokens, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm. `--user` works as for `create`.
 
 ### `lewbox context list|use NAME|remove NAME`
 

@@ -50,6 +50,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | | |
 |---|---|
 | [Sign in](accounts/sign-in.md) | `lewbox login`, contexts, scripts and CI |
+| [Access tokens](accounts/access-tokens.md) | `lbp_` tokens that act as your account, for scripts, CI and automating clusters |
 | [Manage accounts](accounts/manage-accounts.md) | Instance admins and regular accounts, passwords, disabling |
 | [Organizations and API keys](accounts/organizations-and-api-keys.md) | Organizations, member roles, and `lba_` API keys for your backend |
 | [Customers, plans and limits](accounts/customers-and-plans.md) | Sign-up, setup links, plans, a workspace's region, approvals, suspension |
@@ -87,4 +88,4 @@ The design notes are in [docs/design](../design/): [CLI commands](../design/cli-
 
 ## What's built
 
-Built and tested end to end: the orchestrator, the admin web console, accounts and sign-in, organizations with members and API keys, customer sign-up and setup links, plans (one region per workspace), sandbox keys, sandboxes and usage, snapshots, the customer portal, installing AerolVM, starting and joining clusters, registering existing clusters, health checks, removing nodes and clusters, and updating. Planned (see [MVP.md](../../MVP.md)): webhooks and cluster-wide rolling upgrades.
+Built and tested end to end: the orchestrator, the admin web console, accounts and sign-in, access tokens, organizations with members and API keys, customer sign-up and setup links, plans (one region per workspace), sandbox keys, sandboxes and usage, snapshots, the customer portal, installing AerolVM, starting and joining clusters, registering existing clusters, health checks, removing nodes and clusters, and updating. Planned (see [MVP.md](../../MVP.md)): webhooks and cluster-wide rolling upgrades.

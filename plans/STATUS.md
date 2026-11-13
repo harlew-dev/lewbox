@@ -18,6 +18,7 @@ Lewbox is a self-hosted E2B: you run AerolVM clusters, and Lewbox is the account
   - 30-day uptime bars and node metrics (sandboxes, vCPU allocated, memory, disk).
   - A warning when a node's cluster certificate is near expiry.
 - **Users**, and **Settings** (sign-up mode, default plan and regions).
+- **Access tokens** (D38): `lbp_…` tokens that act as an account, made in Account settings or with `lewbox token create`, for scripts and CI. An instance admin's token can add clusters and nodes; `lewbox login --token` saves one.
 - **Machines**: `lewbox install`, `node add`, `update` and `firewall enable` set them up.
 
 **For customers (portal, `/`):**

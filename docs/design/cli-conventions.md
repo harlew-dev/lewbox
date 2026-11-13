@@ -185,7 +185,7 @@ Commands that change this machine (`install`, `node add`, `update --aerolvm`) wo
 
 ## 6. Sign-in and stored settings
 
-- `lewbox login [<url>]` prompts for email and password, and saves a CLI session token. `--password-stdin` reads the password from stdin. `--key-stdin` reads an admin key (`lba_…`, MVP §2) from stdin instead, so it never shows up in `ps`. A browser and device-code sign-in comes when the console has one.
+- `lewbox login [<url>]` prompts for email and password, and saves a CLI session token. `--password-stdin` reads the password from stdin. `--token` saves a token instead: an access token (`lbp_…`, D38) or an admin key (`lba_…`, MVP §2). On its own it reads stdin, or prompts without echo, so the token never shows up in `ps`. `--key-stdin` is its older, hidden name. A browser and device-code sign-in comes when the console has one.
 - Each sign-in is saved as a **context**: a name, the API URL, the token and a default organization. `login` names it after the host (`lewbox.acme.dev`) unless you pass `--context-name`. `context use` switches between them. `local` is a built-in context that is always there.
 - `lewbox logout` ends the session on the server and deletes the token. `--all` does that for every context.
 - `lewbox whoami` shows the account, the organization and the role you'd act as.
@@ -212,7 +212,7 @@ The server checks every permission. The CLI only shows a clear message on `forbi
 
 - `remove`, `revoke`, `delete`, `disable`, `suspend` and `cluster upgrade` show what they will do and ask to confirm. `--yes` skips that.
 - The CLI never runs as root, and refuses to when `$SUDO_USER` is set. When a step needs root, like running the AerolVM installer, it runs that one step with `sudo` and prints the exact command first, with secrets masked. Your config and database stay in your home directory, owned by you.
-- Secrets are never taken as flag values. Every secret has a `--…-stdin` flag (`--password-stdin`, `--key-stdin`, `--admin-token-stdin`, `--dns-api-token-stdin`).
+- Secrets are never taken as flag values. Every secret has a `--…-stdin` flag (`--password-stdin`, `--admin-token-stdin`, `--dns-api-token-stdin`). The one exception is `login --token=<token>`, kept by request (D38): it works but warns, and `--token` on its own is the stdin form.
 
 ---
 
