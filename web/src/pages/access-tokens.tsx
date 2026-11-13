@@ -164,14 +164,17 @@ export function AccessTokensSection({ instanceAdmin }: { instanceAdmin: boolean 
   )
 }
 
-function CreateTokenDialog({
+// Also opened over the server dialogs, to sign a machine's CLI in.
+export function CreateTokenDialog({
   open,
   onClose,
   onCreated,
+  defaultName = '',
 }: {
   open: boolean
   onClose: () => void
   onCreated: () => void
+  defaultName?: string
 }) {
   const count = useOpenCount(open)
   // Once a token exists, the dialog only closes from its Done button, so the
@@ -181,6 +184,7 @@ function CreateTokenDialog({
     <Dialog open={open} onClose={created ? () => {} : onClose} size="xl">
       <CreateToken
         key={count}
+        defaultName={defaultName}
         onClose={() => {
           setCreated(false)
           onClose()
@@ -194,8 +198,16 @@ function CreateTokenDialog({
   )
 }
 
-function CreateToken({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = useState('')
+function CreateToken({
+  onClose,
+  onCreated,
+  defaultName,
+}: {
+  onClose: () => void
+  onCreated: () => void
+  defaultName: string
+}) {
+  const [name, setName] = useState(defaultName)
   const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
   const [token, setToken] = useState<api.NewAccessToken | null>(null)
   const create = useAction(() => api.createAccessToken({ name, expires_in: expiresIn }), {

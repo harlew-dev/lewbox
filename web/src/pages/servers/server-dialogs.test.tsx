@@ -1,10 +1,11 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { Route } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { choose, json, renderAt, stubAPI } from '../../test/render'
 import { AddNodeDialog } from './add-node-dialog'
 import { StartClusterDialog } from './start-cluster-dialog'
 import type { Cluster } from '../../lib/api'
+import { waitTiming } from './wait-step'
 
 const dnsProfile = {
   id: 'd1', name: 'cf-prod', provider: 'cloudflare', zone: 'example.com', zone_id: 'z', token_last4: 'abcd',
@@ -23,6 +24,16 @@ function stub() {
     'GET /v0/storage-profiles': () => json(200, { data: [storageProfile] }),
   })
 }
+
+// Poll fast, so a test sees the second answer quickly.
+beforeEach(() => {
+  waitTiming.every = 20
+})
+afterEach(() => {
+  waitTiming.every = 3000
+})
+
+const node = (id: string, name: string) => ({ id, name, url: '', created_at: '', cluster: 'eu-west', alive: true })
 
 function text(label: string) {
   return screen.getByLabelText(label)
@@ -150,5 +161,107 @@ describe('AddNodeDialog', () => {
     expect(await screen.findByText(/shows as outdated until/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Create join command' }))
     await waitFor(() => expect(screen.getByText(/Run this on the machine/)).toBeInTheDocument())
+  })
+
+  it('waits for the named node to join, then says so', async () => {
+    let calls = 0
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/nodes': () => {
+        calls += 1
+        const nodes = [node('n1', 'node-1')]
+        if (calls > 2) nodes.push(node('n9', 'other'), node('n2', 'node-2'))
+        return json(200, { data: nodes })
+      },
+    })
+    renderAt(
+      '/',
+      <Route path="/" element={<AddNodeDialog open onClose={() => {}} clusters={[domainCluster]} cluster={domainCluster} />} />,
+    )
+    fireEvent.change(await screen.findByLabelText('Node name'), { target: { value: 'node-2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(await screen.findByText('Waiting for node “node-2” to join “eu-west”…')).toBeInTheDocument()
+    expect(await screen.findByText('Node “node-2” joined “eu-west”.')).toBeInTheDocument()
+  })
+
+  it('signs in with a token made in a dialog over this one', async () => {
+    const calls = stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/nodes': () => json(200, { data: [] }),
+      'POST /v0/access-tokens': () =>
+        json(201, {
+          id: 't1', name: 'Node node-2', prefix: 'lbp_ab', last4: 'wxyz', status: 'active', created_at: '',
+          last_used_at: null, expires_at: null, revoked_at: null, token: 'lbp_secret',
+        }),
+    })
+    renderAt(
+      '/',
+      <Route path="/" element={<AddNodeDialog open onClose={() => {}} clusters={[domainCluster]} cluster={domainCluster} />} />,
+    )
+    fireEvent.change(await screen.findByLabelText('Node name'), { target: { value: 'node-2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    await screen.findByText('Join the cluster')
+    expect(code()).toContain('lewbox login http://localhost:3000 --token')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create an access token' }))
+    expect(await screen.findByLabelText('Name')).toHaveValue('Node node-2')
+    fireEvent.click(screen.getByRole('button', { name: 'Create token' }))
+    expect(await screen.findByText('Copy your access token')).toBeInTheDocument()
+    expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ name: 'Node node-2' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(screen.queryByText('Copy your access token')).not.toBeInTheDocument())
+    expect(screen.getByText('Join the cluster')).toBeInTheDocument()
+  })
+
+  it('says when the node name is already in the cluster', async () => {
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/nodes': () => json(200, { data: [node('n1', 'node-1')] }),
+    })
+    renderAt(
+      '/',
+      <Route path="/" element={<AddNodeDialog open onClose={() => {}} clusters={[domainCluster]} cluster={domainCluster} />} />,
+    )
+    fireEvent.change(await screen.findByLabelText('Node name'), { target: { value: 'node-1' } })
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+    expect(await screen.findByText(/“node-1” is already a node of “eu-west”/)).toBeInTheDocument()
+  })
+})
+
+describe('StartClusterDialog waiting step', () => {
+  async function toCommands() {
+    renderAt('/', <Route path="/" element={<StartClusterDialog open onClose={() => {}} />} />)
+    fireEvent.change(await screen.findByLabelText('Cluster slug'), { target: { value: 'eu-west' } })
+    fireEvent.click(screen.getByRole('radio', { name: /Local/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Next/ }))
+  }
+
+  it('waits for the cluster to be registered, then links to it', async () => {
+    let calls = 0
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/dns-profiles': () => json(200, { data: [dnsProfile] }),
+      'GET /v0/storage-profiles': () => json(200, { data: [storageProfile] }),
+      'GET /v0/clusters/eu-west': () => {
+        calls += 1
+        return calls > 2 ? json(200, domainCluster) : json(404, { code: 'not_found', message: 'no such cluster' })
+      },
+    })
+    await toCommands()
+    expect(await screen.findByText('Waiting for cluster “eu-west” to connect…')).toBeInTheDocument()
+    expect(await screen.findByText(/Cluster “eu-west” is connected/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open it' })).toHaveAttribute('href', '/admin/servers/clusters/eu-west')
+  })
+
+  it('says when the slug is already taken', async () => {
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/dns-profiles': () => json(200, { data: [dnsProfile] }),
+      'GET /v0/storage-profiles': () => json(200, { data: [storageProfile] }),
+      'GET /v0/clusters/eu-west': () => json(200, domainCluster),
+    })
+    await toCommands()
+    expect(await screen.findByText(/A cluster named “eu-west” already exists here/)).toBeInTheDocument()
   })
 })

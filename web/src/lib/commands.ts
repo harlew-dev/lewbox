@@ -143,8 +143,3 @@ export function dnsRecordsOffCommand(slug: string): string {
 
 // Applies the cluster's storage and DNS settings on a node.
 export const nodeConfigureCommand = 'lewbox node configure'
-
-// Installs the latest Lewbox on Ubuntu or Debian with Go's own installer. A
-// node doesn't need the web console, which `go install` can't build.
-export const installCLICommand =
-  'sudo apt install -y golang-go && export PATH="$PATH:$HOME/go/bin" && go install github.com/harlew-dev/lewbox/cmd/lewbox@latest && lewbox version'

@@ -54,7 +54,7 @@ export function ClusterDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [configureNote, setConfigureNote] = useState(false)
   const [removeNode, setRemoveNode] = useState<api.Node | null>(null)
-  const { data, error, failure, loading, reload } = useLoad(
+  const { data, error, failure, loading, reload, refresh } = useLoad(
     () => api.getCluster(ref),
     [ref],
   )
@@ -316,7 +316,17 @@ export function ClusterDetailPage() {
           reload()
         }}
       />
-      <AddNodeDialog open={addOpen} onClose={() => setAddOpen(false)} clusters={[detail]} cluster={detail} />
+      <AddNodeDialog
+        open={addOpen}
+        onClose={() => {
+          setAddOpen(false)
+          // The node joins from the machine; pick it up once the dialog closes.
+          setUpdated(null)
+          refresh()
+        }}
+        clusters={[detail]}
+        cluster={detail}
+      />
       <RemoveNodeDialog
         node={removeNode}
         onClose={() => setRemoveNode(null)}

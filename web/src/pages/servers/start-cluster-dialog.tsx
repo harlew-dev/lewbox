@@ -27,10 +27,8 @@ import { useState } from 'react'
 import * as api from '../../lib/api'
 import {
   dnsRecordsOffCommand,
-  installCLICommand,
   installCommand,
   newClusterCommand,
-  serverURL,
   validDomain,
   validEmail,
   validHost,
@@ -43,6 +41,8 @@ import {
 } from '../../lib/commands'
 import { useLoad } from '../../lib/use-load'
 import { ArchiveOptions } from './cluster-settings'
+import { SignInStep } from './sign-in-step'
+import { WaitForClusterStep } from './wait-step'
 import { StepIndicator } from './step-indicator'
 
 // Starting a cluster happens on its first machine: the console can only say
@@ -133,8 +133,8 @@ function StartCluster({ onClose }: { onClose: () => void }) {
       <>
         <DialogTitle>Start a new cluster</DialogTitle>
         <DialogDescription>
-          Run these on the machine that will be the cluster’s first node. The cluster shows up here when the last one
-          finishes.
+          Run these on the machine that will be the cluster’s first node. The last step shows when the cluster has
+          connected.
         </DialogDescription>
         <StepIndicator labels={['Configure', 'Install commands']} current={1} />
         <DialogBody>
@@ -143,22 +143,22 @@ function StartCluster({ onClose }: { onClose: () => void }) {
               title="Install the Lewbox CLI on the machine"
               description={
                 <>
-                  On Ubuntu or Debian. Run it, and the next commands, as your own user, not root. Other systems:{' '}
-                  <TextLink href="/platform/setup/install-the-cli">Install the CLI</TextLink>.
+                  Follow{' '}
+                  <TextLink href="/platform/setup/install-the-cli" target="_blank" rel="noreferrer">
+                    Install the CLI
+                  </TextLink>
+                  . Run the next commands as your own user, not root.
                 </>
               }
-            >
-              <CodeBlock code={installCLICommand} />
-            </Step>
-            <Step title="Sign in to this server">
-              <CodeBlock code={`lewbox login ${serverURL()}`} />
-            </Step>
+            />
+            <SignInStep tokenName={`Node ${node}`} />
             <Step title="Install AerolVM" description="It checks the machine first, then installs a pinned, verified release.">
               <CodeBlock code={install} />
             </Step>
             <Step title="Start the cluster" description="It starts AerolVM, starts the cluster and registers it here.">
               <CodeBlock code={addNode} />
             </Step>
+            <WaitForClusterStep slug={slug} />
             {access === 'domain' && !manageDNS && (
               <Step
                 title="Keep the DNS records yourself"

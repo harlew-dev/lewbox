@@ -27,11 +27,9 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState } from 'react'
 import * as api from '../../lib/api'
 import {
-  installCLICommand,
   installCommand,
   joinClusterCommand,
   nodeConfigureCommand,
-  serverURL,
   validHost,
   validLabel,
   type NodeRole,
@@ -40,6 +38,8 @@ import {
 import { relativeTime } from '../../lib/format'
 import { failureMessage } from '../../lib/use-load'
 import { StepIndicator } from './step-indicator'
+import { SignInStep } from './sign-in-step'
+import { WaitForNodeStep } from './wait-step'
 
 const roles: { value: NodeRole; label: string; description: string }[] = [
   { value: 'mixed', label: 'Mixed', description: 'Runs sandboxes and votes in the cluster. The usual choice.' },
@@ -263,16 +263,15 @@ function AddNode({
               title="Install the Lewbox CLI on the machine"
               description={
                 <>
-                  On Ubuntu or Debian. Other systems:{' '}
-                  <TextLink href="/platform/setup/install-the-cli">Install the CLI</TextLink>.
+                  Follow{' '}
+                  <TextLink href="/platform/setup/install-the-cli" target="_blank" rel="noreferrer">
+                    Install the CLI
+                  </TextLink>
+                  .
                 </>
               }
-            >
-              <CodeBlock code={installCLICommand} />
-            </Step>
-            <Step title="Sign in to this server">
-              <CodeBlock code={`lewbox login ${serverURL()}`} />
-            </Step>
+            />
+            <SignInStep tokenName={`Node ${node}`} />
             <Step title="Install AerolVM" description={`With the cluster's runtime, ${runtime}.`}>
               <CodeBlock code={install} />
             </Step>
@@ -287,6 +286,7 @@ function AddNode({
             >
               <CodeBlock code={joinClusterCommand({ node, slug: cluster.slug, role })} />
             </Step>
+            <WaitForNodeStep cluster={cluster.slug} node={node} />
           </Steps>
         ) : (
           <div className="space-y-4">
@@ -307,6 +307,7 @@ function AddNode({
                     </TextButton>
                   </Text>
                 </Step>
+                <WaitForNodeStep cluster={cluster.slug} />
               </Steps>
             ) : (
               <div className="flex justify-end">

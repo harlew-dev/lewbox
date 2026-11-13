@@ -66,8 +66,23 @@ export function AddServerMenu({
         </DropdownMenu>
       </Dropdown>
 
-      <StartClusterDialog open={open === 'start'} onClose={close} />
-      <AddNodeDialog open={open === 'join'} onClose={close} clusters={clusters} />
+      {/* Refresh the lists once the dialog closes, whether or not it saw the
+          server connect. */}
+      <StartClusterDialog
+        open={open === 'start'}
+        onClose={() => {
+          close()
+          onChanged()
+        }}
+      />
+      <AddNodeDialog
+        open={open === 'join'}
+        onClose={() => {
+          close()
+          onChanged()
+        }}
+        clusters={clusters}
+      />
       <RegisterClusterDialog open={open === 'register-cluster'} onClose={close} />
       <RegisterNodeDialog open={open === 'register-node'} onClose={close} onRegistered={onChanged} />
     </>

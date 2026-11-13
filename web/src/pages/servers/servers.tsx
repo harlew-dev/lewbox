@@ -25,7 +25,7 @@ import {
   tabFrom,
 } from '@harlew-dev/ui'
 import { EllipsisHorizontalIcon, TrashIcon } from '@heroicons/react/16/solid'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { NoClusters } from '../../components/no-clusters'
 import { AliveBadge, StatusBadge } from '../../components/status'
@@ -50,15 +50,24 @@ export function ServersPage() {
 
   const clusters = useLoad(() => api.listClusters(), [])
   const clusterList = clusters.data?.data ?? []
-  // Bumped when a node is added or removed, so the nodes tab reloads.
+  // Bumped when a server may have been added, so the nodes tab refreshes.
   const [nodesVersion, setNodesVersion] = useState(0)
+  const refreshClusters = clusters.refresh
 
   return (
     <>
       <PageHeader
         title="Servers"
         description="The AerolVM clusters this orchestrator manages, and their nodes."
-        actions={<AddServerMenu clusters={clusterList} onChanged={() => setNodesVersion((value) => value + 1)} />}
+        actions={
+          <AddServerMenu
+            clusters={clusterList}
+            onChanged={() => {
+              refreshClusters()
+              setNodesVersion((value) => value + 1)
+            }}
+          />
+        }
         className="mb-4"
       />
       <PageTabs label="Server views" tabs={tabs} current={tab} className="mb-8" />
@@ -66,7 +75,7 @@ export function ServersPage() {
         {tab === 'clusters' ? (
           <ClustersTab load={clusters} />
         ) : (
-          <NodesTab key={nodesVersion} clusters={clusterList} />
+          <NodesTab version={nodesVersion} clusters={clusterList} />
         )}
       </PageTransition>
     </>
@@ -126,12 +135,17 @@ function ClustersTab({ load }: { load: ReturnType<typeof useLoad<api.ClusterList
   )
 }
 
-function NodesTab({ clusters }: { clusters: api.Cluster[] }) {
+function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: number }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const cluster = searchParams.get('cluster') ?? ''
   const [target, setTarget] = useState<api.Node | null>(null)
   const nodes = useLoad(() => api.listNodes(cluster === '' ? undefined : cluster), [cluster])
   const nodeList = nodes.data?.data ?? []
+  const refreshNodes = nodes.refresh
+  // Refresh in the background, keeping the list on screen.
+  useEffect(() => {
+    if (version > 0) refreshNodes()
+  }, [version, refreshNodes])
 
   function changeCluster(value: string) {
     setSearchParams((current) => {
