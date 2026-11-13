@@ -16,6 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API="http://127.0.0.1:${LEWBOX_DEV_PORT:-8080}"
 CLUSTER="${LEWBOX_DEV_CLUSTER:-lab}"
 NODES=(${LEWBOX_DEV_NODES:-node-1 node-2})
+RUNTIME="${LEWBOX_DEV_RUNTIME:-docker}"   # the cluster's: docker or firecracker
 RUN="$(date +%s)"
 S3=http://172.30.0.20:9000
 S3_KEY=lewbox
@@ -96,7 +97,7 @@ KEY=$(jq -r .token <<<"$k"); EP=$(jq -r .env.SB_API_URL <<<"$k")
 avm() { local m="$1" p="$2"; shift 2; curl -sS -X "$m" -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' "$EP$p" "$@"; }
 whoami_ok() { test "$(avm GET /v1/whoami -o /dev/null -w '%{http_code}')" = 200; }
 eventually 30 "the key works on the cluster" whoami_ok
-sb=$(avm POST /v1/sandboxes -d '{"image":"alpine:3.20","cpu":1,"memory_mb":256,"name":"keeper","tags":{"app":"e2e"}}' | jq -r .id)
+sb=$(avm POST /v1/sandboxes -d "{\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIME\",\"cpu\":1,\"memory_mb\":256,\"name\":\"keeper\",\"tags\":{\"app\":\"e2e\"}}" | jq -r .id)
 [[ $sb == sb-* ]] && pass "sandbox $sb created" || fail "create sandbox"
 out=$(avm POST "/v1/sandboxes/$sb/toolbox/process/execute" -d "$(jq -nc --arg c "sh -c 'echo archived-$RUN > /root/marker'" '{command: $c}')")
 expect "a file written in it" '.exit_code == 0' "$out"

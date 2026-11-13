@@ -56,6 +56,8 @@ go generate ./internal/db   # after editing migrations/ or queries/ (runs sqlc v
 
 # End to end against real AerolVM in Docker (~6 min, needs Docker and privileged containers)
 cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh
+# The same on Firecracker nodes (needs /dev/kvm on the host)
+cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh --runtime firecracker
 ```
 
 The four Go checks (or `make test`, which adds the web checks) must pass before you call a change done. Run `e2e.sh` for anything touching `internal/machine`, `cmd/lewbox/{install,nodeadd,update,machine}.go`, cluster checks or node sync. The unit tests use fakes and **have missed real bugs**: a wrong `sudo` argv, and running an unverified file.

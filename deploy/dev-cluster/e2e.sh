@@ -4,13 +4,28 @@
 #   ./e2e.sh           # fresh dev cluster, run every step, tear it down
 #   ./e2e.sh --keep    # leave it running afterwards (for a live look)
 #   ./e2e.sh --reuse   # skip down/up/install; run the checks on the running cluster
+#   ./e2e.sh --runtime firecracker   # Firecracker nodes (needs /dev/kvm on the host)
 #
 # Each step prints PASS or FAIL; the script exits 1 on the first failure.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEEP=false REUSE=false
-for a in "$@"; do case "$a" in --keep) KEEP=true ;; --reuse) REUSE=true KEEP=true ;; *) echo "unknown flag $a" >&2; exit 2 ;; esac; done
+RUNTIME="${LEWBOX_DEV_RUNTIME:-docker}"
+while (($#)); do
+	case "$1" in
+		--keep) KEEP=true ;;
+		--reuse) REUSE=true KEEP=true ;;
+		--runtime) RUNTIME="${2:-}"; shift ;;
+		--runtime=*) RUNTIME="${1#*=}" ;;
+		*) echo "unknown flag $1" >&2; exit 2 ;;
+	esac
+	shift
+done
+case "$RUNTIME" in docker | firecracker) ;; *) echo "--runtime must be docker or firecracker" >&2; exit 2 ;; esac
+[[ $RUNTIME == firecracker && ! -c /dev/kvm ]] && { echo "--runtime firecracker needs /dev/kvm on this host" >&2; exit 2; }
+# customers.sh and archives.sh create sandboxes with this runtime too.
+export LEWBOX_DEV_RUNTIME="$RUNTIME"
 
 dev() { "$HERE/dev.sh" "$@"; }
 compose() { "$HERE/dev.sh" compose "$@"; }
@@ -41,8 +56,8 @@ if ! $REUSE; then
 	out=$(lb node-1 install --public-host 172.30.0.11 --dry-run 2>&1) || { echo "$out"; fail "dry run failed"; }
 	compose exec -T node-1 test ! -e /usr/local/bin/sandboxd && pass "no sandboxd after dry run" || fail "dry run installed something"
 
-	step "log in, install AerolVM on both nodes, start a cluster on node-1, join node-2"
-	dev cluster
+	step "log in, install AerolVM ($RUNTIME) on both nodes, start a cluster on node-1, join node-2"
+	dev cluster --runtime "$RUNTIME"
 	pass "cluster flow finished"
 fi
 
@@ -53,7 +68,7 @@ expect "status ready" '.status == "ready"' "$c"
 expect "2 nodes" '.nodes == 2' "$c"
 expect "both alive" '[.node_list[] | select(.alive)] | length == 2' "$c"
 expect "every check passed" '[.checks[] | select(.ok | not)] | length == 0' "$c"
-expect "runtime docker, AerolVM v0.7.0" '.runtime == "docker" and .version == "v0.7.0"' "$c"
+expect "runtime $RUNTIME, AerolVM v0.7.0" ".runtime == \"$RUNTIME\" and .version == \"v0.7.0\"" "$c"
 
 step "node-2 sees the same cluster (it joined with --cluster node-1, a node name)"
 r=$(lb node-2 node list --cluster "$CLUSTER" --json)
@@ -91,13 +106,19 @@ runner=$(compose exec -T node-1 curl -fsS -X POST -H "Authorization: Bearer $pat
 for i in $(seq 30); do [[ $(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $runner" http://127.0.0.1:21202/v1/whoami) == 200 ]] && break; sleep 1; done
 ids=()
 for i in 1 2 3; do
-	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-$i\",\"image\":\"alpine:3.20\"}")
+	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-$i\",\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIME\"}")
 	expect "sandbox e2e-$i started" '.status == "started"' "$s"
 	ids+=("$(jq -r .id <<<"$s")")
 done
-on1=$(compose exec -T node-1 docker ps -q | wc -l); on2=$(compose exec -T node-2 docker ps -q | wc -l)
+# running_on <node> counts the sandboxes running on a node: containers, or
+# Firecracker VM processes.
+running_on() {
+	if [[ $RUNTIME == firecracker ]]; then compose exec -T "$1" sh -c 'pgrep -xc firecracker || true'
+	else compose exec -T "$1" docker ps -q | wc -l; fi
+}
+on1=$(running_on node-1); on2=$(running_on node-2)
 echo "placement: node-1 runs $on1, node-2 runs $on2"
-(( on1 + on2 == 3 )) && pass "3 sandbox containers across the cluster" || fail "expected 3 containers, got $on1 + $on2"
+(( on1 + on2 == 3 )) && pass "3 sandboxes ($RUNTIME) across the cluster" || fail "expected 3 sandboxes, got $on1 + $on2"
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
 step "firewall enable: ufw with Lewbox's ports, the cluster ports from the private network only"
@@ -116,25 +137,25 @@ c=$(lb node-1 cluster check "$CLUSTER" --json)
 expect "cluster still ready behind the firewall" '.status == "ready"' "$c"
 ids=()
 for i in 1 2; do
-	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-fw-$i\",\"image\":\"alpine:3.20\"}")
+	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-fw-$i\",\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIME\"}")
 	expect "sandbox e2e-fw-$i started through node-2" '.status == "started"' "$s"
 	ids+=("$(jq -r .id <<<"$s")")
 done
 # A sandbox with an egress allowlist goes through AerolVM's egress proxy and
 # DNS on the host, which ufw's default-deny would drop without Lewbox's rules.
 s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' http://127.0.0.1:21202/v1/sandboxes \
-	-d '{"name":"e2e-fw-egress","image":"alpine:3.20","network_allow_out":["example.com"]}')
+	-d "{\"name\":\"e2e-fw-egress\",\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIME\",\"network_allow_out\":[\"example.com\"]}")
 expect "egress-restricted sandbox started" '.status == "started"' "$s"
 id=$(jq -r .id <<<"$s"); ids+=("$id")
-found=false
-for n in node-1 node-2; do
-	ct=$(compose exec -T "$n" docker ps -q --filter "name=^${id}\$")
-	[[ -n "$ct" ]] || continue
-	found=true
-	compose exec -T "$n" docker exec "$ct" timeout 20 wget -q -O /dev/null http://example.com && pass "allowed host reachable behind the firewall" || fail "egress to an allowed host blocked"
-	if compose exec -T "$n" docker exec "$ct" timeout 20 wget -q -O /dev/null http://google.com 2>/dev/null; then fail "egress to a host not allowed got through"; else pass "other hosts still blocked"; fi
-done
-$found || fail "egress-restricted sandbox's container not found on either node"
+# Through AerolVM's toolbox, so it works for containers and VMs alike.
+fetch_in() {
+	curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' \
+		"http://127.0.0.1:21202/v1/sandboxes/$id/toolbox/process/execute" \
+		-d "{\"command\":\"timeout 20 wget -q -O /dev/null $1\"}" | jq -r .exit_code
+}
+[[ $(fetch_in http://example.com) == 0 ]] && pass "allowed host reachable behind the firewall" || fail "egress to an allowed host blocked"
+code=$(fetch_in http://google.com)
+[[ -n $code && $code != 0 && $code != null ]] && pass "other hosts still blocked" || fail "egress to a host not allowed got through (exit $code)"
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
 step "the customer journey (customers.sh)"

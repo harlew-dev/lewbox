@@ -51,7 +51,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 # The cluster's own API with a customer's sandbox key. EP is the region's endpoint.
 EP=""
 avm() { local who="$1" m="$2" p="$3"; shift 3; curl -sS -X "$m" -H "Authorization: Bearer ${KEY[$who]}" -H 'Content-Type: application/json' "$EP$p" "$@"; }
-SANDBOX='{"image":"alpine:3.20","cpu":1,"memory_mb":512}'
+SANDBOX="{\"image\":\"alpine:3.20\",\"runtime\":\"${LEWBOX_DEV_RUNTIME:-docker}\",\"cpu\":1,\"memory_mb\":512}"
 create_code() { avm "$1" POST /v1/sandboxes -d "$SANDBOX" -o "$JAR/created" -w '%{http_code}'; }
 status_of() { avm "$1" GET "/v1/sandboxes/$2" | jq -r .status; }
 # Customer GETs as plain functions, so `eventually` can call them.
@@ -108,7 +108,13 @@ expect "a customer sees its subscribed region with the plan" "[.data[] | select(
 step "each customer creates a sandbox key for the region"
 for who in a b; do
 	k=$(cust "$who" POST /v0/sandbox-keys -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
-	expect "$who's key is an avm_ token with SDK settings" '(.token | startswith("avm_")) and .env.SB_API_TOKEN == .token and (.e2b_env.E2B_API_URL | endswith("/e2b"))' "$k"
+	expect "$who's key is an avm_ token with SDK settings" '(.token | startswith("avm_")) and .env.SB_API_TOKEN == .token' "$k"
+	# Only Docker regions serve E2B.
+	if [[ ${LEWBOX_DEV_RUNTIME:-docker} == docker ]]; then
+		expect "$who's key has E2B settings" '.e2b_env.E2B_API_URL | endswith("/e2b")' "$k"
+	else
+		expect "$who's key has no E2B settings on $LEWBOX_DEV_RUNTIME" '.e2b_env == null' "$k"
+	fi
 	KEY[$who]=$(jq -r .token <<<"$k")
 	EP=$(jq -r .env.SB_API_URL <<<"$k")
 done

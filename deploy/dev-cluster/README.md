@@ -51,6 +51,7 @@ Other commands:
 | `./dev.sh shell node-2` | A shell on a node, as the `lewbox` user (it has passwordless sudo) |
 | `./dev.sh logs` / `./dev.sh logs node-1` | Follow the orchestrator's log, or `sandboxd`'s on a node |
 | `./dev.sh up --three` | Also start node-3, for a three-voter cluster |
+| `./dev.sh cluster --runtime firecracker` | Install the nodes for Firecracker instead of Docker (below) |
 | `./dev.sh down` | Stop everything and delete the dev cluster's volumes |
 | `./archives.sh` | Storage profiles and archived sandboxes against a running cluster (the `storage` service is an S3-compatible bucket, RustFS, at `172.30.0.20:9000`) |
 | `./e2e.sh` | The end-to-end test (below) |
@@ -75,7 +76,15 @@ From the host you can also use the orchestrator directly: `lewbox login http://1
 - `node remove` needs `--yes`, removes the node from AerolVM too, and refuses the last node;
 - `update --aerolvm` upgrades a single-machine setup (node-3: local mode, orchestrator on the same machine) from v0.6.13 to v0.7.0.
 
-`--keep` leaves the cluster running afterwards. `--reuse` runs the checks against a cluster that is already up.
+`--keep` leaves the cluster running afterwards. `--reuse` runs the checks against a cluster that is already up. `--runtime firecracker` runs it all on Firecracker nodes.
+
+## Firecracker
+
+`./dev.sh cluster --runtime firecracker` (or `./e2e.sh --runtime firecracker`, or `LEWBOX_DEV_RUNTIME=firecracker`) installs every node with `lewbox install --runtime firecracker`, so cluster `lab` runs microVMs instead of containers. `customers.sh` and `archives.sh` read `LEWBOX_DEV_RUNTIME` and create their sandboxes with that runtime.
+
+- The host needs `/dev/kvm`: bare metal, or a VM with nested virtualization. The node containers are privileged, so they see the host's `/dev/kvm`; nothing else is passed through.
+- The installer downloads Firecracker, the jailer and a guest kernel from GitHub and S3 (pinned hashes) on each node, so the first install takes a little longer.
+- A cluster's runtime is fixed when it starts. To switch, `./dev.sh down` and start again.
 
 ## Troubleshooting
 

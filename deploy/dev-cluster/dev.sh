@@ -10,6 +10,9 @@ EMAIL="${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}"
 PASSWORD="${LEWBOX_DEV_PASSWORD:-dev-password-123}"
 ORCH_URL="http://orchestrator:8080"   # as the nodes see it
 CLUSTER="${LEWBOX_DEV_CLUSTER:-lab}"
+# The cluster's runtime: docker (default) or firecracker. --runtime on up,
+# cluster and e2e sets it; e2e.sh, customers.sh and archives.sh read it.
+RUNTIME="${LEWBOX_DEV_RUNTIME:-docker}"
 
 # LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" makes the nodes forward outside lookups to
 # those servers instead of the host's resolver, for networks whose resolver
@@ -34,6 +37,20 @@ compose() {
 }
 say() { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# set_runtime <value> checks a --runtime value and exports it for the other
+# scripts. Firecracker needs /dev/kvm on the host: the privileged nodes see
+# the host's devices.
+set_runtime() {
+	case "$1" in
+		docker | firecracker) RUNTIME="$1" ;;
+		*) die "--runtime must be docker or firecracker, not \"$1\"" ;;
+	esac
+	export LEWBOX_DEV_RUNTIME="$RUNTIME"
+	if [[ $RUNTIME == firecracker && ! -c /dev/kvm ]]; then
+		die "--runtime firecracker needs /dev/kvm on this host (bare metal, or nested virtualization)"
+	fi
+}
 
 # node_ip <node> prints the node's address on the cluster network.
 node_ip() { case "$1" in node-1) echo 172.30.0.11 ;; node-2) echo 172.30.0.12 ;; node-3) echo 172.30.0.13 ;; *) die "unknown node $1" ;; esac; }
@@ -102,15 +119,23 @@ login() {
 }
 
 # install <node> installs AerolVM on a node in IP mode.
-install() { lb "$1" install --public-host "$(node_ip "$1")" --yes; }
+install() { lb "$1" install --public-host "$(node_ip "$1")" --runtime "$RUNTIME" --yes; }
 
 # The whole flow from docs/clusters/start-a-cluster.md: node-1 starts a cluster,
 # the other nodes join it.
 cmd_cluster() {
+	while (($#)); do
+		case "$1" in
+			--runtime) set_runtime "${2:-}"; shift ;;
+			--runtime=*) set_runtime "${1#*=}" ;;
+			*) die "cluster: unknown flag $1" ;;
+		esac
+		shift
+	done
 	local nodes=(node-1 node-2)
 	compose ps --services --status running | grep -qx node-3 && nodes+=(node-3)
 	for n in "${nodes[@]}"; do say "$n: lewbox login"; login "$n"; done
-	say "installing AerolVM on ${nodes[*]} (in parallel)"
+	say "installing AerolVM ($RUNTIME) on ${nodes[*]} (in parallel)"
 	local pids=()
 	for n in "${nodes[@]}"; do install "$n" >"$HERE/.cache/install-$n.log" 2>&1 & pids+=($!); done
 	for i in "${!pids[@]}"; do wait "${pids[$i]}" || { tail -30 "$HERE/.cache/install-${nodes[$i]}.log"; die "install failed on ${nodes[$i]}"; }; done
@@ -138,7 +163,8 @@ Usage: ./dev.sh <command>
   fetch [tag]          download AerolVM release files into .cache (default $AEROLVM_VERSION)
   build                build lewbox-node:dev and lewbox:dev
   up [--three]         fetch, build, start the orchestrator and node-1, node-2 (and node-3)
-  cluster              log in, install AerolVM on every node, start cluster "$CLUSTER" on node-1, join the rest
+  cluster [--runtime docker|firecracker]
+                       log in, install AerolVM on every node, start cluster "$CLUSTER" on node-1, join the rest
   shell [node]         a shell on a node as the lewbox user (default node-1)
   lewbox <node> args   run the lewbox CLI on a node, e.g. ./dev.sh lewbox node-2 node list
   logs [service]       follow the orchestrator's log, or sandboxd's on a node
@@ -148,7 +174,10 @@ Usage: ./dev.sh <command>
 
 Environment: LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" sends the nodes' outside DNS
 lookups to those servers, for networks whose resolver fails on some names.
-  e2e [--keep]         up, cluster, check it, run sandboxes on it, down (see e2e.sh)
+LEWBOX_DEV_RUNTIME=firecracker is the same as --runtime firecracker.
+
+  e2e [--keep] [--runtime docker|firecracker]
+                       up, cluster, check it, run sandboxes on it, down (see e2e.sh)
 EOF
 }
 
