@@ -103,7 +103,7 @@ Both apply the cluster's **node settings**, fetched from `GET /v0/clusters/{ref}
     - `SB_AUTO_IMPORT_CLUSTER_PAT_PATH=/etc/sandboxd/lewbox-registry.token`
     - `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL=30s`
   - The token file holds a random value, never the PAT. The registry has no auth (loopback only), so the PAT never leaves the node.
-  - Install a cleanup timer that removes archive images the node no longer needs (from the step 3 test).
+  - Install `lewbox-archive-cleanup.timer` (root, every 5 minutes). It removes the local image of every `archive-*` snapshot whose push is `active`, and pulled `127.0.0.1:5000/…/archive-*` images no container uses ([findings](../docs/design/snapshot-archive.md) 3 and 5).
 - **Without one:** remove the registry and those env lines, if present.
 - **When the DNS profile's token changed:** re-run the verified installer with `--version <installed>` and the new `--dns-api-token`. The installer keeps its other saved options.
 
@@ -132,13 +132,16 @@ On a cluster with `stop_policy: archive`, **every stopped customer sandbox is ar
 
 **Restore** (`POST /v0/archives/{id}/restore`; owners, admins, members, the workspace API key, instance admins):
 - Creates a sandbox with the workspace's runner token:
-  - `image` is the snapshot's name;
+  - `image` is the archive's **registry ref**, not its name: a name stops resolving on the node that took it once the cleanup timer removes its local copy (findings 6 and 7);
   - name, tags, runtime, CPU, memory and disk are the archived sandbox's;
   - the tag `lewbox.restored_from=<old id>` is added.
 - Returns the new sandbox. The archive is kept, so a sandbox can be restored again.
-- Customers can do the same with the SDK: `create({image: "archive-<old id>"})`.
+- Customers can do the same with the SDK: `create({image: "<registry ref>"})`. The portal shows the ref. AerolVM keeps refs to their team (finding 9).
 
-**Delete** (`DELETE /v0/archives/{id}`) deletes the snapshot through AerolVM, which retires its registry copy, then marks the row `deleted`.
+**Delete** (`DELETE /v0/archives/{id}`):
+1. delete the snapshot through AerolVM;
+2. delete its repository's keys from the bucket, since AerolVM doesn't retire them (finding 11);
+3. mark the row `deleted`.
 
 Archives are **kept until the customer or an operator deletes them** (no retention for now).
 
@@ -193,7 +196,7 @@ A unique index on `(cluster_id, sandbox_id)` while `status` isn't `cancelled` or
 2. DNS profiles: migration, Cloudflare client, service, routes, Backend, client, CLI, parity tests.
 3. Cluster DNS settings, `install --dns-profile`, records on the cluster check.
 4. Storage profiles: migration, S3 client, service through CLI, parity tests.
-5. **Dev cluster test:** MinIO and a registry on the dev nodes. Snapshot, push, restore on another node, find what is left on the first node's disk. Findings go in `docs/design/snapshot-archive.md`. Steps 6 and 7 depend on it.
+5. **Dev cluster test** (done: [docs/design/snapshot-archive.md](../docs/design/snapshot-archive.md)): MinIO and a registry on the dev nodes. Snapshot, push, restore on another node, find what is left on the first node's disk. Findings go in `docs/design/snapshot-archive.md`. Steps 6 and 7 depend on it.
 6. Node settings: the registry, env, cleanup timer, `node configure`, reported versions, outdated nodes. `e2e.sh` step.
 7. Archiving: table, archiver, restore, delete, API, CLI, parity tests. `e2e.sh` step.
 8. Web: profiles, cluster settings, the two-step dialogs, the archived tab.
