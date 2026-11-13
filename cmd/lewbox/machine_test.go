@@ -57,6 +57,7 @@ type harness struct {
 	bin      string
 	execArgs []string
 	probeErr error
+	images   []string // what docker images lists
 }
 
 func newHarness(t *testing.T, localURL string) *harness {
@@ -187,7 +188,8 @@ func (h *harness) output(_ context.Context, cmd machine.Cmd) ([]byte, error) {
 	case "id":
 		return []byte("999\n"), nil
 	case "docker":
-		return []byte(""), nil
+		// docker images: the node's local images, one per line.
+		return []byte(strings.Join(h.images, "\n")), nil
 	case "systemctl":
 		if len(cmd.Args) > 0 && cmd.Args[0] == "is-active" {
 			if h.active {
@@ -1495,6 +1497,7 @@ func TestNodeCleanupAsRootUsesNoSudo(t *testing.T) {
 	h := newHarness(t, fake.URL())
 	h.pat = fake.AdminToken
 	h.hd.euid = func() int { return 0 }
+	h.images = []string{"ubuntu:22.04", "aerolvm-snapshot/aaa:latest"}
 
 	out, errOut, code := h.runCLI("", "node", "cleanup")
 	if code != 0 {
