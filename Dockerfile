@@ -43,6 +43,9 @@ RUN --mount=type=cache,target=/go/pkg/mod,uid=10001,gid=10001 \
 # Some CLI tests behave differently as root, so this stage drops to an
 # unprivileged user with a writable HOME and Go caches.
 FROM build AS test
+# The race detector needs cgo and a C compiler; the build stage above compiles
+# with CGO_ENABLED=0.
+RUN apk add --no-cache build-base
 RUN addgroup -g 10001 -S lewbox \
  && adduser -u 10001 -S -D -G lewbox -h /home/lewbox lewbox \
  && mkdir -p /home/lewbox/.cache/go-build /home/lewbox/.config /home/lewbox/.local/share \
@@ -55,7 +58,7 @@ ENV HOME=/home/lewbox \
     XDG_DATA_HOME=/home/lewbox/.local/share
 RUN --mount=type=cache,target=/go/pkg/mod,uid=10001,gid=10001 \
     --mount=type=cache,target=/home/lewbox/.cache/go-build,uid=10001,gid=10001 \
-    test -z "$(gofmt -l .)" && go vet ./... && go test ./...
+    test -z "$(gofmt -l .)" && go vet ./... && CGO_ENABLED=1 go test -race ./...
 
 # --- runtime ---------------------------------------------------------------
 FROM alpine:3.22 AS runtime

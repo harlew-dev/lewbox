@@ -130,7 +130,7 @@ make help        # list every target
 make             # build the web console and bin/lewbox
 make run         # build, then serve on :8080
 make dev         # Vite dev server on :5173 with hot reload (run `make run` alongside)
-make test        # gofmt, go vet, Go tests, web typecheck and tests
+make test        # static checks, Go tests with the race detector, and web tests
 ```
 
 The Go tests use an in-memory fake AerolVM cluster, with no network or Docker needed. For anything that touches a machine, run the end-to-end test against real AerolVM in Docker (about 6 minutes, needs privileged containers):

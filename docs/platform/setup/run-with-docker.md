@@ -78,7 +78,7 @@ Run every check in the image, as a non-root user, with no host toolchain:
 make docker-test
 ```
 
-It builds the image's `test` and `web-test` stages: `gofmt`, `go vet`, the Go tests, and the web console's typecheck and tests.
+It builds the image's `test` and `web-test` stages: `gofmt`, `go vet`, the Go tests with the race detector, and the web console's typecheck and tests.
 
 Compose builds through the daemon's BuildKit, so you do **not** need the Docker `buildx` plugin.
 

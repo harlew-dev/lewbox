@@ -12,7 +12,7 @@ UI_DIR ?= ../ui
 
 .DEFAULT_GOAL := build
 
-.PHONY: help deps web build build-go run dev test fmt docker docker-test up down e2e update-ui release clean distclean
+.PHONY: help deps web build build-go run dev check test fmt docker docker-test up down e2e update-ui release clean distclean
 
 help: ## List the targets and what they do.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.\/-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,11 +40,14 @@ run: build ## Build, then serve on the port in PORT. Set LEWBOX_BOOTSTRAP_ADMIN_
 dev: deps ## Run the Vite dev server on :5173, proxying /v0 to :8080. Run `make run` in another terminal.
 	npm --prefix web run dev
 
-test: deps ## Run every check: gofmt, go vet, Go tests, web typecheck and tests.
+check: deps ## Run the static checks without rewriting: gofmt -l, go vet, web typecheck.
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	go vet ./...
-	go test ./...
 	npm --prefix web run typecheck
+
+# The race detector needs cgo and a C compiler (gcc/cc).
+test: check ## Run every check: static checks, Go tests with -race, and web tests.
+	go test -race ./...
 	npm --prefix web test
 
 fmt: ## Format every Go file.
