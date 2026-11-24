@@ -1,5 +1,6 @@
 import { Button, EmptyState, ErrorNotice, ListSkeleton, Notice } from '@harlew-dev/ui'
 import { Outlet, useOutletContext } from 'react-router'
+import { PortalLayout } from '../../components/portal-layout'
 import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useInstance } from '../../lib/instance'
@@ -31,8 +32,11 @@ function StatusBanner({ org }: { org: api.Organization }) {
   )
 }
 
-// Loads the current workspace (organization) for the portal's pages, with its status
-// banner above them.
+// The portal's layout around its pages, with the current workspace
+// (organization) loaded for them and its status banner above them. The
+// workspace loads here, above the layout's page transition, so it loads once
+// rather than again on every page: a page change then shows the page's own
+// header straight away, with placeholders only where its data goes.
 export function PortalRoute() {
   const { user } = useAuth()
   const { current } = useOrganizations()
@@ -44,15 +48,29 @@ export function PortalRoute() {
 
   if (!current) {
     return (
-      <EmptyState
-        title="You’re not in a workspace"
-        description="Ask someone on your team to add you to theirs."
-        action={<Button href="/docs">Read the docs</Button>}
-      />
+      <PortalLayout>
+        <EmptyState
+          title="You’re not in a workspace"
+          description="Ask someone on your team to add you to theirs."
+          action={<Button href="/docs">Read the docs</Button>}
+        />
+      </PortalLayout>
     )
   }
-  if (loading && !data) return <ListSkeleton label="Loading your workspace" rows={4} />
-  if (error.message || !data) return <ErrorNotice error={error} onRetry={reload} />
+  if (loading && !data) {
+    return (
+      <PortalLayout>
+        <ListSkeleton label="Loading your workspace" rows={4} />
+      </PortalLayout>
+    )
+  }
+  if (error.message || !data) {
+    return (
+      <PortalLayout>
+        <ErrorNotice error={error} onRetry={reload} />
+      </PortalLayout>
+    )
+  }
 
   const context: PortalOrg = {
     org: data,
@@ -60,10 +78,10 @@ export function PortalRoute() {
     reload,
   }
   return (
-    <>
+    <PortalLayout>
       <StatusBanner org={data} />
       <Outlet context={context} />
-    </>
+    </PortalLayout>
   )
 }
 

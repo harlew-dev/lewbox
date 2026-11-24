@@ -883,8 +883,20 @@ func TestArchiveBackendsAgree(t *testing.T) {
 		}
 	}
 
+	// Archives are part of the snapshot list, so the parity check lists both
+	// and keeps the archive rows.
 	listArchives := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListArchives(ctx, service.RegionScope{Org: "acme"})
+		list, err := b.ListSnapshots(ctx, service.RegionScope{Org: "acme"})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]service.Snapshot, 0)
+		for _, snapshot := range list.Data {
+			if snapshot.Kind == "archive" {
+				out = append(out, snapshot)
+			}
+		}
+		return out, nil
 	}
 	runSteps(t, h, []step{
 		both("list archives", listArchives),
@@ -917,8 +929,8 @@ func TestArchiveBackendsAgree(t *testing.T) {
 				return b.DeleteArchive(ctx, archiveIDs["sb-2"], service.RegionScope{Org: "acme"})
 			},
 			check: func(t *testing.T, v any) {
-				archive, ok := v.(service.Archive)
-				if !ok || archive.Status != "deleted" || archive.Region != "eu-west" {
+				archive, ok := v.(service.Snapshot)
+				if !ok || archive.Status != "active" || archive.Region != "eu-west" {
 					t.Errorf("deleted archive = %+v", v)
 				}
 			},

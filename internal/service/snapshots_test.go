@@ -62,7 +62,8 @@ func TestListSnapshotsScoping(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if len(list.Data) != 1 || list.Data[0].Name != "ckpt-a" || list.Data[0].Region != "eu-west" ||
-			list.Data[0].SourceSandboxID != "sb-1" || list.Data[0].PushState != "active" {
+			list.Data[0].SourceSandboxID != "sb-1" || list.Data[0].Status != snapshotStatusActive ||
+			list.Data[0].Kind != snapshotKindSnapshot {
 			t.Errorf("%s sees %+v", name, list.Data)
 		}
 	}

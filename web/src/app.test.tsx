@@ -63,7 +63,7 @@ describe('routing', () => {
     const snapshots = renderApp('/snapshots')
     const tabs = await screen.findByRole('navigation', { name: 'Sandbox views' })
     expect(within(tabs).getByRole('link', { name: 'Snapshots' })).toHaveAttribute('aria-current', 'page')
-    expect(await screen.findByText('Snapshots you take show up here.')).toBeInTheDocument()
+    expect(await screen.findByText('Snapshots you take and sandboxes archived on stop show up here.')).toBeInTheDocument()
     snapshots.unmount()
 
     renderApp('/settings')

@@ -382,11 +382,11 @@ Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--re
 
 ### `lewbox snapshot list [--region SLUG]` · `lewbox snapshot delete NAME [--region SLUG] [--yes]`
 
-Your workspace's snapshots, from every node of every subscribed region (or one region). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm. As an instance admin without `--org`, the list is every workspace's snapshots, with WORKSPACE and NODE columns.
+Your workspace's snapshots and archived sandboxes in one table, newest first, from every node of every subscribed region (or one region). Each row has a KIND column (`snapshot` or `archive`) and a STATUS column (`pending`, `pushing`, `active` or `error`; an empty status, for a region with no registry, prints `-`). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm. As an instance admin without `--org`, the list is every workspace's, with WORKSPACE and NODE columns; an archive has no node.
 
-### `lewbox archive list [--region SLUG] [--org SLUG]` · `lewbox archive show ID` · `lewbox archive restore ID` · `lewbox archive delete ID [--yes]`
+### `lewbox archive show ID` · `lewbox archive restore ID` · `lewbox archive delete ID [--yes]`
 
-The workspace's archived sandboxes (also `archives`), newest first, with a short ID, the sandbox name, region, status, when it was archived, its original size and the last sandbox restored from it. Only `pending`, `pushing`, `archived` and `failed` rows are shown. `--region` filters by cluster. As an instance admin without `--org`, the list is every workspace's, with a WORKSPACE column; `show` and the others take `--org` for a workspace whose archive it is. `show` is a key/value view including the registry ref and tags.
+Archived sandboxes are listed by `lewbox snapshot list` (KIND `archive`); these commands act on one by its ID. `show` is a key/value view of the merged Snapshot shape, including the registry ref and tags. `--org` names a workspace whose archive it is; as an instance admin without `--org`, the ID is looked up across workspaces.
 
 `restore` creates a **new** sandbox from the archive's registry ref, with the archived name, tags and size and the tag `lewbox.restored_from=<old ID>`, and prints the new ID and name. The archive is kept, so it can be restored again. `delete` removes the snapshot and its keys in the bucket and asks to confirm. Owners, admins, members and API keys can restore and delete; viewers can only list and show. See [Archived sandboxes](../../consumer/sandboxes/archived-sandboxes.md).
 

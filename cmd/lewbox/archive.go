@@ -15,20 +15,8 @@ func newArchiveCmd(a *app) *cobra.Command {
 	archive := &cobra.Command{
 		Use:     "archive",
 		Aliases: []string{"archives"},
-		Short:   "List, restore and delete archived sandboxes",
+		Short:   "Show, restore and delete archived sandboxes",
 	}
-
-	var listRegion string
-	list := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "List archived sandboxes (GET /v0/archives)",
-		Args:    usageArgs(cobra.NoArgs),
-		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListArchives(ctx, service.RegionScope{Region: listRegion, Org: a.org})
-		}),
-	}
-	list.Flags().StringVar(&listRegion, "region", "", "only archives in this region")
 
 	show := &cobra.Command{
 		Use:   "show <id>",
@@ -63,6 +51,6 @@ func newArchiveCmd(a *app) *cobra.Command {
 		},
 	}
 
-	archive.AddCommand(list, show, restore, remove)
+	archive.AddCommand(show, restore, remove)
 	return archive
 }

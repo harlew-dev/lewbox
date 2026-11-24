@@ -862,7 +862,8 @@ func TestSnapshots(t *testing.T) {
 	if err := json.Unmarshal([]byte(deleted), &gone); err != nil {
 		t.Fatal(err)
 	}
-	if gone.Name != "ckpt-1" || gone.Region != "eu-west" || gone.SourceSandboxID != "sb-1" {
+	if gone.Name != "ckpt-1" || gone.Region != "eu-west" || gone.SourceSandboxID != "sb-1" ||
+		gone.Kind != "snapshot" || gone.Status != "active" {
 		t.Errorf("deleted snapshot = %+v", gone)
 	}
 	e.sameError([]string{"snapshot", "delete", "ckpt-1", "--region", "eu-west", "--org", "acme", "--yes"},
@@ -969,9 +970,9 @@ func TestArchives(t *testing.T) {
 		ids[sandboxID] = id
 	}
 
-	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
-	e.sameOrg("acme", []string{"archive", "list", "--region", "eu-west", "--org", "acme"},
-		"GET", "/v0/archives?region=eu-west", 200)
+	e.sameOrg("acme", []string{"snapshot", "list", "--org", "acme"}, "GET", "/v0/snapshots", 200)
+	e.sameOrg("acme", []string{"snapshot", "list", "--region", "eu-west", "--org", "acme"},
+		"GET", "/v0/snapshots?region=eu-west", 200)
 	e.sameOrg("acme", []string{"archive", "show", ids["sb-1"], "--org", "acme"},
 		"GET", "/v0/archives/"+ids["sb-1"], 200)
 
@@ -985,7 +986,8 @@ func TestArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.Sandbox.ID == "" || first.Sandbox.Name != "box" || first.Sandbox.Region != "eu-west" ||
-		first.Archive.SandboxID != "sb-1" || first.Archive.LastRestoredSandboxID != first.Sandbox.ID {
+		first.Archive.SourceSandboxID != "sb-1" || first.Archive.Kind != "archive" ||
+		first.Archive.LastRestoredSandboxID != first.Sandbox.ID {
 		t.Errorf("restored = %+v", first)
 	}
 	if sandbox, ok := fake.Sandbox(first.Sandbox.ID); !ok || sandbox.Tags["lewbox.restored_from"] != "sb-1" {
@@ -1000,7 +1002,7 @@ func TestArchives(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &second); err != nil {
 		t.Fatal(err)
 	}
-	if second.Sandbox.ID == "" || second.Sandbox.ID == first.Sandbox.ID || second.Archive.SandboxID != "sb-2" {
+	if second.Sandbox.ID == "" || second.Sandbox.ID == first.Sandbox.ID || second.Archive.SourceSandboxID != "sb-2" {
 		t.Errorf("HTTP restored = %+v", second)
 	}
 
@@ -1009,11 +1011,11 @@ func TestArchives(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("archive delete: exit %d: %s", code, errOut)
 	}
-	var firstDeleted service.Archive
+	var firstDeleted service.Snapshot
 	if err := json.Unmarshal([]byte(deleted), &firstDeleted); err != nil {
 		t.Fatal(err)
 	}
-	if firstDeleted.ID != ids["sb-1"] || firstDeleted.Status != "deleted" {
+	if firstDeleted.ID != ids["sb-1"] || firstDeleted.Status != "active" || firstDeleted.Kind != "archive" {
 		t.Errorf("deleted = %+v", firstDeleted)
 	}
 
@@ -1021,14 +1023,14 @@ func TestArchives(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("HTTP delete: status %d: %s", status, body)
 	}
-	var secondDeleted service.Archive
+	var secondDeleted service.Snapshot
 	if err := json.Unmarshal([]byte(body), &secondDeleted); err != nil {
 		t.Fatal(err)
 	}
-	if secondDeleted.ID != ids["sb-2"] || secondDeleted.Status != "deleted" {
+	if secondDeleted.ID != ids["sb-2"] || secondDeleted.Status != "active" || secondDeleted.Kind != "archive" {
 		t.Errorf("HTTP deleted = %+v", secondDeleted)
 	}
-	e.sameOrg("acme", []string{"archive", "list", "--org", "acme"}, "GET", "/v0/archives", 200)
+	e.sameOrg("acme", []string{"snapshot", "list", "--org", "acme"}, "GET", "/v0/snapshots", 200)
 }
 
 func TestMonitoring(t *testing.T) {

@@ -246,7 +246,8 @@ SELECT archives.id, archives.org_id, archives.cluster_id, archives.sandbox_id,
        archives.registry_ref, archives.status, archives.error, archives.attempts,
        archives.next_attempt_at, archives.pushing_since, archives.created_at,
        archives.archived_at, archives.deleted_at, archives.last_restored_sandbox_id,
-       archives.last_restored_at, clusters.slug AS region, organizations.slug AS org
+       archives.last_restored_at, clusters.slug AS region, organizations.slug AS org,
+       organizations.name AS org_name
 FROM archives
 JOIN clusters ON clusters.id = archives.cluster_id
 JOIN organizations ON organizations.id = archives.org_id
@@ -287,6 +288,7 @@ type ListArchivesRow struct {
 	LastRestoredAt        sql.NullTime
 	Region                string
 	Org                   string
+	OrgName               string
 }
 
 // Every live archive, newest first, for one workspace and region, or every
@@ -327,6 +329,7 @@ func (q *Queries) ListArchives(ctx context.Context, arg ListArchivesParams) ([]L
 			&i.LastRestoredAt,
 			&i.Region,
 			&i.Org,
+			&i.OrgName,
 		); err != nil {
 			return nil, err
 		}

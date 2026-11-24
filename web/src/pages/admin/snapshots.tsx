@@ -5,22 +5,17 @@ import {
   ListboxOption,
   ListSkeleton,
   PageHeader,
-  PageTabs,
   Stat,
   Subheading,
   Text,
-  tabFrom,
 } from '@harlew-dev/ui'
 import { BarList } from '@harlew-dev/ui/chart'
 import { useState } from 'react'
-import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
-import { ArchiveTable } from '../../components/archive-table'
 import { PartialNotice, SnapshotTable, useSnapshots } from '../../components/snapshot-table'
 import { formatMemory, formatNumber } from '../../lib/format'
 import { useRegions } from '../../lib/regions'
 import { useDocumentTitle } from '../../lib/use-document-title'
-import { useLoad } from '../../lib/use-load'
 
 interface Group {
   key: string
@@ -66,56 +61,15 @@ function GroupList({ title, groups }: { title: string; groups: Group[] }) {
   )
 }
 
-const tabs = [
-  { id: 'snapshots', label: 'Snapshots' },
-  { id: 'archived', label: 'Archived' },
-] as const
-
 export function FleetSnapshotsPage() {
-  const [searchParams] = useSearchParams()
-  const tab = tabFrom(searchParams, tabs)
-  useDocumentTitle(tab === 'archived' ? 'Archived sandboxes' : 'Snapshots')
-  return tab === 'archived' ? (
-    <>
-      <PageHeader title="Snapshots" description="Every workspace’s snapshots, and its archived sandboxes." />
-      <PageTabs label="Snapshot views" tabs={tabs} current={tab} className="mb-8" />
-      <FleetArchives />
-    </>
-  ) : (
-    <SnapshotsView />
-  )
-}
-
-// Every workspace's archived sandboxes, which an instance admin may delete.
-function FleetArchives() {
-  const archives = useLoad(() => api.listArchives(''), [])
-  const regions = useRegions()
-  if (archives.loading && !archives.data) return <ListSkeleton label="Loading archived sandboxes" rows={4} />
-  if (archives.error.message) return <ErrorNotice error={archives.error} onRetry={archives.reload} />
-  const list = archives.data?.data ?? []
-  if (list.length === 0) {
-    return (
-      <EmptyState
-        title="No archived sandboxes"
-        description="Sandboxes archived on stop, in regions that archive, show up here."
-      />
-    )
-  }
-  return (
-    <ArchiveTable
-      archives={list}
-      canChange
-      fleet
-      showRegion
-      regionName={regions.name}
-      onChanged={archives.refresh}
-    />
-  )
+  useDocumentTitle('Snapshots')
+  return <SnapshotsView />
 }
 
 function SnapshotsView() {
   const [region, setRegion] = useState('')
   const [workspace, setWorkspace] = useState('')
+  const [kind, setKind] = useState('')
   const snapshots = useSnapshots('')
   const { load } = snapshots
   const regions = useRegions()
@@ -126,15 +80,21 @@ function SnapshotsView() {
     href: `/admin/workspaces/${encodeURIComponent(snapshot.organization?.slug ?? '')}`,
   })).sort((a, b) => a.label.localeCompare(b.label))
   const list = snapshots.list.filter(
-    (snapshot) => (!region || snapshot.region === region) && (!workspace || snapshot.organization?.slug === workspace),
+    (snapshot) =>
+      (!region || snapshot.region === region) &&
+      (!workspace || snapshot.organization?.slug === workspace) &&
+      (!kind || snapshot.kind === kind),
   )
   const diskGB = list.reduce((sum, snapshot) => sum + snapshot.disk_gb, 0)
   const memoryMB = list.reduce((sum, snapshot) => sum + snapshot.memory_mb, 0)
-  const failed = list.filter((snapshot) => snapshot.push_state === 'failed').length
+  const failed = list.filter((snapshot) => snapshot.status === 'error').length
   const owners = new Set(list.map((snapshot) => snapshot.organization?.slug)).size
   const byNode = groupBy(list, (snapshot) => ({
-    key: `${snapshot.region}/${snapshot.node ?? ''}`,
-    label: `${snapshot.node ?? 'Unknown node'} (${regions.name(snapshot.region)})`,
+    key: `${snapshot.region}/${snapshot.kind === 'archive' ? 'archive' : (snapshot.node ?? '')}`,
+    label:
+      snapshot.kind === 'archive'
+        ? `Archived to storage (${regions.name(snapshot.region)})`
+        : `${snapshot.node ?? 'Unknown node'} (${regions.name(snapshot.region)})`,
     href: `/admin/servers/clusters/${encodeURIComponent(snapshot.region)}`,
   }))
   const byWorkspace = groupBy(list, (snapshot) => ({
@@ -145,9 +105,16 @@ function SnapshotsView() {
 
   return (
     <>
-      <PageHeader title="Snapshots" description="Every workspace’s snapshots, on every node." />
-      <PageTabs label="Snapshot views" tabs={tabs} current="snapshots" className="mb-8" />
+      <PageHeader
+        title="Snapshots"
+        description="Every workspace’s snapshots and archived sandboxes, on every node and in every bucket."
+      />
       <div className="mb-6 flex flex-wrap gap-3">
+        <Listbox aria-label="Kind" value={kind} onChange={setKind} className="sm:w-48">
+          <ListboxOption value="">All kinds</ListboxOption>
+          <ListboxOption value="snapshot">Snapshots</ListboxOption>
+          <ListboxOption value="archive">Archived sandboxes</ListboxOption>
+        </Listbox>
         <Listbox aria-label="Region" value={region} onChange={setRegion} className="sm:w-48">
           <ListboxOption value="">All regions</ListboxOption>
           {regions.list.map((option) => (
@@ -197,7 +164,9 @@ function SnapshotsView() {
               <EmptyState
                 title="No snapshots"
                 description={
-                  region || workspace ? 'None match these filters.' : 'Snapshots workspaces take show up here.'
+                  region || workspace || kind
+                    ? 'None match these filters.'
+                    : 'Snapshots workspaces take and sandboxes archived on stop show up here.'
                 }
               />
             </div>
@@ -207,8 +176,15 @@ function SnapshotsView() {
                 <GroupList title="By node" groups={byNode} />
                 <GroupList title="By workspace" groups={byWorkspace} />
               </div>
-              <Subheading className="mt-14 mb-4">All snapshots</Subheading>
-              <SnapshotTable snapshots={list} regionName={regions.name} canDelete fleet onDeleted={snapshots.deleted} />
+              <Subheading className="mt-14 mb-4">All snapshots and archives</Subheading>
+              <SnapshotTable
+                snapshots={list}
+                regionName={regions.name}
+                canChange
+                fleet
+                onDeleted={snapshots.deleted}
+                onRestored={snapshots.changed}
+              />
             </>
           )}
         </>

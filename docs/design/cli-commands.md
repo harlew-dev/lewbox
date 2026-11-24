@@ -74,7 +74,7 @@ lewbox cluster upgrade eu-west  # rolling AerolVM upgrade of a whole cluster
 
 ## Commands
 
-✅ built · 🔁 built, renamed or changed by this doc · 🔜 next · 📋 planned (milestone from [MVP.md](../../MVP.md) §18) · ❓ open question
+✅ built · 🔁 built, renamed or changed by this doc · 🔜 next · 📋 planned (milestone from the legacy MVP specification §18) · ❓ open question
 
 **Runs on** says where the command must run:
 - **this machine**: it changes the machine you're on, and runs one step at a time with `sudo`;

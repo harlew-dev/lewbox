@@ -694,15 +694,8 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	})
 
 	// Archives are stopped sandboxes kept in a cluster's bucket. Their IDs
-	// are unique, so only the organization is chosen.
-	mux.HandleFunc("GET "+Prefix+"/archives", func(w http.ResponseWriter, r *http.Request) {
-		resp, err := svc.ListArchives(r.Context(), service.RegionScope{
-			Region: r.URL.Query().Get("region"),
-			Org:    requestOrganization(r),
-		})
-		respond(w, log, http.StatusOK, resp, err)
-	})
-
+	// are unique, so only the organization is chosen. The list is part of
+	// GET /v0/snapshots, where their kind is "archive".
 	mux.HandleFunc("GET "+Prefix+"/archives/{id}", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := svc.GetArchive(r.Context(), r.PathValue("id"), service.RegionScope{
 			Org: requestOrganization(r),

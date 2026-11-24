@@ -102,14 +102,14 @@ sb=$(avm POST /v1/sandboxes -d "{\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIM
 out=$(avm POST "/v1/sandboxes/$sb/toolbox/process/execute" -d "$(jq -nc --arg c "sh -c 'echo archived-$RUN > /root/marker'" '{command: $c}')")
 expect "a file written in it" '.exit_code == 0' "$out"
 avm POST "/v1/sandboxes/$sb/stop" -o /dev/null
-archived() { cust GET /v0/archives | jq -e "[.data[] | select(.sandbox_id == \"$sb\" and .status == \"archived\")] | length == 1"; }
+archived() { cust GET /v0/snapshots | jq -e "[.data[] | select(.kind == \"archive\" and .source_sandbox_id == \"$sb\" and .status == \"active\")] | length == 1"; }
 eventually 180 "it is archived" archived
-a=$(cust GET /v0/archives | jq -c ".data[] | select(.sandbox_id == \"$sb\")")
+a=$(cust GET /v0/snapshots | jq -c ".data[] | select(.kind == \"archive\" and .source_sandbox_id == \"$sb\")")
 expect "the archive keeps its name, tags and registry ref" ".sandbox_name == \"keeper\" and .tags.app == \"e2e\" and (.registry_ref | startswith(\"127.0.0.1:5000/cluster/\"))" "$a"
-expect "its snapshot is named archive-<name>-<id>" ".snapshot_name == \"archive-keeper-$sb\"" "$a"
+expect "its snapshot is named archive-<name>-<id>" ".name == \"archive-keeper-$sb\"" "$a"
 ARCHIVE=$(jq -r .id <<<"$a"); REF=$(jq -r .registry_ref <<<"$a")
 [[ $(avm GET "/v1/sandboxes/$sb" -o /dev/null -w '%{http_code}') == 404 ]] && pass "the sandbox is gone from the cluster" || fail "sandbox still on the cluster"
-expect "it isn't listed as an ordinary snapshot" "[.data[] | select(.name == \"archive-keeper-$sb\")] | length == 0" "$(cust GET /v0/snapshots)"
+expect "it isn't listed as an ordinary snapshot" "[.data[] | select(.kind == \"snapshot\" and .name == \"archive-keeper-$sb\")] | length == 0" "$(cust GET /v0/snapshots)"
 CID=$(admin GET "/v0/clusters/$CLUSTER" | jq -r .id)
 REPO="clusters/$CID/docker/registry/v2/repositories/${REF#127.0.0.1:5000/}"; REPO="${REPO%:*}/"
 [[ -n $(bucket_keys "$REPO") ]] && pass "its repository is in the bucket" || fail "no repository under $REPO"
@@ -164,8 +164,8 @@ expect "the file came back" ".stdout | contains(\"archived-$RUN\")" "$out"
 step "delete the archive: gone from AerolVM and the bucket"
 avm DELETE "/v1/sandboxes/$nsb" -o /dev/null
 d=$(cust DELETE "/v0/archives/$ARCHIVE")
-expect "deleted" '.status == "deleted"' "$d"
-expect "no longer listed" "[.data[] | select(.id == \"$ARCHIVE\")] | length == 0" "$(cust GET /v0/archives)"
+expect "deleted" '.kind == "archive" and .status == "active"' "$d"
+expect "no longer listed" "[.data[] | select(.kind == \"archive\" and .id == \"$ARCHIVE\")] | length == 0" "$(cust GET /v0/snapshots)"
 [[ -z $(bucket_keys "$REPO") ]] && pass "its repository is gone from the bucket" || fail "repository left under $REPO"
 
 step "back to keeping stopped sandboxes"

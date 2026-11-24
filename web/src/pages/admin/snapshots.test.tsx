@@ -4,19 +4,29 @@ import { json, renderApp, stubAPI } from '../../test/render'
 
 const euWest = { slug: 'eu-west', name: 'EU West', endpoint_url: 'https://eu.example', runtime: 'docker', status: 'ready' }
 
-function snapshot(name: string, org: { slug: string; name: string }, node: string, diskGB: number, pushState = 'active') {
+function snapshot(name: string, org: { slug: string; name: string }, node: string, diskGB: number, status = 'active') {
   return {
+    id: '',
+    kind: 'snapshot',
     name,
     region: 'eu-west',
     organization: org,
     node,
+    sandbox_name: '',
     source_sandbox_id: 'sb-1',
     image: 'ubuntu:22.04',
+    runtime: 'docker',
     created_at: '2026-11-12T12:00:00Z',
+    archived_at: null,
     cpu: 1,
     memory_mb: 1024,
     disk_gb: diskGB,
-    push_state: pushState,
+    tags: {},
+    status,
+    error: '',
+    registry_ref: '',
+    last_restored_sandbox_id: '',
+    last_restored_at: null,
   }
 }
 
@@ -32,7 +42,7 @@ describe('FleetSnapshotsPage', () => {
         json(200, {
           data: [
             snapshot('ckpt-a', acme, 'node-a', 10),
-            snapshot('ckpt-b', acme, 'node-b', 20, 'failed'),
+            snapshot('ckpt-b', acme, 'node-b', 20, 'error'),
             snapshot('ckpt-c', globex, 'node-a', 5),
           ],
           partial_nodes: [],
@@ -54,7 +64,7 @@ describe('FleetSnapshotsPage', () => {
     const row = screen.getByRole('row', { name: /ckpt-c/ })
     expect(within(row).getByText('Globex')).toBeInTheDocument()
     expect(within(row).getByText('node-a')).toBeInTheDocument()
-    expect(screen.getByText('Upload failed')).toBeInTheDocument()
+    expect(within(screen.getByRole('row', { name: /ckpt-b/ })).getByText('Error')).toBeInTheDocument()
 
     fireEvent.click(within(row).getByRole('button', { name: 'Delete ckpt-c' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete snapshot' }))
@@ -63,40 +73,45 @@ describe('FleetSnapshotsPage', () => {
     expect(deleted).toMatchObject({ url: '/v0/snapshots/ckpt-c?region=eu-west', org: 'globex' })
   })
 
-  it('lists every workspace’s archives on the Archived tab, with delete only', async () => {
+  it('lists archives in the same table, with delete only for the operator', async () => {
     const archive = {
       id: '01a1cb34-29a5-74c3-9691-5394d021b0aa',
-      org: 'globex',
+      kind: 'archive',
+      name: 'archive-1',
       region: 'eu-west',
-      sandbox_id: 'sb-1',
+      organization: globex,
       sandbox_name: 'builder',
+      source_sandbox_id: 'sb-1',
       image: 'ubuntu:22.04',
       runtime: 'docker',
+      created_at: '2026-11-12T10:00:00Z',
+      archived_at: '2026-11-12T10:05:00Z',
       cpu: 1,
       memory_mb: 1024,
       disk_gb: 10,
       tags: {},
-      snapshot_name: 'a',
-      registry_ref: '',
-      status: 'archived',
+      status: 'active',
       error: '',
-      created_at: '2026-11-12T10:00:00Z',
-      archived_at: '2026-11-12T10:05:00Z',
+      registry_ref: '',
       last_restored_sandbox_id: '',
       last_restored_at: null,
     }
     const calls = stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/regions': () => json(200, { data: [euWest] }),
-      'GET /v0/archives': () => json(200, { data: [archive] }),
+      'GET /v0/snapshots': () => json(200, { data: [archive], partial_nodes: [] }),
       [`DELETE /v0/archives/${archive.id}`]: () => json(200, archive),
     })
-    renderApp('/admin/snapshots?tab=archived')
+    renderApp('/admin/snapshots')
 
     const row = (await screen.findByText('builder')).closest('tr')!
-    expect(within(row).getByText('globex')).toBeInTheDocument()
+    expect(within(row).getByText('Archived sandbox')).toBeInTheDocument()
+    expect(within(row).getByText('Globex')).toBeInTheDocument()
     expect(within(row).getByText('EU West')).toBeInTheDocument()
     expect(within(row).queryByRole('button', { name: /Restore/ })).toBeNull()
+    expect(screen.getByRole('link', { name: /Archived to storage \(EU West\) · 1 snapshot/ })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Archived' })).toBeNull()
+
     fireEvent.click(within(row).getByRole('button', { name: 'Delete builder' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete archive' }))
     await waitFor(() =>

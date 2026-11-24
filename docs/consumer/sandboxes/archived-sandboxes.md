@@ -9,13 +9,15 @@ A region's [region list](../reference/management-api.md) shows its `stop_policy`
 
 ## Where archived sandboxes appear
 
-An archived sandbox shows under **Sandboxes → Archived** in the portal, and with the CLI:
+An archived sandbox shows under **Sandboxes → Snapshots** in the portal, in the same table as your snapshots, with **Archived sandbox** in its KIND column. With the CLI, use the same list:
 
 ```bash
-lewbox archive list
+lewbox snapshot list
 ```
 
-The list shows the original sandbox name, its region, when it was archived, its size and whether it has been restored before. Archived sandboxes no longer count as stopped sandboxes on the region and do not take up a sandbox slot there.
+The table shows the original sandbox name, its region, when it was archived, its size, its status and whether it has been restored before. `lewbox archive show <id>` prints one archive in full. Archived sandboxes no longer count as stopped sandboxes on the region and do not take up a sandbox slot there.
+
+An archive and a snapshot share one status vocabulary: `pending`, `pushing`, `active` or `error`. An archive is `active` once its snapshot is safely in storage and can be restored.
 
 ## Restoring
 
@@ -48,7 +50,7 @@ On a Firecracker region, add `runtime: "firecracker"` as for any create there. A
 
 ## E2B pause and connect
 
-E2B's `pause()` followed by `connect(id)` does not work on an archive region: restoring creates a new sandbox with a new ID, so the old ID no longer exists. Use the archive list (or the registry reference) to bring the sandbox back instead.
+E2B's `pause()` followed by `connect(id)` does not work on an archive region: restoring creates a new sandbox with a new ID, so the old ID no longer exists. Use the snapshot list (or the registry reference) to bring the sandbox back instead.
 
 ## Keeping and deleting archives
 

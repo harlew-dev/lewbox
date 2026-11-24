@@ -27,21 +27,48 @@ const (
 	snapshotWorkers     = 4
 )
 
-// Snapshot is a sandbox snapshot owned by one workspace's AerolVM team.
-// Organization and Node are only included for instance admins.
+// Snapshot is a sandbox snapshot or an archived sandbox, owned by one
+// workspace's AerolVM team. Kind tells them apart; an archive is a snapshot of
+// a stopped sandbox that lives in a cluster's bucket. Organization and Node
+// are only included for instance admins, and an archive has no node.
 type Snapshot struct {
-	Name            string               `json:"name"`
-	Region          string               `json:"region"`
-	Organization    *SandboxOrganization `json:"organization,omitempty"`
-	Node            *string              `json:"node,omitempty"`
-	SourceSandboxID string               `json:"source_sandbox_id"`
-	Image           string               `json:"image"`
-	CreatedAt       time.Time            `json:"created_at"`
-	CPU             float64              `json:"cpu"`
-	MemoryMB        int64                `json:"memory_mb"`
-	DiskGB          int64                `json:"disk_gb"`
-	PushState       string               `json:"push_state"`
+	ID                    string               `json:"id"`
+	Kind                  string               `json:"kind"`
+	Name                  string               `json:"name"`
+	Region                string               `json:"region"`
+	Organization          *SandboxOrganization `json:"organization,omitempty"`
+	Node                  *string              `json:"node,omitempty"`
+	SandboxName           string               `json:"sandbox_name"`
+	SourceSandboxID       string               `json:"source_sandbox_id"`
+	Image                 string               `json:"image"`
+	Runtime               string               `json:"runtime"`
+	CreatedAt             time.Time            `json:"created_at"`
+	ArchivedAt            *time.Time           `json:"archived_at"`
+	CPU                   float64              `json:"cpu"`
+	MemoryMB              int64                `json:"memory_mb"`
+	DiskGB                int64                `json:"disk_gb"`
+	Tags                  map[string]string    `json:"tags"`
+	Status                string               `json:"status"`
+	Error                 string               `json:"error"`
+	RegistryRef           string               `json:"registry_ref"`
+	LastRestoredSandboxID string               `json:"last_restored_sandbox_id"`
+	LastRestoredAt        *time.Time           `json:"last_restored_at"`
 }
+
+// Snapshot kinds. An archive is a snapshot of a stopped sandbox, kept in a
+// cluster's bucket rather than on a node.
+const (
+	snapshotKindSnapshot = "snapshot"
+	snapshotKindArchive  = "archive"
+)
+
+// Snapshot statuses use AerolVM's vocabulary for both kinds.
+const (
+	snapshotStatusPending = "pending"
+	snapshotStatusPushing = "pushing"
+	snapshotStatusActive  = "active"
+	snapshotStatusError   = "error"
+)
 
 // SnapshotList is returned by ListSnapshots. Data is never null; PartialNodes
 // names nodes that did not answer.
@@ -91,6 +118,13 @@ func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotL
 		return SnapshotList{}, err
 	}
 	out := SnapshotList{Data: make([]Snapshot, 0), PartialNodes: make([]string, 0)}
+	// Archives come from the database, so they are never partial and are
+	// listed even when a region's nodes do not answer.
+	archives, err := s.listArchiveSnapshots(ctx, org, req.Region, p.InstanceAdmin)
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	out.Data = append(out.Data, archives...)
 	partial := make(map[string]bool)
 	addPartial := func(name string) {
 		if !partial[name] {
@@ -130,6 +164,60 @@ func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotL
 	})
 	sort.Strings(out.PartialNodes)
 	return out, nil
+}
+
+// listArchiveSnapshots reads the live archives the caller may see and returns
+// them as snapshot rows of kind archive. Archives come from the database, so
+// they never make a list partial.
+func (s *Service) listArchiveSnapshots(ctx context.Context, org *db.Organization, region string, admin bool) ([]Snapshot, error) {
+	cluster, err := s.regionFilter(ctx, org, region)
+	if err != nil {
+		return nil, err
+	}
+	orgID, clusterID := "", ""
+	if org != nil {
+		orgID = org.ID
+	}
+	if cluster != nil {
+		clusterID = cluster.ID
+	}
+	rows, err := s.q.ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: clusterID})
+	if err != nil {
+		return nil, fmt.Errorf("list archives: %w", err)
+	}
+	archives := make([]Snapshot, 0, len(rows))
+	for _, row := range rows {
+		var owner *SandboxOrganization
+		if admin {
+			owner = &SandboxOrganization{Slug: row.Org, Name: row.OrgName}
+		}
+		archives = append(archives, archiveSnapshot(db.Archive{
+			ID:                    row.ID,
+			OrgID:                 row.OrgID,
+			ClusterID:             row.ClusterID,
+			SandboxID:             row.SandboxID,
+			SandboxName:           row.SandboxName,
+			Image:                 row.Image,
+			Runtime:               row.Runtime,
+			Cpu:                   row.Cpu,
+			MemoryMb:              row.MemoryMb,
+			DiskGb:                row.DiskGb,
+			Tags:                  row.Tags,
+			SnapshotName:          row.SnapshotName,
+			RegistryRef:           row.RegistryRef,
+			Status:                row.Status,
+			Error:                 row.Error,
+			Attempts:              row.Attempts,
+			NextAttemptAt:         row.NextAttemptAt,
+			PushingSince:          row.PushingSince,
+			CreatedAt:             row.CreatedAt,
+			ArchivedAt:            row.ArchivedAt,
+			DeletedAt:             row.DeletedAt,
+			LastRestoredSandboxID: row.LastRestoredSandboxID,
+			LastRestoredAt:        row.LastRestoredAt,
+		}, row.Region, owner))
+	}
+	return archives, nil
 }
 
 // DeleteSnapshot deletes one snapshot with a temporary runner token bound to
@@ -479,6 +567,7 @@ func isArchiveSnapshot(name string) bool {
 // forPrincipal decides whether the caller sees it.
 func toSnapshot(snapshot aerolvm.Snapshot, region, node string) Snapshot {
 	return Snapshot{
+		Kind:            snapshotKindSnapshot,
 		Name:            snapshot.Name,
 		Region:          region,
 		Node:            &node,
@@ -488,7 +577,9 @@ func toSnapshot(snapshot aerolvm.Snapshot, region, node string) Snapshot {
 		CPU:             snapshot.CPU,
 		MemoryMB:        snapshot.MemoryMB,
 		DiskGB:          snapshot.DiskGB,
-		PushState:       snapshot.PushState,
+		Tags:            map[string]string{},
+		Status:          snapshot.PushState,
+		Error:           snapshot.PushError,
 	}
 }
 

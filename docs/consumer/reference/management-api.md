@@ -63,12 +63,11 @@ A key is refused while the workspace is pending or suspended. A region failure i
 | `GET /v0/sandboxes?region={slug}&status={status}` | its members, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500 |
 | `POST /v0/sandboxes/{id}/stop` | owner, admin or member, its keys | Stop on the region, then update the mirror → Sandbox |
 | `DELETE /v0/sandboxes/{id}` | same | Delete on the region, then mark it gone → Sandbox |
-| `GET /v0/snapshots?region={slug}` | its members, its keys | `{data: [Snapshot], partial_nodes: [name]}`. Partial nodes are the machines that did not answer |
+| `GET /v0/snapshots?region={slug}` | its members, its keys | `{data: [Snapshot], partial_nodes: [name]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`) and `status`. Partial nodes are the machines that did not answer; archives are never partial |
 | `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, its keys | Delete on the region → Snapshot. An `archive-…` name is `400`: use the archive routes |
-| `GET /v0/archives?region={slug}` | its members, its keys | `{data: [Archive]}`, newest first: the sandboxes stopped on an archive region. Cancelled and deleted rows are not listed |
-| `GET /v0/archives/{id}` | its members, its keys | Archive. Another workspace's is `404` |
-| `POST /v0/archives/{id}/restore` | owner, admin or member, its keys | Create a new sandbox from the archive → `{archive, sandbox}`. The archive is kept |
-| `DELETE /v0/archives/{id}` | same | Delete the archive's snapshot and bucket data → Archive, with `status: "deleted"` |
+| `GET /v0/archives/{id}` | its members, its keys | The archive as a Snapshot of `kind: "archive"`. Another workspace's is `404` |
+| `POST /v0/archives/{id}/restore` | owner, admin or member, its keys | Create a new sandbox from the archive → `{archive, sandbox}`, where `archive` is a Snapshot. The archive is kept |
+| `DELETE /v0/archives/{id}` | same | Delete the archive's snapshot and bucket data → the Snapshot as it was before the delete, with its `active`, `error` or `pending` status |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day` | its members, its keys | Usage: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, its keys | LimitsReport: the workspace's region, its plan, effective limits, live use and quota |
 | `GET /v0/regions` | signed in, or a key | `{data: [Region]}`: the regions the workspace can use, with its `plan` and `limits` |
@@ -98,7 +97,7 @@ Another workspace's sandbox is always `404`, never `403`.
 
 **Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a region the workspace can use. `stop_policy` is `keep` or `archive`: on an `archive` region a stopped sandbox is archived to storage. A subscribed region also has `plan` (`{slug, name}`) and `limits`.
 
-**Archive**: `{id, region, sandbox_id, sandbox_name, image, runtime, cpu, memory_mb, disk_gb, tags, snapshot_name, registry_ref, status, error, created_at, archived_at, last_restored_sandbox_id, last_restored_at}`. `status` is `pending`, `pushing`, `archived` or `failed`; `registry_ref` is the image to restore it by. `snapshot_name` starts with `archive-` and ends with the sandbox ID; depending on the region it may include the sandbox's name too, as `archive-<name>-<id>`. The restore response's `sandbox` is `{id, name, status, region}`, a new sandbox.
+**Snapshot**: `{id, kind, name, region, sandbox_name, source_sandbox_id, image, runtime, created_at, archived_at, cpu, memory_mb, disk_gb, tags, status, error, registry_ref, last_restored_sandbox_id, last_restored_at}`. `kind` is `snapshot` or `archive`; an archive is a snapshot of a stopped sandbox kept in the region's storage. `name` is the snapshot name: for an archive it starts with `archive-` and ends with the sandbox ID, and depending on the region may include the sandbox's name too, as `archive-<name>-<id>`. `sandbox_name` and `source_sandbox_id` name the sandbox it came from. `status` is `pending`, `pushing`, `active` or `error` for both kinds; a plain snapshot's is empty when its region has no registry. `error` explains an error. `registry_ref` is the image to restore an archive by. `tags` is always an object; `id`, `archived_at`, `registry_ref` and `last_restored_*` are empty or `null` for a plain snapshot. The restore response's `sandbox` is `{id, name, status, region}`, a new sandbox.
 
 **SandboxKey**: `{id, name, region, token_hint, created_by, created_at, expires_at, revoked_at, expired}`. `token_hint` is `avm_…` and the token's last four characters. **NewSandboxKey** adds the `token`, `env` (`SB_API_URL`, `SB_API_TOKEN`) and, for a Docker region, `e2b_env` (`E2B_API_URL`, `E2B_SANDBOX_URL`, `E2B_API_KEY`).
 

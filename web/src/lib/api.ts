@@ -114,19 +114,39 @@ export interface SubscriptionInput {
   max_memory_mb?: number | null
 }
 
+export type SnapshotKind = 'snapshot' | 'archive'
+
+// AerolVM's push states, the one vocabulary for both snapshots and archives.
+// An empty status is a cluster with no registry, which never pushes.
+export type SnapshotStatus = 'pending' | 'pushing' | 'active' | 'error' | ''
+
 export interface Snapshot {
+  // The archive's UUIDv7; empty for a plain snapshot.
+  id: string
+  kind: SnapshotKind
+  // A plain snapshot's name, or an archive's snapshot name.
   name: string
   region: string
-  // Only for instance admins: the owning workspace and the node that holds it.
+  // Only for instance admins: the owning workspace and, for a plain
+  // snapshot, the node that holds it. An archive lives in the bucket.
   organization?: { slug: string; name: string }
   node?: string
+  // The sandbox an archive was taken from.
+  sandbox_name: string
   source_sandbox_id: string
   image: string
+  runtime: string
   created_at: string
+  archived_at: string | null
   cpu: number
   memory_mb: number
   disk_gb: number
-  push_state: string
+  tags: Record<string, string>
+  status: SnapshotStatus
+  error: string
+  registry_ref: string
+  last_restored_sandbox_id: string
+  last_restored_at: string | null
 }
 
 export interface SnapshotList {
@@ -1102,48 +1122,19 @@ export function updateCluster(clusterRef: string, input: ClusterUpdate): Promise
   return request<Cluster>(`/v0/clusters/${ref(clusterRef)}`, { method: 'PATCH', body: input })
 }
 
-// A stopped sandbox kept in a region's bucket.
-export interface Archive {
-  id: string
-  // Only for instance admins listing every workspace's archives.
-  org?: string
-  region: string
-  sandbox_id: string
-  sandbox_name: string
-  image: string
-  runtime: string
-  cpu: number
-  memory_mb: number
-  disk_gb: number
-  tags: Record<string, string>
-  snapshot_name: string
-  registry_ref: string
-  status: string
-  error: string
-  created_at: string
-  archived_at: string | null
-  last_restored_sandbox_id: string
-  last_restored_at: string | null
-}
-
 export interface RestoredArchive {
-  archive: Archive
+  archive: Snapshot
   sandbox: { id: string; name: string; status: string; region: string }
 }
 
-// An empty org is every workspace's, for an instance admin.
-export function listArchives(org: string): Promise<{ data: Archive[] }> {
-  return request<{ data: Archive[] }>('/v0/archives', { org: org || undefined })
-}
-
-export function getArchive(org: string, id: string): Promise<Archive> {
-  return request<Archive>(`/v0/archives/${ref(id)}`, { org: org || undefined })
+export function getArchive(org: string, id: string): Promise<Snapshot> {
+  return request<Snapshot>(`/v0/archives/${ref(id)}`, { org: org || undefined })
 }
 
 export function restoreArchive(org: string, id: string): Promise<RestoredArchive> {
   return request<RestoredArchive>(`/v0/archives/${ref(id)}/restore`, { method: 'POST', org })
 }
 
-export function deleteArchive(org: string, id: string): Promise<Archive> {
-  return request<Archive>(`/v0/archives/${ref(id)}`, { method: 'DELETE', org: org || undefined })
+export function deleteArchive(org: string, id: string): Promise<Snapshot> {
+  return request<Snapshot>(`/v0/archives/${ref(id)}`, { method: 'DELETE', org: org || undefined })
 }

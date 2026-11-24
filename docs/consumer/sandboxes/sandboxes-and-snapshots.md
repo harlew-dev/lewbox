@@ -22,13 +22,13 @@ A sandbox belongs to one workspace: a member of another workspace gets "not foun
 
 ## Snapshots
 
-Snapshots you take with the SDK show up under **Sandboxes → Snapshots**:
+Snapshots you take with the SDK show up under **Sandboxes → Snapshots**, in the same table as any sandboxes archived on stop:
 
 ```ts
 const snapshot = await sb.snapshot()
 ```
 
-The portal lists each snapshot's name, source sandbox, image, size and time. A snapshot belongs to your workspace, so every member sees it. Owners, admins and members can delete one; viewers can only look.
+The portal lists each row's kind (`Snapshot` or `Archived sandbox`), name, source sandbox, size, time and status. The status is `pending`, `pushing`, `active` or `error`; it is empty for a region with no registry. A snapshot belongs to your workspace, so every member sees it. Owners, admins and members can delete one; viewers can only look. An archived sandbox can also be restored; see [Archived sandboxes](archived-sandboxes.md).
 
 The region stores snapshots on more than one machine, so a snapshot may be listed as partial while part of the region does not answer. The rest are still shown. AerolVM reports no snapshot size, so snapshots are not charged.
 

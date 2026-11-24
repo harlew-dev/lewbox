@@ -102,10 +102,9 @@ type Backend interface {
 	DeleteSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error)
 	ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error)
 	DeleteSnapshot(ctx context.Context, name string, req service.RegionScope) (service.Snapshot, error)
-	ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error)
-	GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error)
+	GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Snapshot, error)
 	RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error)
-	DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error)
+	DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Snapshot, error)
 	Usage(ctx context.Context, req service.UsageRequest) (service.Usage, error)
 	Limits(ctx context.Context, org string) (service.LimitsReport, error)
 }
@@ -508,13 +507,8 @@ func (l Local) DeleteSnapshot(ctx context.Context, name string, req service.Regi
 	return l.Svc.DeleteSnapshot(l.withPrincipal(ctx), name, req)
 }
 
-// ListArchives lists the archives the caller may see.
-func (l Local) ListArchives(ctx context.Context, req service.RegionScope) (service.ArchiveList, error) {
-	return l.Svc.ListArchives(l.withPrincipal(ctx), req)
-}
-
 // GetArchive returns one archive by ID.
-func (l Local) GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+func (l Local) GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Snapshot, error) {
 	return l.Svc.GetArchive(l.withPrincipal(ctx), id, req)
 }
 
@@ -524,7 +518,7 @@ func (l Local) RestoreArchive(ctx context.Context, id string, req service.Region
 }
 
 // DeleteArchive removes an archive.
-func (l Local) DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Archive, error) {
+func (l Local) DeleteArchive(ctx context.Context, id string, req service.RegionScope) (service.Snapshot, error) {
 	return l.Svc.DeleteArchive(l.withPrincipal(ctx), id, req)
 }
 

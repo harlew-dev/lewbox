@@ -31,9 +31,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // React and the router change less often than the app, so they get a
-        // chunk of their own. Charts and markdown are already split off by
-        // the lazy pages in src/app.tsx; listing them here would pull their
-        // shared dependencies into a chunk the entry then loads eagerly.
+        // chunk of their own. Markdown is already split off with the lazy docs
+        // page in src/app.tsx; listing it here would pull its shared
+        // dependencies into a chunk the entry then loads eagerly.
         manualChunks(id) {
           if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router)[\\/]/.test(id)) return 'react'
         },
