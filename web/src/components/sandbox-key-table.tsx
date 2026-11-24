@@ -50,6 +50,7 @@ export function SandboxKeyTable({
           <TableRow>
             <TableHeader>Name</TableHeader>
             {showRegion && <TableHeader>Region</TableHeader>}
+            <TableHeader>Endpoint URL</TableHeader>
             <TableHeader>Key</TableHeader>
             <TableHeader>Status</TableHeader>
             <TableHeader>Created</TableHeader>
@@ -68,6 +69,9 @@ export function SandboxKeyTable({
               {showRegion && (
                 <TableCell className="text-zinc-500 dark:text-zinc-400">{key.region.name}</TableCell>
               )}
+              <TableCell>
+                <Code>{key.region.endpoint_url}</Code>
+              </TableCell>
               <TableCell>
                 <Code>{key.token_hint}</Code>
               </TableCell>

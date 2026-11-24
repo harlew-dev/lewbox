@@ -15,17 +15,24 @@ export function UsageSummary({
   onRetry: () => void
   byRegion?: boolean
 }) {
-  if (usage.loading && !usage.data) return <ListSkeleton label="Loading usage" rows={4} />
-  if (usage.error.message || !usage.data) return <ErrorNotice error={usage.error} onRetry={onRetry} />
-  const { totals } = usage.data
+  if (usage.error.message || (!usage.loading && !usage.data)) {
+    return <ErrorNotice error={usage.error} onRetry={onRetry} />
+  }
+  const totals = usage.data?.totals
   return (
     <>
       <div className="grid gap-8 sm:grid-cols-3">
-        <Stat title="vCPU-hours" value={formatNumber(totals.vcpu_hours, 1)} />
-        <Stat title="Memory GiB-hours" value={formatNumber(totals.memory_gib_hours, 1)} />
-        <Stat title="Sandbox-hours" value={formatNumber(totals.sandbox_hours, 1)} />
+        <Stat title="vCPU-hours" value={totals ? formatNumber(totals.vcpu_hours, 1) : undefined} />
+        <Stat title="Memory GiB-hours" value={totals ? formatNumber(totals.memory_gib_hours, 1) : undefined} />
+        <Stat title="Sandbox-hours" value={totals ? formatNumber(totals.sandbox_hours, 1) : undefined} />
       </div>
-      <UsageChart usage={usage.data} regionName={regionName} byRegion={byRegion} />
+      {usage.data ? (
+        <UsageChart usage={usage.data} regionName={regionName} byRegion={byRegion} />
+      ) : (
+        <div className="mt-12">
+          <ListSkeleton label="Loading usage" rows={3} />
+        </div>
+      )}
     </>
   )
 }

@@ -25,7 +25,7 @@ Stopped sandboxes still count against your plan's sandbox limit, as the region c
 - maximum vCPUs,
 - maximum memory.
 
-A limit may be unlimited. Limits are per workspace and per region, with no shared pool between workspaces. The page is informational: it does not take payment. Your provider sets the plan and any change to it.
+A limit may be unlimited. Limits are per workspace and per region, with no shared pool between workspaces. The page is informational: it does not take payment. Your provider sets the plan and any change to it. It also shows the region's endpoint URL, with a copy button.
 
 **Home** shows live use against each limit, so you can see how close a workspace is before creating another sandbox.
 

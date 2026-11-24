@@ -2,6 +2,14 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
+const region = {
+  slug: 'eu-west',
+  name: 'EU West',
+  endpoint_url: 'https://eu-west.api.acme.dev',
+  runtime: 'docker',
+  status: 'ready',
+}
+
 const limits = {
   regions: [
     {
@@ -21,6 +29,7 @@ describe('PlanPage', () => {
       {
         'GET /v0/organizations/acme': () => json(200, acme),
         'GET /v0/limits': () => json(200, limits),
+        'GET /v0/regions': () => json(200, { data: [region] }),
       },
       customerUser,
       [acmeMembership],
@@ -30,6 +39,9 @@ describe('PlanPage', () => {
     expect(await screen.findByRole('heading', { name: 'Plan & Billing' })).toBeInTheDocument()
     expect((await screen.findAllByText('Free')).length).toBeGreaterThan(0)
     expect((await screen.findAllByText('in EU West')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('Endpoint URL')).toBeInTheDocument()
+    expect(await screen.findByText(region.endpoint_url)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy endpoint URL' })).toBeInTheDocument()
     expect(await screen.findByText('1 of 2')).toBeInTheDocument()
     expect(screen.getByText('1 · Unlimited')).toBeInTheDocument()
     expect(screen.getByText('1 GB of 4 GB')).toBeInTheDocument()
@@ -39,7 +51,10 @@ describe('PlanPage', () => {
 
   it('says the provider will assign a region when there is none', async () => {
     stubAPI(
-      { 'GET /v0/organizations/acme': () => json(200, { ...acme, region: null }) },
+      {
+        'GET /v0/organizations/acme': () => json(200, { ...acme, region: null }),
+        'GET /v0/regions': () => json(200, { data: [] }),
+      },
       customerUser,
       [acmeMembership],
     )

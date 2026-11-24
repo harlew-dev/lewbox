@@ -52,11 +52,30 @@ function Home() {
 
   if (!opened) {
     if ((usage.loading && !usage.data) || (sandboxes.loading && !sandboxes.data)) {
-      return <ListSkeleton label="Loading" rows={4} />
+      return (
+        <>
+          <PageHeader title={org.name} />
+          <ListSkeleton label="Loading" rows={4} />
+        </>
+      )
     }
-    if (sandboxes.error.message) return <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
+    if (sandboxes.error.message) {
+      return (
+        <>
+          <PageHeader title={org.name} />
+          <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
+        </>
+      )
+    }
     if ((sandboxes.data?.data.length ?? 0) === 0) {
-      if (usage.error.message) return <ErrorNotice error={usage.error} onRetry={usage.reload} />
+      if (usage.error.message) {
+        return (
+          <>
+            <PageHeader title={org.name} />
+            <ErrorNotice error={usage.error} onRetry={usage.reload} />
+          </>
+        )
+      }
       if ((usage.data?.totals.sandbox_hours ?? 0) === 0) {
         return (
           <GetStarted

@@ -7,7 +7,7 @@ A sandbox API key is a token (`avm_…`) for your workspace's region. It can cre
 
 ## Create a key
 
-In the portal, open **API keys** and choose **Create API key**. Give it a name. The key works in your workspace's region; there is no region to pick.
+In the portal, open **API keys** and choose **Create API key**. Give it a name. The key works in your workspace's region; there is no region to pick. The dialog and the keys list show the region's endpoint URL, the `SB_API_URL` your apps call.
 
 The key lasts 90 days by default. Choose another lifetime in the dialog, or keep it until you revoke it. Members, admins and owners can create keys; viewers cannot.
 

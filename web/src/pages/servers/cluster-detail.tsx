@@ -75,11 +75,52 @@ export function ClusterDetailPage() {
     { toError: (failure) => ({ message: errorMessage(failure) }) },
   )
 
+  const actions = (
+    <>
+      <Button outline onClick={() => void check.run()} loading={check.loading}>
+        Run checks
+      </Button>
+      <Button onClick={() => setAddOpen(true)} disabled={!detail} disabledReason="Loading the cluster">
+        Add node
+      </Button>
+      <Dropdown>
+        <DropdownButton as={Button} plain aria-label="More actions">
+          <EllipsisHorizontalIcon />
+        </DropdownButton>
+        <DropdownMenu anchor="bottom end">
+          <DropdownItem variant="danger" onClick={() => setConfirmOpen(true)}>
+            <TrashIcon data-slot="icon" />
+            Remove cluster
+          </DropdownItem>
+        </DropdownMenu>
+      </Dropdown>
+    </>
+  )
+
+  const removeDialog = (
+    <ConfirmationDialog
+      open={confirmOpen}
+      onClose={() => setConfirmOpen(false)}
+      title="Remove this cluster?"
+      description="Lewbox stops managing this cluster and deletes its stored admin token. The AerolVM cluster and its nodes keep running."
+      confirm="Remove cluster"
+      variant="danger"
+      onConfirm={async () => {
+        await api.removeCluster(ref)
+      }}
+      onConfirmed={() => {
+        toast.success('Cluster removed.')
+        navigate('/admin/servers')
+      }}
+    />
+  )
+
   if (loading && !detail) {
     return (
       <>
-        <PageHeader title="Cluster" back={back} />
+        <PageHeader title="Cluster" back={back} actions={actions} />
         <ListSkeleton label="Loading the cluster" rows={5} />
+        {removeDialog}
       </>
     )
   }
@@ -97,31 +138,12 @@ export function ClusterDetailPage() {
   if (error.message || !detail) {
     return (
       <>
-        <PageHeader title="Cluster" back={back} />
+        <PageHeader title="Cluster" back={back} actions={actions} />
         <ErrorNotice error={error} onRetry={reload} />
+        {removeDialog}
       </>
     )
   }
-
-  const actions = (
-    <>
-      <Button outline onClick={() => void check.run()} loading={check.loading}>
-        Run checks
-      </Button>
-      <Button onClick={() => setAddOpen(true)}>Add node</Button>
-      <Dropdown>
-        <DropdownButton as={Button} plain aria-label="More actions">
-          <EllipsisHorizontalIcon />
-        </DropdownButton>
-        <DropdownMenu anchor="bottom end">
-          <DropdownItem variant="danger" onClick={() => setConfirmOpen(true)}>
-            <TrashIcon data-slot="icon" />
-            Remove cluster
-          </DropdownItem>
-        </DropdownMenu>
-      </Dropdown>
-    </>
-  )
 
   const failed = detail.checks.filter((item) => !item.ok).length
 
@@ -285,21 +307,7 @@ export function ClusterDetailPage() {
         )}
       </div>
 
-      <ConfirmationDialog
-        open={confirmOpen}
-        onClose={() => setConfirmOpen(false)}
-        title="Remove this cluster?"
-        description="Lewbox stops managing this cluster and deletes its stored admin token. The AerolVM cluster and its nodes keep running."
-        confirm="Remove cluster"
-        variant="danger"
-        onConfirm={async () => {
-          await api.removeCluster(ref)
-        }}
-        onConfirmed={() => {
-          toast.success('Cluster removed.')
-          navigate('/admin/servers')
-        }}
-      />
+      {removeDialog}
 
       <ClusterSettingsDialog
         open={editOpen}

@@ -23,7 +23,7 @@ describe('OverviewPage', () => {
     renderApp('/admin')
 
     expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument()
-    expect(screen.getByText('7 / 8')).toBeInTheDocument()
+    expect(await screen.findByText('7 / 8')).toBeInTheDocument()
     expect(screen.getByText('1 / 1')).toBeInTheDocument()
     expect(screen.getByRole('list', { name: /EU West, last 2 days/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'EU West' })).toHaveAttribute('href', '/admin/servers/clusters/eu-west')

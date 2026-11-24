@@ -30,8 +30,9 @@ export function useIsActive() {
 }
 
 // The sidebar layout both sides of the app share: the logo (or `header` in
-// its place), the side's `nav`, Docs, and the account menu. `navbar` sits
-// beside the account menu on phones.
+// its place), the side's `nav`, Docs, and the account menu. On phones the
+// top bar shows `navbar` if given, and otherwise the account menu; the
+// account menu is always in the drawer's footer.
 export function AppShell({
   header,
   navbar,
@@ -98,8 +99,7 @@ export function AppShell({
     <Navbar>
       <NavbarSpacer />
       <NavbarSection className="min-w-0">
-        {navbar}
-        {accountMenu('navbar')}
+        {navbar ?? accountMenu('navbar')}
       </NavbarSection>
     </Navbar>
   )

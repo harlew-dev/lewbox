@@ -92,6 +92,37 @@ const ServersPage = lazyPage(() => import('./pages/servers/servers'), 'ServersPa
 const UserDetailPage = lazyPage(() => import('./pages/users/user-detail'), 'UserDetailPage')
 const UsersPage = lazyPage(() => import('./pages/users/users'), 'UsersPage')
 
+// Each side's pages, fetched in the background once its layout is open, so
+// a first visit to a page renders its header and layout straight away
+// instead of the chunk fallback.
+const portalPages = [
+  HomePage,
+  SandboxesPage,
+  KeysPage,
+  UsagePage,
+  PlanPage,
+  SettingsGeneralPage,
+  SettingsMembersPage,
+  SettingsKeysPage,
+  AccountPage,
+  DocsPage,
+]
+const consolePages = [
+  OverviewPage,
+  WorkspacesPage,
+  WorkspaceDetailPage,
+  FleetSandboxesPage,
+  FleetSnapshotsPage,
+  PlansPage,
+  ServersPage,
+  ClusterDetailPage,
+  UsersPage,
+  UserDetailPage,
+  AdminSettingsPage,
+  AccountPage,
+  PlatformDocsPage,
+]
+
 // The customer portal. An instance admin who belongs to no workspace
 // has nothing here and goes to the console; everyone else without one goes
 // to onboarding to create it.
@@ -101,18 +132,22 @@ function Portal() {
     return <Navigate to={user?.instance_admin ? '/admin' : '/onboarding'} replace />
   }
   return (
-    <PortalLayout>
-      <PortalRoute />
-    </PortalLayout>
+    <Preload pages={portalPages}>
+      <PortalLayout>
+        <PortalRoute />
+      </PortalLayout>
+    </Preload>
   )
 }
 
 function Console() {
   return (
     <RequireAdmin>
-      <ConsoleLayout>
-        <Outlet />
-      </ConsoleLayout>
+      <Preload pages={consolePages}>
+        <ConsoleLayout>
+          <Outlet />
+        </ConsoleLayout>
+      </Preload>
     </RequireAdmin>
   )
 }

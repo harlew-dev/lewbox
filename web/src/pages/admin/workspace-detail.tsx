@@ -87,7 +87,15 @@ export function WorkspaceDetailPage() {
     refreshPending()
   }
 
-  if (workspace.loading && !org) return <ListSkeleton label="Loading the workspace" rows={4} />
+  if (workspace.loading && !org) {
+    return (
+      <>
+        <PageHeader title="Workspace" back={back} />
+        <PageTabs label="Workspace views" tabs={tabs} current={tab} className="mb-8" />
+        <ListSkeleton label="Loading the workspace" rows={4} />
+      </>
+    )
+  }
   if (workspace.failure instanceof api.ApiError && workspace.failure.status === 404) {
     return (
       <EmptyState
@@ -101,6 +109,7 @@ export function WorkspaceDetailPage() {
     return (
       <>
         <PageHeader title="Workspace" back={back} />
+        <PageTabs label="Workspace views" tabs={tabs} current={tab} className="mb-8" />
         <ErrorNotice error={workspace.error} onRetry={workspace.reload} />
       </>
     )

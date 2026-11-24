@@ -1,5 +1,6 @@
 import {
   Button,
+  Code,
   CodeBlock,
   CodeTabs,
   Description,
@@ -24,6 +25,7 @@ import * as api from '../../lib/api'
 import { formatDate } from '../../lib/format'
 import { KeyExpiryField } from '../../components/key-expiry'
 import { noRegionText } from '../../components/no-region'
+import { useRegions } from '../../lib/regions'
 import { sandboxSnippets } from '../../lib/snippets'
 import { failureMessage } from '../../lib/use-load'
 
@@ -74,6 +76,9 @@ function CreateKey({
   const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
   const [key, setKey] = useState<api.NewSandboxKey | null>(null)
   const region = org.region
+  const regions = useRegions(org.slug)
+  // The region's endpoint comes from /v0/regions; it is left out until loaded.
+  const endpoint = regions.list.find((option) => option.slug === region?.slug)?.endpoint_url
   // The workspace's region is the key's region; the server fills it in.
   const create = useAction(() => api.createSandboxKey(org.slug, { name: name.trim(), expires_in: expiresIn }), {
     toError: (failure) => ({ message: failureMessage(failure) }),
@@ -93,7 +98,16 @@ function CreateKey({
   return (
     <form onSubmit={submit}>
       <DialogTitle>Create an API key</DialogTitle>
-      <DialogDescription>A key works in {region?.name ?? 'your region'}, for this workspace’s sandboxes.</DialogDescription>
+      <DialogDescription>
+        A key works in {region?.name ?? 'your region'}
+        {endpoint ? (
+          <>
+            {' at '}
+            <Code>{endpoint}</Code>
+          </>
+        ) : null}
+        {', for this workspace’s sandboxes.'}
+      </DialogDescription>
       <DialogBody>
         {!region ? (
           <Notice variant="info">{noRegionText}</Notice>
@@ -143,6 +157,10 @@ function NewKey({ apiKey, onDone }: { apiKey: api.NewSandboxKey; onDone: () => v
       </DialogDescription>
       <DialogBody>
         <SecretReveal secret={apiKey.token} label="Copy API key">
+          <div>
+            <Text className="mb-2">Endpoint URL</Text>
+            <CodeBlock code={apiKey.region.endpoint_url} label="Copy endpoint URL" />
+          </div>
           <div>
             <Text className="mb-2">Set these, then run an example.</Text>
             <CodeBlock code={env} label="Copy environment variables" />

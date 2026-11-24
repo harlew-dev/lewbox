@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
@@ -30,6 +30,7 @@ describe('KeysPage', () => {
       {
         'GET /v0/organizations/acme': () => json(200, acme),
         'GET /v0/sandbox-keys': () => json(200, { data: created ? [key] : [] }),
+        'GET /v0/regions': () => json(200, { data: [region] }),
         'POST /v0/sandbox-keys': () => {
           created = true
           return json(201, {
@@ -53,9 +54,13 @@ describe('KeysPage', () => {
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'laptop' } })
     // A workspace has one region, so the dialog doesn't ask for one.
     expect(screen.queryByRole('combobox', { name: 'Region' })).toBeNull()
+    expect(await screen.findByText(region.endpoint_url)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(await screen.findByText(token)).toBeInTheDocument()
+    expect(screen.getAllByText('Endpoint URL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(region.endpoint_url).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Copy endpoint URL' })).toBeInTheDocument()
     expect(screen.getByText('Copy it now. You won’t see it again.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Copy API key' })).toBeInTheDocument()
     expect(screen.getByText(`export SB_API_URL=${region.endpoint_url}\nexport SB_API_TOKEN=${token}`, { normalizer: (s) => s })).toBeInTheDocument()
@@ -72,6 +77,9 @@ describe('KeysPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByText(token)).toBeNull())
     expect(await screen.findByText('avm_…k3Xz')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Endpoint URL' })).toBeInTheDocument()
+    const row = screen.getByText('avm_…k3Xz').closest('tr')!
+    expect(within(row).getByText(region.endpoint_url)).toBeInTheDocument()
   })
 
   it('disables creating a key until the workspace has a region', async () => {
@@ -79,6 +87,7 @@ describe('KeysPage', () => {
       {
         'GET /v0/organizations/acme': () => json(200, { ...acme, region: null }),
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
+        'GET /v0/regions': () => json(200, { data: [] }),
       },
       customerUser,
       [acmeMembership],
@@ -96,6 +105,7 @@ describe('key expiry', () => {
       {
         'GET /v0/organizations/acme': () => json(200, acme),
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
+        'GET /v0/regions': () => json(200, { data: [region] }),
         'POST /v0/sandbox-keys': () => json(400, { error: { code: 'invalid', message: 'stop here' } }),
       },
       customerUser,
