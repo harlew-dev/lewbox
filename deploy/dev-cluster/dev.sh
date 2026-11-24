@@ -149,6 +149,7 @@ cmd_cluster() {
 	lb node-1 node list --cluster "$CLUSTER"
 }
 
+cmd_seed() { exec "$HERE/seed.sh" "$@"; }
 cmd_shell() { compose exec -u lewbox -w /home/lewbox "${1:-node-1}" bash -l; }
 cmd_lewbox() { local n="${1:-node-1}"; shift || true; lb "$n" "$@"; }
 cmd_logs() { local s="${1:-orchestrator}"; if [[ $s == orchestrator ]]; then compose logs -f orchestrator; else compose exec "$s" journalctl -u sandboxd -f; fi; }
@@ -165,6 +166,7 @@ Usage: ./dev.sh <command>
   up [--three]         fetch, build, start the orchestrator and node-1, node-2 (and node-3)
   cluster [--runtime docker|firecracker]
                        log in, install AerolVM on every node, start cluster "$CLUSTER" on node-1, join the rest
+  seed                 fill a running instance with a plan, workspace, key and sandboxes (idempotent)
   shell [node]         a shell on a node as the lewbox user (default node-1)
   lewbox <node> args   run the lewbox CLI on a node, e.g. ./dev.sh lewbox node-2 node list
   logs [service]       follow the orchestrator's log, or sandboxd's on a node
@@ -182,7 +184,7 @@ EOF
 }
 
 case "${1:-help}" in
-	fetch | build | up | cluster | shell | lewbox | logs | ps | down | compose | help) c="$1"; shift || true; "cmd_$c" "$@" ;;
+	fetch | build | up | cluster | seed | shell | lewbox | logs | ps | down | compose | help) c="$1"; shift || true; "cmd_$c" "$@" ;;
 	e2e) shift; exec "$HERE/e2e.sh" "$@" ;;
 	*) cmd_help; exit 2 ;;
 esac

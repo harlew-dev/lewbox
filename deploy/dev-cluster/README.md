@@ -52,11 +52,22 @@ Other commands:
 | `./dev.sh logs` / `./dev.sh logs node-1` | Follow the orchestrator's log, or `sandboxd`'s on a node |
 | `./dev.sh up --three` | Also start node-3, for a three-voter cluster |
 | `./dev.sh cluster --runtime firecracker` | Install the nodes for Firecracker instead of Docker (below) |
+| `./dev.sh seed` | Fill the console with a customer, workspace, key and sandboxes (idempotent) |
 | `./dev.sh down` | Stop everything and delete the dev cluster's volumes |
 | `./archives.sh` | Storage profiles and archived sandboxes against a running cluster (the `storage` service is an S3-compatible bucket, RustFS, at `172.30.0.20:9000`) |
 | `./e2e.sh` | The end-to-end test (below) |
 
 From the host you can also use the orchestrator directly: `lewbox login http://127.0.0.1:8080`. Each node's AerolVM API is published on `127.0.0.1:2120N`.
+
+## Seed data
+
+`./dev.sh seed` fills a running instance so the console is not empty:
+
+- `admin@example.com` (instance admin) and `customer@example.com`, both with password `password1234`;
+- plan `dev` (8 sandboxes, 8 vCPUs, 8 GB), workspace "Acme Dev" (`acme-dev`) owned by the customer and subscribed to `lab`;
+- sandbox key `seed`, sandboxes `seed-api`, `seed-worker`, `seed-runner` (running) and `seed-idle` (stopped), and snapshot `seed-snapshot`.
+
+It prints the console URLs (`/` and `/admin`), both logins, and `SB_API_URL` / `SB_API_TOKEN` exports. The key's token is shown once, so it is saved in `.cache/seed.env` (0600). Running it again reuses everything that exists and only creates what is missing. The bootstrap admin (`admin@lewbox.dev`) and its settings are left unchanged. If key `seed` exists but `.cache/seed.env` was deleted, revoke the key in the console (or with `DELETE /v0/sandbox-keys/seed` and the `Lewbox-Organization: acme-dev` header) and run `./dev.sh seed` again.
 
 ## End-to-end test
 

@@ -52,6 +52,8 @@ node-1  lab      mixed  v0.7.0   yes    http://172.30.0.11:21212
 node-2  lab      mixed  v0.7.0   yes    http://172.30.0.12:21212
 ```
 
+To fill the console with sample data, run `./dev.sh seed`: it creates a plan, a workspace, a sandbox key and a few sandboxes, and prints the console URLs and logins.
+
 ## 3. Explore
 
 ```bash
