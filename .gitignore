@@ -4,3 +4,6 @@ web/dist/*
 !web/dist/.gitkeep
 release/
 *.tsbuildinfo
+
+# Local planning notes, moved out of the tracked tree
+.agents/plans/
