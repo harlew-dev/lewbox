@@ -6,7 +6,7 @@ description: The customer and platform books, and the design notes.
 Lewbox has two documentation books.
 
 - **[Customer documentation](consumer/README.md)** is for workspace members: running sandboxes, API keys, the SDKs, usage and limits, and the customer-facing API. It is served in the console at `/docs`.
-- **[Platform documentation](platform/README.md)** is for instance admins: installing AerolVM, clusters and nodes, accounts, workspaces and plans, operations, and reference. It is served in the console at `/platform`.
+- **[Platform documentation](platform/README.md)** is for instance admins: installing AerolVM, clusters and nodes, accounts, workspaces and plans, operations, and reference. It is served in the console at `/platform`. Its [data map](platform/operations/data-map.md) lists the personal data Lewbox stores and its [incident response runbook](platform/operations/incident-response.md) covers detection, containment, rotation and restore.
 
 The [design notes](design/) explain how Lewbox was built and what was verified, including the [AerolVM integration](design/aerolvm-integration.md) and the [snapshot archive findings](design/snapshot-archive.md). They are for contributors and are not served in either book.
 

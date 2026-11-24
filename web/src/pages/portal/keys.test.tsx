@@ -106,7 +106,7 @@ describe('key expiry', () => {
         'GET /v0/organizations/acme': () => json(200, acme),
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
         'GET /v0/regions': () => json(200, { data: [region] }),
-        'POST /v0/sandbox-keys': () => json(400, { error: { code: 'invalid', message: 'stop here' } }),
+        'POST /v0/sandbox-keys': () => json(400, { error: { code: 'bad_request', message: 'stop here' } }),
       },
       customerUser,
       [acmeMembership],
