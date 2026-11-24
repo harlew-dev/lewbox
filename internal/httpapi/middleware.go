@@ -362,7 +362,7 @@ func withAuth(svc *service.Service, log *slog.Logger, opts RouterOptions, next h
 				respond(w, log, 0, nil, err)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(service.WithPrincipal(r.Context(), p)))
+			serveAuthenticated(svc, log, w, r, p, next)
 			return
 		}
 
@@ -386,8 +386,37 @@ func withAuth(svc *service.Service, log *slog.Logger, opts RouterOptions, next h
 			}})
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(service.WithPrincipal(r.Context(), p)))
+		serveAuthenticated(svc, log, w, r, p, next)
 	})
+}
+
+// serveAuthenticated stores the caller on the request and charges one request
+// to its budget (api:per-user) before the handler runs. It sits inside
+// withAuth, after the origin and content-type checks, so a refused forged
+// request does not spend the caller's budget.
+func serveAuthenticated(svc *service.Service, log *slog.Logger, w http.ResponseWriter, r *http.Request, p service.Principal, next http.Handler) {
+	r = r.WithContext(service.WithPrincipal(r.Context(), p))
+	if !unmeteredRoute(r) {
+		if err := svc.AllowRequest(r.Context()); err != nil {
+			respond(w, log, 0, nil, err)
+			return
+		}
+	}
+	next.ServeHTTP(w, r)
+}
+
+// unmeteredRoute names the recovery routes excluded from the API budget.
+// Without this, someone holding a stolen session could spend the owner's whole
+// budget and stop them signing out or changing the password. Both routes keep
+// their own guard: changing the password needs fresh proof, which shares the
+// sign-in failure budget.
+func unmeteredRoute(r *http.Request) bool {
+	if r.Method == http.MethodPost && r.URL.Path == Prefix+"/auth/logout" {
+		return true
+	}
+	return r.Method == http.MethodPatch &&
+		strings.HasPrefix(r.URL.Path, Prefix+"/users/") &&
+		strings.HasSuffix(r.URL.Path, "/password")
 }
 
 // unsafeContentType rejects cookie-authenticated state-changing requests that

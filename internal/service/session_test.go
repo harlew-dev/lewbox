@@ -150,10 +150,11 @@ func TestLoginRateLimitPerIP(t *testing.T) {
 	}
 	_, err := s.Login(ctx, wrong)
 	se := wantCode(t, err, CodeRateLimited)
-	if secs := retryAfterDetail(t, se); secs != 60 {
-		t.Errorf("retry_after_seconds = %d, want 60", secs)
+	// The window is aligned to the minute, so 5:06:07 waits until 5:07:00.
+	if secs := retryAfterDetail(t, se); secs != 53 {
+		t.Errorf("retry_after_seconds = %d, want 53", secs)
 	}
-	if se.Message != "too many sign-in attempts; try again in 60 seconds" {
+	if se.Message != "too many sign-in attempts; try again in 53 seconds" {
 		t.Errorf("message = %q", se.Message)
 	}
 
@@ -193,8 +194,9 @@ func TestLoginRateLimitPerEmail(t *testing.T) {
 	}
 	_, err := s.Login(context.Background(), LoginRequest{Email: u.Email, Password: testPassword + "x"})
 	se := wantCode(t, err, CodeRateLimited)
-	if secs := retryAfterDetail(t, se); secs != 60 {
-		t.Errorf("retry_after_seconds = %d, want 60", secs)
+	// The window is aligned to the minute, so 5:06:07 waits until 5:07:00.
+	if secs := retryAfterDetail(t, se); secs != 53 {
+		t.Errorf("retry_after_seconds = %d, want 53", secs)
 	}
 
 	// The budget is per email, so another account can still try.

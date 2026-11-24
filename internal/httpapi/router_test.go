@@ -423,6 +423,51 @@ func TestRateLimitedResponse(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedRequestBudget(t *testing.T) {
+	ts := newTestServer(t, service.WithRequestBudget(2))
+	res, body := ts.do("POST", "/v0/auth/session", ts.loginJSON(), nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("sign in: status %d body %s", res.StatusCode, body)
+	}
+	cookie := cookieNamed(t, res, "lewbox_session")
+
+	for i := 0; i < 2; i++ {
+		res, body = ts.do("GET", "/v0/profile", "", nil, cookie)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status %d body %s", i+1, res.StatusCode, body)
+		}
+	}
+	res, body = ts.do("GET", "/v0/profile", "", nil, cookie)
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status %d body %s, want 429", res.StatusCode, body)
+	}
+	if !strings.Contains(body, `"code":"rate_limited"`) || !strings.Contains(body, "too many requests") {
+		t.Errorf("body = %s", body)
+	}
+	retry, err := strconv.Atoi(res.Header.Get("Retry-After"))
+	if err != nil || retry < 1 || retry > 60 {
+		t.Errorf("Retry-After = %q", res.Header.Get("Retry-After"))
+	}
+
+	// An access token for the same account cannot dodge the spent budget.
+	token, err := ts.svc.CreateAccessToken(
+		service.WithPrincipal(context.Background(), service.LocalPrincipal()),
+		service.CreateAccessTokenRequest{Name: "script", User: adminEmail})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, body = ts.do("GET", "/v0/profile", "", map[string]string{"Authorization": "Bearer " + token.Token})
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("access token: status %d body %s, want 429", res.StatusCode, body)
+	}
+
+	// Signing out is a recovery route: it works even with the budget spent.
+	res, body = ts.do("POST", "/v0/auth/logout", "", nil, cookie)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("logout: status %d body %s", res.StatusCode, body)
+	}
+}
+
 func openSignup(t *testing.T, ts *testServer) {
 	t.Helper()
 	mode := "open"

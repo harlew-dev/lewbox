@@ -55,11 +55,21 @@ API responses carry `Cache-Control: no-store`.
 
 ### Rate limits
 
+Every authenticated request draws on a per-caller budget of 1,800 requests per minute. A signed-in account's sessions and access tokens share one budget, so switching credentials does not buy a fresh one; each organization API key has its own. Over the limit the response is `429` with a `Retry-After` header and:
+
+```json
+{"error":{"code":"rate_limited","message":"too many requests; try again in 52 seconds","details":{"retry_after_seconds":52}}}
+```
+
+`POST /v0/auth/logout` and `PATCH /v0/users/{user}/password` are exempt, so a stolen session cannot spend the owner's budget and stop them recovering the account. Changing a password still needs fresh proof, which shares the sign-in failure budget.
+
 `POST /v0/auth/login`, `POST /v0/auth/session` and `POST /v0/auth/signup` share two budgets: 20 attempts per client IP per minute, and 5 failed attempts per normalized email per minute (sign-up only uses the per-IP budget). When one is exhausted the response is `429` with a `Retry-After` header and:
 
 ```json
 {"error":{"code":"rate_limited","message":"too many sign-in attempts; try again in 42 seconds","details":{"retry_after_seconds":42}}}
 ```
+
+Windows are aligned to their length (the top of the minute for the per-minute budgets, the top of the hour for sign-up), so `Retry-After` says how long is left in the current window, not how long since the first attempt. A per-client budget counts an IPv6 address by its /64, so rotating addresses inside one network does not reset it.
 
 ## Routes
 

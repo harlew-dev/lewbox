@@ -30,6 +30,14 @@ For your own scripts across every workspace you belong to, create a personal **a
 
 Both create calls also take your own `current_password`, to confirm it's you. A missing or wrong value is an error whose `details.field` is `current_password`; too many wrong guesses answer `rate_limited`, with the same budget as signing in.
 
+Every signed-in request draws on a per-caller budget of 1,800 requests per minute. Your sessions and personal access tokens share it, so switching credentials does not reset it; each management key has its own. Over the limit answers `429` with a `Retry-After` header and:
+
+```json
+{"error":{"code":"rate_limited","message":"too many requests; try again in 52 seconds","details":{"retry_after_seconds":52}}}
+```
+
+Signing out and changing your password are exempt, so a stolen session cannot lock you out of recovering your account. Windows are aligned to the minute, and client IPs are counted by IPv6 /64.
+
 Routes that act on a workspace take it from the `Lewbox-Organization` header (its slug or ID). A management key acts for its own workspace, so it can leave the header out; naming a different workspace gets `404`.
 
 ## Workspace and members

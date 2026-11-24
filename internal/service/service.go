@@ -47,6 +47,7 @@ type Service struct {
 
 	limiter       *loginLimiter
 	signupLimiter *loginLimiter
+	budget        *limiter
 
 	log          *slog.Logger
 	syncInterval time.Duration
@@ -96,8 +97,15 @@ func WithClock(now func() time.Time) Option {
 // minute, and failed attempts per email per minute. Zero disables that budget.
 func WithLoginLimits(perIPPerMinute, failuresPerEmailPerMinute int) Option {
 	return func(s *Service) {
-		s.limiter.perIP = perIPPerMinute
-		s.limiter.perEmail = failuresPerEmailPerMinute
+		s.limiter.setLimits(perIPPerMinute, failuresPerEmailPerMinute)
+	}
+}
+
+// WithRequestBudget changes the per-caller API budget (api:per-user), in
+// requests per aligned minute. Zero disables it. Tests use a small budget.
+func WithRequestBudget(perMinute int) Option {
+	return func(s *Service) {
+		s.budget.setLimit(perMinute)
 	}
 }
 
@@ -123,6 +131,7 @@ func New(q *db.Queries, opts ...Option) *Service {
 		now:           func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
 		limiter:       newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
 		signupLimiter: newLimiter(signupIPAttemptsPerHour, 0, signupIPWindow),
+		budget:        newWindowLimiter(requestBudgetPerMinute, requestBudgetWindow, requestBudgetMaxKeys),
 		log:           slog.New(slog.DiscardHandler),
 		syncInterval:  15 * time.Second,
 

@@ -32,6 +32,8 @@ Cookie-authenticated requests are protected against CSRF: the orchestrator rejec
 
 Sign-in is rate limited in memory: 20 attempts per client IP per minute, and 5 failed attempts per normalized email per minute. The limits are checked before the password hash, so a flood costs little CPU. Exhausting either returns `429` with `Retry-After`.
 
+Every authenticated request also draws on a per-caller budget of 1,800 requests per minute. An account's sessions and access tokens share one budget, so swapping credentials does not reset it; each organization API key has its own. Signing out and changing a password are exempt, because a stolen session must not be able to spend the owner's budget and stop them recovering the account. Every window is aligned to a boundary of its length, and a per-client budget counts an IPv6 address by its /64, so neither the current time nor rotating addresses inside one network reveals or resets a budget.
+
 > [!NOTE]
 > The client IP is taken from the connection, never from `X-Forwarded-For`. Behind a reverse proxy every request appears to come from the proxy, so they all share one per-IP budget. If the proxy also rewrites `Host`, add the public origin with `--trusted-origin` (or `LEWBOX_TRUSTED_ORIGINS`) so the CSRF check accepts it. If it terminates TLS without setting `X-Forwarded-Proto: https`, use `--cookie-secure=always`.
 
