@@ -21,6 +21,7 @@ import (
 	docsfs "github.com/harlew-dev/lewbox/docs"
 	docssite "github.com/harlew-dev/lewbox/internal/docs"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
+	"github.com/harlew-dev/lewbox/internal/logsafe"
 	"github.com/harlew-dev/lewbox/internal/service"
 	"github.com/harlew-dev/lewbox/internal/webui"
 	"github.com/harlew-dev/lewbox/web"
@@ -164,7 +165,8 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	if err != nil {
 		return err
 	}
-	log := slog.New(slog.NewJSONHandler(a.stderr, nil))
+	// Every server log line is scrubbed, including the background loops'.
+	log := logsafe.WrapLogger(slog.New(slog.NewJSONHandler(a.stderr, nil)))
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

@@ -48,7 +48,7 @@ lewbox member remove dev@acme.dev
 
 Members are existing accounts: an instance admin creates the account first ([Manage accounts](manage-accounts.md)). Anyone can leave an organization. An organization always keeps at least one owner, so the last owner can't be demoted or removed.
 
-Removing a member, changing their role to viewer, disabling their account or deleting their account revokes every sandbox key they created. If a key cannot be revoked, the change is refused with `502` and nothing changes, so you can try again.
+Removing a member, changing their role to viewer, disabling their account or deleting their account revokes every sandbox key they created. If a key cannot be revoked, the change is refused with `503` and nothing changes, so you can try again.
 
 ## API keys
 
@@ -62,6 +62,8 @@ lewbox admin-key revoke ci
 ```
 
 `create` prints the token once. Lewbox keeps only its SHA-256 hash and its first and last characters (`lba_3c34b3e9…xFCz`), so copy it straight away. Keys expire after 90 days unless you choose otherwise, and `list` shows when each was last used.
+
+Creating a key also asks for your own current password, to confirm it's you: the CLI prompts without echo on a terminal, and in scripts you pass `--current-password-file PATH` with the password on its first line. Local mode needs none. The create dialog in the console asks for it too.
 
 Use it as a bearer token, or sign the CLI in with it:
 

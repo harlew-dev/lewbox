@@ -153,16 +153,16 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 
 	slug := strings.TrimSpace(req.Slug)
 	if !nodeName.MatchString(slug) {
-		return ClusterDetail{}, invalid("slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
+		return ClusterDetail{}, invalidField("slug", "slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
 	}
 	if _, err := uuid.Parse(slug); err == nil {
-		return ClusterDetail{}, invalid("slug must not be a UUID")
+		return ClusterDetail{}, invalidField("slug", "slug must not be a UUID")
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = slug
 	}
-	adminURL, err := normalizeURL(req.AdminURL)
+	adminURL, err := normalizeURLField(req.AdminURL, "admin_url")
 	if err != nil {
 		return ClusterDetail{}, err
 	}
@@ -173,7 +173,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	endpointURL := strings.TrimSpace(req.EndpointURL)
 	if endpointURL == "" {
 		endpointURL = adminURL
-	} else if endpointURL, err = normalizeURL(endpointURL); err != nil {
+	} else if endpointURL, err = normalizeURLField(endpointURL, "endpoint_url"); err != nil {
 		return ClusterDetail{}, err
 	}
 	runtime := strings.ToLower(strings.TrimSpace(req.Runtime))
@@ -181,11 +181,11 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		runtime = defaultRuntime
 	}
 	if runtime != "docker" && runtime != "firecracker" {
-		return ClusterDetail{}, invalid("runtime must be docker or firecracker")
+		return ClusterDetail{}, invalidField("runtime", "runtime must be docker or firecracker")
 	}
 	token := strings.TrimSpace(req.AdminToken)
 	if token == "" {
-		return ClusterDetail{}, invalid("admin_token is required")
+		return ClusterDetail{}, invalidField("admin_token", "admin_token is required")
 	}
 	domain, err := clusterDomain(req.Domain)
 	if err != nil {
@@ -241,7 +241,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		AdminIP:     adminIP,
 	})
 	if result.fatal {
-		return ClusterDetail{}, precondition(checks, "cluster %q failed its checks", slug)
+		return ClusterDetail{}, checkFailure(checks, slug)
 	}
 	status, detail := summarizeChecks(checks)
 
@@ -656,7 +656,7 @@ func (s *Service) CreateJoinToken(ctx context.Context, ref string, req JoinToken
 	switch role {
 	case "worker", "ingress", "server", "mixed":
 	default:
-		return JoinToken{}, invalid("role must be worker, ingress, server or mixed")
+		return JoinToken{}, invalidField("role", "role must be worker, ingress, server or mixed")
 	}
 	ttl := strings.TrimSpace(req.TTL)
 	if ttl == "" {
@@ -765,6 +765,20 @@ type checkResult struct {
 
 // runChecks runs the cluster requirements in order and stops at the first
 // fatal failure. It returns the checks it ran and the facts later steps need.
+// checkFailure reports a cluster's failed registration checks. An unreachable
+// cluster is a dependency outage (503); a cluster that answered but refused
+// the token, version or runtime is a request-value problem (422).
+func checkFailure(checks []Check, slug string) error {
+	code := CodeInvalid
+	for _, check := range checks {
+		if !check.OK && check.Name == "health" {
+			code = CodeUnavailable
+			break
+		}
+	}
+	return &Error{Code: code, Message: fmt.Sprintf("cluster %q failed its checks", slug), Details: checks}
+}
+
 func (s *Service) runChecks(ctx context.Context, spec clusterSpec) ([]Check, checkResult) {
 	checks := make([]Check, 0, 7)
 	var result checkResult
@@ -1124,7 +1138,7 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 func (s *Service) findCluster(ctx context.Context, ref string) (db.Cluster, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.Cluster{}, invalid("a cluster ID or slug is required")
+		return db.Cluster{}, badRequest("a cluster ID or slug is required")
 	}
 	var (
 		row db.Cluster
@@ -1147,7 +1161,7 @@ func (s *Service) findCluster(ctx context.Context, ref string) (db.Cluster, erro
 func (s *Service) resolveClusterRow(ctx context.Context, ref string) (db.Cluster, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.Cluster{}, invalid("a cluster ID, slug, or node name is required")
+		return db.Cluster{}, badRequest("a cluster ID, slug, or node name is required")
 	}
 	if rest, ok := strings.CutPrefix(ref, "cluster/"); ok {
 		return s.findCluster(ctx, rest)
@@ -1379,7 +1393,7 @@ func clusterDomain(raw string) (string, error) {
 		return "", nil
 	}
 	if !dnsZoneName.MatchString(domain) {
-		return "", invalid("domain must be a domain name with a dot, such as eu.example.com")
+		return "", invalidField("domain", "domain must be a domain name with a dot, such as eu.example.com")
 	}
 	return domain, nil
 }
@@ -1391,7 +1405,7 @@ func clusterDNSRecords(raw string) (string, error) {
 		records = "auto"
 	}
 	if records != "auto" && records != "off" {
-		return "", invalid("dns_records must be auto or off")
+		return "", invalidField("dns_records", "dns_records must be auto or off")
 	}
 	return records, nil
 }
@@ -1410,7 +1424,7 @@ func clusterStopPolicy(raw string) (string, error) {
 		policy = "keep"
 	}
 	if policy != "keep" && policy != "archive" {
-		return "", invalid("stop_policy must be keep or archive")
+		return "", invalidField("stop_policy", "stop_policy must be keep or archive")
 	}
 	return policy, nil
 }
@@ -1420,7 +1434,7 @@ func clusterStopPolicy(raw string) (string, error) {
 // snapshots since v0.6.11.
 func checkStopPolicy(policy string, hasStorage bool) error {
 	if policy == "archive" && !hasStorage {
-		return invalid("stop_policy archive needs a storage profile")
+		return invalidField("storage_profile", "stop_policy archive needs a storage profile")
 	}
 	return nil
 }
@@ -1452,10 +1466,10 @@ func checkDomainProfile(domain string, profile *db.DnsProfile) error {
 		return nil
 	}
 	if domain == "" {
-		return invalid("a domain is required when a DNS profile is set")
+		return invalidField("domain", "a domain is required when a DNS profile is set")
 	}
 	if !DomainInZone(domain, profile.Zone) {
-		return invalid("domain %s is not in the profile's zone %s", domain, profile.Zone)
+		return invalidField("domain", "domain %s is not in the profile's zone %s", domain, profile.Zone)
 	}
 	return nil
 }

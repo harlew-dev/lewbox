@@ -245,7 +245,7 @@ func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
 func (s *Service) findPlan(ctx context.Context, ref string) (db.Plan, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.Plan{}, invalid("a plan ID or slug is required")
+		return db.Plan{}, badRequest("a plan ID or slug is required")
 	}
 	var (
 		row db.Plan
@@ -313,10 +313,10 @@ func toPlan(row db.Plan, subscriptions int, isDefault bool) Plan {
 func planSlug(raw string) (string, error) {
 	slug := strings.ToLower(strings.TrimSpace(raw))
 	if !nodeName.MatchString(slug) {
-		return "", invalid("slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
+		return "", invalidField("slug", "slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
 	}
 	if _, err := uuid.Parse(slug); err == nil {
-		return "", invalid("slug must not be a UUID")
+		return "", invalidField("slug", "slug must not be a UUID")
 	}
 	return slug, nil
 }

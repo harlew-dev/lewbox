@@ -93,7 +93,7 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		return NewSandboxKey{}, fmt.Errorf("get quota state: %w", err)
 	}
 	if errors.Is(err, sql.ErrNoRows) || state.Error != "" || state.Quota != desired {
-		return NewSandboxKey{}, precondition(nil, "region %q is still being set up for your workspace; try again in a few seconds", cluster.Slug)
+		return NewSandboxKey{}, conflict("region %q is still being set up for your workspace; try again in a few seconds", cluster.Slug)
 	}
 	if _, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
 		return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
@@ -205,7 +205,7 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return SandboxKey{}, invalid("a key ID or name is required")
+		return SandboxKey{}, badRequest("a key ID or name is required")
 	}
 	var row db.SandboxKey
 	var email sql.NullString
@@ -267,11 +267,11 @@ func sandboxOrgReady(status string) error {
 	case orgActive:
 		return nil
 	case orgPending:
-		return precondition(nil, "your account is waiting for approval")
+		return forbidden("your account is waiting for approval")
 	case orgSuspended:
-		return precondition(nil, "your workspace is suspended")
+		return forbidden("your workspace is suspended")
 	default:
-		return precondition(nil, "workspace is %s", status)
+		return forbidden("workspace is %s", status)
 	}
 }
 
@@ -312,14 +312,14 @@ func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Clus
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		if len(subs) == 0 {
-			return db.Cluster{}, precondition(nil, "your workspace is not in a region yet; ask your provider")
+			return db.Cluster{}, conflict("your workspace is not in a region yet; ask your provider")
 		}
 		for _, row := range rows {
 			if _, ok := subs[row.ID]; !ok {
 				continue
 			}
 			if !regionReady(row.Status) {
-				return db.Cluster{}, precondition(nil, "region %q is %s", row.Slug, row.Status)
+				return db.Cluster{}, conflict("region %q is %s", row.Slug, row.Status)
 			}
 			return row, nil
 		}
@@ -333,7 +333,7 @@ func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Clus
 			return db.Cluster{}, notFound("region %q not found", ref)
 		}
 		if !regionReady(row.Status) {
-			return db.Cluster{}, precondition(nil, "region %q is %s", row.Slug, row.Status)
+			return db.Cluster{}, conflict("region %q is %s", row.Slug, row.Status)
 		}
 		return row, nil
 	}
@@ -388,9 +388,9 @@ func mintSandboxToken(ctx context.Context, client *aerolvm.Client, req aerolvm.C
 func (s *Service) sandboxTokenErr(ctx context.Context, slug string, requested time.Duration, err error) error {
 	if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == http.StatusBadRequest && requested > 365*24*time.Hour {
 		if p, ok := PrincipalFrom(ctx); ok && p.InstanceAdmin {
-			return invalid("region %q refused the token lifetime: %s; raise SB_TOKEN_MAX_TTL on every node so keys can last", slug, apiErr.Message)
+			return invalidField("expires_in", "region %q refused the token lifetime: %s; raise SB_TOKEN_MAX_TTL on every node so keys can last", slug, apiErr.Message)
 		}
-		return invalid("this region can't issue keys that last that long; choose a shorter expiry")
+		return invalidField("expires_in", "this region can't issue keys that last that long; choose a shorter expiry")
 	}
 	return s.regionUnavailable(ctx, slug, err)
 }

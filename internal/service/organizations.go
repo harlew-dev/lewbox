@@ -180,7 +180,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		if p.Kind != "key" {
-			return orgCaller{}, invalid("choose a workspace")
+			return orgCaller{}, badRequest("choose a workspace")
 		}
 		ref = p.OrgID
 	}
@@ -407,7 +407,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	switch status {
 	case "", orgPending, orgActive, orgSuspended:
 	default:
-		return OrganizationList{}, invalid("status must be pending, active or suspended")
+		return OrganizationList{}, invalidField("status", "status must be pending, active or suspended")
 	}
 	counts, err := s.memberCounts(ctx)
 	if err != nil {
@@ -509,16 +509,16 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 	name := strings.TrimSpace(req.Name)
 	if slug != "" {
 		if !nodeName.MatchString(slug) {
-			return Organization{}, invalid("slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
+			return Organization{}, invalidField("slug", "slug must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
 		}
 		if _, err := uuid.Parse(slug); err == nil {
-			return Organization{}, invalid("slug must not be a UUID")
+			return Organization{}, invalidField("slug", "slug must not be a UUID")
 		}
 		if name, err = orgName(req.Name, slug); err != nil {
 			return Organization{}, err
 		}
 	} else if name == "" {
-		return Organization{}, invalid("name is required when slug is empty")
+		return Organization{}, invalidField("name", "name is required when slug is empty")
 	} else if _, err := orgName(name, ""); err != nil {
 		return Organization{}, err
 	}
@@ -554,7 +554,7 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 			return Organization{}, fmt.Errorf("count owned organizations: %w", err)
 		}
 		if owned >= maxOwnedWorkspaces {
-			return Organization{}, precondition(nil, "you can own at most %d workspaces", maxOwnedWorkspaces)
+			return Organization{}, invalid("you can own at most %d workspaces", maxOwnedWorkspaces)
 		}
 	}
 
@@ -659,7 +659,7 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 				MaxOwned:  maxOwnedWorkspaces,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
-				return Organization{}, precondition(nil, "you can own at most %d workspaces", maxOwnedWorkspaces)
+				return Organization{}, invalid("you can own at most %d workspaces", maxOwnedWorkspaces)
 			}
 		}
 		if err != nil {
@@ -864,11 +864,11 @@ func orgName(raw, slug string) (string, error) {
 // characters and the bidi overrides and isolates.
 func displayName(name, field string, max int) error {
 	if utf8.RuneCountInString(name) > max {
-		return invalid("%s must be at most %d characters", field, max)
+		return invalidField(field, "%s must be at most %d characters", field, max)
 	}
 	for _, r := range name {
 		if unicode.IsControl(r) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) {
-			return invalid("%s must not contain control characters", field)
+			return invalidField(field, "%s must not contain control characters", field)
 		}
 	}
 	return nil
@@ -917,7 +917,7 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		switch status {
 		case orgActive, orgSuspended:
 		default:
-			return Organization{}, invalid("status must be active or suspended")
+			return Organization{}, invalidField("status", "status must be active or suspended")
 		}
 	}
 
@@ -982,13 +982,13 @@ func (s *Service) AddMember(ctx context.Context, org string, req AddMemberReques
 		role = roleMember
 	}
 	if !validRole(role) {
-		return Member{}, invalid("role must be owner, admin, member or viewer")
+		return Member{}, invalidField("role", "role must be owner, admin, member or viewer")
 	}
 	if role == roleOwner && !c.owner() {
 		return Member{}, forbidden("only an owner can add another owner")
 	}
 	if strings.TrimSpace(req.Email) == "" {
-		return Member{}, invalid("email is required")
+		return Member{}, invalidField("email", "email is required")
 	}
 	user, err := s.findUser(ctx, req.Email)
 	if err != nil {
@@ -1023,7 +1023,7 @@ func (s *Service) SetMemberRole(ctx context.Context, org, ref string, req SetMem
 	}
 	role := strings.ToLower(strings.TrimSpace(req.Role))
 	if !validRole(role) {
-		return Member{}, invalid("role must be owner, admin, member or viewer")
+		return Member{}, invalidField("role", "role must be owner, admin, member or viewer")
 	}
 	m, email, err := s.findMember(ctx, c.org, ref)
 	if err != nil {
@@ -1097,7 +1097,7 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 func (s *Service) findMember(ctx context.Context, org db.Organization, ref string) (db.Membership, string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.Membership{}, "", invalid("a member's email or ID is required")
+		return db.Membership{}, "", badRequest("a member's email or ID is required")
 	}
 	if id, err := uuid.Parse(ref); err == nil {
 		m, err := s.q.GetMembershipByID(ctx, db.GetMembershipByIDParams{OrgID: org.ID, ID: id.String()})

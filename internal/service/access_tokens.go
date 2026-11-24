@@ -47,11 +47,13 @@ type AccessTokenList struct {
 // account (ID or email); empty means the caller's own. Only instance admins
 // can name another account, and local mode, which has no account, must name
 // one. ExpiresIn is a duration such as "90d" or "720h"; empty means the token
-// never expires.
+// never expires. CurrentPassword is the caller's own password, as fresh
+// proof (see requireFreshProof); local mode needs none.
 type CreateAccessTokenRequest struct {
-	Name      string `json:"name"`
-	ExpiresIn string `json:"expires_in"`
-	User      string `json:"user,omitempty"`
+	Name            string `json:"name"`
+	ExpiresIn       string `json:"expires_in"`
+	User            string `json:"user,omitempty"`
+	CurrentPassword string `json:"current_password,omitempty"`
 }
 
 const accessTokenPrefix = "lbp_"
@@ -64,7 +66,7 @@ func (s *Service) tokenOwner(ctx context.Context, p Principal, ref string) (db.U
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		if p.Kind != "user" {
-			return db.User{}, invalid("local mode has no account of its own: name one with --user")
+			return db.User{}, badRequest("local mode has no account of its own: name one with --user")
 		}
 		row, err := s.q.GetUserByID(ctx, p.UserID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -111,6 +113,9 @@ func (s *Service) CreateAccessToken(ctx context.Context, req CreateAccessTokenRe
 			return NewAccessToken{}, err
 		}
 		expires = sql.NullTime{Time: now.Add(d), Valid: true}
+	}
+	if err := s.requireFreshProof(ctx, p, req.CurrentPassword); err != nil {
+		return NewAccessToken{}, err
 	}
 	token, digest, err := newKeyToken(accessTokenPrefix)
 	if err != nil {
@@ -171,7 +176,7 @@ func (s *Service) RevokeAccessToken(ctx context.Context, user, ref string) (Acce
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return AccessToken{}, invalid("an access token ID or name is required")
+		return AccessToken{}, badRequest("an access token ID or name is required")
 	}
 	var row db.AccessToken
 	if id, perr := uuid.Parse(ref); perr == nil {

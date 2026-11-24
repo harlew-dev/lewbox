@@ -20,7 +20,7 @@ func newArchiveCmd(a *app) *cobra.Command {
 
 	show := &cobra.Command{
 		Use:   "show <id>",
-		Short: "Show an archived sandbox (GET /v0/archives/{id})",
+		Short: "Show an archived sandbox (GET /v0/archives/{archive})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetArchive(ctx, args[0], service.RegionScope{Org: a.org})
@@ -29,7 +29,7 @@ func newArchiveCmd(a *app) *cobra.Command {
 
 	restore := &cobra.Command{
 		Use:   "restore <id>",
-		Short: "Restore an archived sandbox as a new sandbox (POST /v0/archives/{id}/restore)",
+		Short: "Restore an archived sandbox as a new sandbox (POST /v0/archives/{archive}/restore)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.RestoreArchive(ctx, args[0], service.RegionScope{Org: a.org})
@@ -39,7 +39,7 @@ func newArchiveCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
-		Short:   "Delete an archived sandbox (DELETE /v0/archives/{id})",
+		Short:   "Delete an archived sandbox (DELETE /v0/archives/{archive})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete archive %q?", args[0])); err != nil {

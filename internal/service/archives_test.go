@@ -673,7 +673,7 @@ func TestGetArchive(t *testing.T) {
 		wantCode(t, err, CodeNotFound)
 	}
 	if _, err := f.s.GetArchive(member, "not-a-uuid", RegionScope{Org: "acme"}); err != nil {
-		wantCode(t, err, CodeInvalid)
+		wantCode(t, err, CodeNotFound)
 	}
 }
 
@@ -707,7 +707,7 @@ func TestRestoreArchiveAPI(t *testing.T) {
 	f.pass(t)
 	pending := f.row(t, "sb-2")
 	if _, err := f.s.RestoreArchive(member, pending.ID, RegionScope{Org: "acme"}); err != nil {
-		wantCode(t, err, CodePrecondition)
+		wantCode(t, err, CodeConflict)
 	}
 
 	// A suspended workspace does not get new sandboxes.
@@ -716,7 +716,7 @@ func TestRestoreArchiveAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.s.RestoreArchive(member, row.ID, RegionScope{Org: "acme"}); err != nil {
-		wantCode(t, err, CodePrecondition)
+		wantCode(t, err, CodeForbidden)
 	}
 }
 

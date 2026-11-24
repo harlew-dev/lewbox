@@ -8,6 +8,35 @@ Context for coding agents working in this repo. Read it before changing anything
 
 **Built:** accounts, sessions, sign-up and setup links, access tokens (`lbp_…`, act as their account; D38); self-serve workspaces with members and API keys; plans, one subscription (region) per workspace; sandbox keys (AerolVM runner tokens); the sync loop (sandbox mirror, usage metering, quota pushes, suspension); snapshots; 30-day health, uptime and node metrics; the customer portal (`/`) and operator console (`/admin`); clusters, nodes, `install`, `node add`, `node configure`, `update`, `firewall enable`; DNS profiles (Cloudflare) with managed DNS records, storage profiles (S3-compatible) with a registry on each node, and archiving stopped sandboxes to the bucket, with per-cluster local copy retention and snapshot names (D34–D37); text/JSON output. **Deliberately not built** (see `.agents/plans/DECISIONS.md`): billing (D24), per-member limits (D29), webhooks, email.
 
+## Skills
+
+Generic "how I build apps" skills live in `.agents/skills/` (committed, unlike the plans). Load the matching one before working in its area:
+
+| Skill | Load it when |
+|---|---|
+| `api-design` | Adding or changing an endpoint, list, table, migration, seeder or event; reviewing API or data-layer code |
+| `authentication` | Any sign-up, sign-in, password, session, invitation, deletion or credential flow; any endpoint taking an unproven email, ID, token or key |
+| `conventions-and-docs` | Before starting any change (find and read the docs); adding a check, doc or plan; renaming; before saying "done" |
+| `delivery-workflow` | The user hands over notes or an idea, asks for a plan or "build this"; orchestrating agents; closing a plan, committing, PR |
+| `dev-environment` | The Makefile, env files, compose, the dev server, running tests or e2e locally, CI |
+| `production-hardening` | An endpoint that creates rows or checks a secret; logging, metrics, alerts, admin features, config and secrets, a release or first deploy, an incident |
+| `project-structure` | Creating a file, package, module, component, page or endpoint; adding a dependency; deciding where code goes |
+| `resource-naming` | Before adding or renaming a route, handler, page, client method, permission, event or rate limit |
+| `security-defaults` | Before adding or changing an endpoint, an auth flow, a permission, a token or secret, a cookie, a redirect, a log line, a template or a config variable |
+| `testing` | Writing or reviewing tests; adding an endpoint, page, table, permission, event or rate limit; before saying "done" |
+| `ui-patterns` | Adding or changing a page, route, list, form, dialog, component, chart or UI text; reviewing frontend code |
+
+**Where Lewbox deviates (recorded; these win over the skills):**
+
+- The error body stays `{"error":{"code","message","details"}}` — the CLI's `--json` must be byte-identical to the API body. Status codes follow the api-design table; a field-level error names the field in `details`.
+- `DELETE` answers 200 with the deleted record, not 204, for the same parity reason (D42).
+- The workspace is chosen by the `Lewbox-Organization` header (CLI-first), not the URL path.
+- One process, one SQLite file (D2): migrations run on start, after the deploy's backup. IDs are app-generated UUIDv7, and names/slugs are looked up like IDs, so no prefixed public IDs.
+- No email (D4): email verification, account lock and unlock links, invitations (D18), email blocks, the mail outbox and CAPTCHA don't apply. Sign-up approval and rate limits are the abuse defence.
+- One web build with `/admin` (D13): no hidden admin door, no separate admin bundle; instance admin is an account role.
+- Passwords use PBKDF2-SHA256 (stdlib), not Argon2id.
+- Plans live in `.agents/plans/` as phase briefs plus `DECISIONS.md`/`STATUS.md`; new plans follow the delivery-workflow plan template.
+
 ## Layout
 
 | Path | What |
@@ -41,7 +70,8 @@ Context for coding agents working in this repo. Read it before changing anything
 # The Makefile is the entry point. `make` builds web/dist and then bin/lewbox.
 make                        # build the console and the binary (default)
 make build-go               # Go only, after the console is built
-make test                   # gofmt, go vet, go test, web typecheck + tests
+make test                   # gofmt, go vet, go test -race, web typecheck + tests
+make check                  # static checks only: gofmt -l, go vet, web typecheck
 make fmt                    # gofmt -w .
 make docker                 # the runtime image, lewbox:local, via Compose
 make docker-test            # the Go checks and web tests inside the image
@@ -60,7 +90,7 @@ cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh
 cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh --runtime firecracker
 ```
 
-The four Go checks (or `make test`, which adds the web checks) must pass before you call a change done. Run `e2e.sh` for anything touching `internal/machine`, `cmd/lewbox/{install,nodeadd,update,machine}.go`, cluster checks or node sync. The unit tests use fakes and **have missed real bugs**: a wrong `sudo` argv, and running an unverified file.
+The four Go checks (or `make test`, which runs the tests under `-race` and adds the web checks; CI in `.github/workflows/ci.yml` runs `make test` and `make docker-test`) must pass before you call a change done. Run `e2e.sh` for anything touching `internal/machine`, `cmd/lewbox/{install,nodeadd,update,machine}.go`, cluster checks or node sync. The unit tests use fakes and **have missed real bugs**: a wrong `sudo` argv, and running an unverified file.
 
 ## Rules of the code
 

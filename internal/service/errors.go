@@ -10,14 +10,15 @@ import (
 type Code string
 
 const (
-	CodeInvalid      Code = "invalid_request"     // 400
+	CodeBadRequest   Code = "bad_request"         // 400: the request cannot be read
+	CodeInvalid      Code = "invalid_request"     // 422: a value breaks a rule, or a quota is reached
 	CodeUnauthorized Code = "unauthorized"        // 401
 	CodeForbidden    Code = "forbidden"           // 403
 	CodeNotFound     Code = "not_found"           // 404
 	CodeConflict     Code = "conflict"            // 409
-	CodePrecondition Code = "precondition_failed" // 412
+	CodePrecondition Code = "precondition_failed" // CLI machine checks only; never an HTTP status
 	CodeRateLimited  Code = "rate_limited"        // 429
-	CodeUnavailable  Code = "unavailable"         // 502
+	CodeUnavailable  Code = "unavailable"         // 503: a dependency is down
 )
 
 // Error is an expected failure that is safe to show the caller. Any other
@@ -30,8 +31,27 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// badRequest reports a request that cannot be read: malformed JSON, an unknown
+// field, or a malformed query parameter.
+func badRequest(format string, a ...any) error {
+	return &Error{Code: CodeBadRequest, Message: fmt.Sprintf(format, a...)}
+}
+
+// invalid reports a parsed value that breaks a rule, or a quota that is
+// reached. Name the one field at fault with invalidField.
 func invalid(format string, a ...any) error {
 	return &Error{Code: CodeInvalid, Message: fmt.Sprintf(format, a...)}
+}
+
+// FieldDetails names the one request field an invalid error is about.
+type FieldDetails struct {
+	Field string `json:"field"`
+}
+
+// invalidField is invalid for a value that breaks a rule on one field, named
+// as in the request body.
+func invalidField(field, format string, a ...any) error {
+	return &Error{Code: CodeInvalid, Message: fmt.Sprintf(format, a...), Details: FieldDetails{Field: field}}
 }
 
 func unauthorized(format string, a ...any) error {
@@ -50,7 +70,9 @@ func conflict(format string, a ...any) error {
 	return &Error{Code: CodeConflict, Message: fmt.Sprintf(format, a...)}
 }
 
-// precondition reports a check that failed before the work could start.
+// precondition reports a local machine check that failed before the work could
+// start. It is for CLI-only commands; API routes use conflict, invalid or
+// unavailable instead.
 func precondition(details any, format string, a ...any) error {
 	return &Error{Code: CodePrecondition, Message: fmt.Sprintf(format, a...), Details: details}
 }

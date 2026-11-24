@@ -154,6 +154,26 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const rehashUserPassword = `-- name: RehashUserPassword :execrows
+UPDATE users SET password_hash = ?1 WHERE id = ?2 AND password_hash = ?3
+`
+
+type RehashUserPasswordParams struct {
+	NewHash string
+	ID      string
+	OldHash string
+}
+
+// Upgrades a hash only if it is still the one that was checked, so a
+// password change that lands in between is never overwritten.
+func (q *Queries) RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rehashUserPassword, arg.NewHash, arg.ID, arg.OldHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setUserDisabled = `-- name: SetUserDisabled :one
 UPDATE users SET disabled = ?1
 WHERE users.id = ?2

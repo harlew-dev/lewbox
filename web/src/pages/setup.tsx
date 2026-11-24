@@ -32,7 +32,6 @@ export function SetupPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [signingOut, setSigningOut] = useState(false)
-  const onboarding = `/onboarding?setup=${encodeURIComponent(token)}`
 
   async function signOutNow() {
     if (signingOut) return
@@ -52,7 +51,8 @@ export function SetupPage() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     const result = await signup.run()
-    if (result.ok) navigate(onboarding)
+    // The token goes to onboarding in router state, never in the URL.
+    if (result.ok) navigate('/onboarding', { state: { setupToken: token } })
   }
 
   return (
@@ -81,7 +81,10 @@ export function SetupPage() {
 
             {status === 'authenticated' ? (
               <>
-                <Button className="w-full" onClick={() => navigate(onboarding)}>
+                <Button
+                  className="w-full"
+                  onClick={() => navigate('/onboarding', { state: { setupToken: token } })}
+                >
                   Continue as {user?.email}
                 </Button>
                 <Text className="text-center">

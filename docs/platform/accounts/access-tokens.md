@@ -18,7 +18,9 @@ lewbox token create deploy --never-expires
 
 `create` prints the token once. Lewbox keeps only its SHA-256 hash and its first and last characters (`lbp_3c34b3e9…xFCz`), so copy it straight away. Tokens expire after 90 days unless you choose otherwise. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days.
 
-In the web console, open **Account settings** from the account menu. Then choose **Create token** under **Access tokens**.
+A remote orchestrator also asks for your current password, to confirm it's you: the CLI prompts without echo on a terminal, and in scripts you pass `--current-password-file PATH` with the password on its first line. Local mode, which has no signed-in account, asks for nothing.
+
+In the web console, open **Account settings** from the account menu. Then choose **Create token** under **Access tokens**; the dialog asks for your current password too.
 
 A token can't create another token, so a leaked token can't outlive its own expiry. Create tokens with a password sign-in, or in the console.
 

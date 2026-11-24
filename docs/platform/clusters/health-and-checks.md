@@ -45,7 +45,7 @@ Every check also syncs the node list from AerolVM. New members appear, members t
 
 ## History and uptime
 
-Every check keeps a sample of the cluster's status and each node's capacity, and Lewbox deletes samples older than 31 days. The console and the CLI show a 30-day bar from them. A day with no samples is "no data", not downtime: a stopped orchestrator says nothing about the cluster.
+Every check keeps a sample of the cluster's status and each node's capacity, and Lewbox deletes samples older than 31 days. The console and the CLI show a 30-day bar from them. A day with no samples is "no data", not downtime: a stopped orchestrator says nothing about the cluster. The same daily pass deletes expired sessions and metered usage older than 400 days, the longest range `GET /v0/usage` accepts.
 
 ```bash
 lewbox cluster health eu-west --days 30    # a bar per day, then the percentage

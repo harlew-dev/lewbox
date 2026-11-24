@@ -171,7 +171,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return Sandbox{}, invalid("a sandbox ID is required")
+		return Sandbox{}, badRequest("a sandbox ID is required")
 	}
 	var org *db.Organization
 	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
@@ -205,7 +205,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 		return Sandbox{}, notFound("sandbox %q not found", id)
 	case 1:
 	default:
-		return Sandbox{}, invalid("sandbox %q is in more than one region; choose a region", id)
+		return Sandbox{}, invalidField("region", "sandbox %q is in more than one region; choose a region", id)
 	}
 	row := rows[0]
 

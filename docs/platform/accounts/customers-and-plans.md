@@ -36,7 +36,7 @@ lewbox setup-link revoke <id>
 
 The command prints the `lbs_…` token once and the `/setup/<token>` path to send, prefixed by the server URL when the CLI knows it. `--expires` defaults to `7d`, in whole hours from `1h` to `720h`. The console's setup-link form creates the same thing.
 
-The public page shows the instance, plan and region **names**, never slugs or who claimed it. When the person signs up with the token, the link is claimed by their new account. Creating a workspace with the same token consumes it and subscribes the link's plan in its region; reusing it then fails with `400`. A link is `unused`, `claimed`, `used` or `expired`; `revoke` deletes an unused one, and a used link cannot be revoked (`409`). Each link works once, so hand out one per customer.
+The public page shows the instance, plan and region **names**, never slugs or who claimed it. When the person signs up with the token, the link is claimed by their new account. Creating a workspace with the same token consumes it and subscribes the link's plan in its region; reusing it then fails with `422`. A link is `unused`, `claimed`, `used` or `expired`; `revoke` deletes an unused one, and a used link cannot be revoked (`409`). Each link works once, so hand out one per customer.
 
 ## Plans
 
@@ -78,7 +78,7 @@ Only instance admins change a subscription or an organization's status. Owners a
 
 An organization also has a **team** (`lbx-…`) for AerolVM, derived from its ID and never reused. Only instance admins see the team.
 
-Removing a member, changing their role to viewer, disabling their account or deleting it revokes every sandbox key they created (in that workspace for member changes, everywhere for account changes). If a key cannot be revoked, the change is refused with `502` until it succeeds. The workspace's `lba_` keys and other members' keys are untouched.
+Removing a member, changing their role to viewer, disabling their account or deleting it revokes every sandbox key they created (in that workspace for member changes, everywhere for account changes). If a key cannot be revoked, the change is refused with `503` until it succeeds. The workspace's `lba_` keys and other members' keys are untouched.
 
 ## Regions
 
@@ -88,7 +88,7 @@ Customers place sandboxes in their workspace's **region**: a cluster that is rea
 lewbox region list --org acme
 ```
 
-A sandbox key defaults to the workspace's region and can only be created there; another region is `404 region … not found`, and a workspace with no region is `412`. A subscription's quota is pushed before the workspace is created or a plan change returns; a key created in that region before the push succeeds gets `412` ("still being set up") until it does.
+A sandbox key defaults to the workspace's region and can only be created there; another region is `404 region … not found`, and a workspace with no region is `409`. A subscription's quota is pushed before the workspace is created or a plan change returns; a key created in that region before the push succeeds gets `409` ("still being set up") until it does.
 
 ## How limits are enforced
 

@@ -24,22 +24,24 @@ Progress (checks, commands about to run, installer output) goes to **stderr**. s
 Every error from the orchestrator or a check has the same shape, from the CLI (on stderr) and the API:
 
 ```json
-{"error":{"code":"precondition_failed","message":"cluster \"eu-west\" failed its checks","details":[{"name":"admin_token","ok":false,"fatal":true,"detail":"whoami returned 401: check SB_IDENTITY_ENABLED=true on every node …"}]}}
+{"error":{"code":"invalid_request","message":"cluster \"eu-west\" failed its checks","details":[{"name":"admin_token","ok":false,"fatal":true,"detail":"whoami returned 401: check SB_IDENTITY_ENABLED=true on every node …"}]}}
 ```
 
 On a terminal, the CLI prints `Error: <message>` instead, followed by any failed checks. Usage errors (exit 2) are always plain `Error: …` text, even with `--json`.
 
 | Code | HTTP | Means |
 |---|---|---|
-| `invalid_request` | 400 | A bad argument: wrong format, missing field |
+| `bad_request` | 400 | The request can't be read: malformed JSON, trailing data, an unknown or mistyped field, an oversized body, or an unknown, repeated or malformed query parameter |
 | `unauthorized` | 401 | Not signed in, or the session expired |
-| `forbidden` | 403 | Signed in, but only an instance admin can do this |
-| `not_found` | 404 | No such cluster, node or account |
-| `conflict` | 409 | Already exists, or not allowed in the current state (last node, last admin) |
-| `precondition_failed` | 412 | A check failed; `details` lists the checks |
+| `forbidden` | 403 | Signed in, but not allowed: missing permission, a suspended or pending workspace, a bad Origin |
+| `not_found` | 404 | No such cluster, node or account, not yours, or a malformed ID |
+| `method_not_allowed` | 405 | A known path with a method it doesn't take |
+| `conflict` | 409 | The input is valid but the current state forbids it (last node, last admin, a region still being set up) |
+| `invalid_request` | 422 | A parsed value breaks a rule (`details.field` names the field), or a quota is reached (no field) |
 | `rate_limited` | 429 | Too many sign-in attempts. `details.retry_after_seconds` (and the `Retry-After` header) says how long to wait |
-| `unavailable` | 502 | A cluster couldn't be reached, or answered with an error |
-| `internal` | 500 | A bug. The orchestrator's log has the cause |
+| `unavailable` | 503 | A dependency is down (AerolVM, the database, S3, Cloudflare). `Retry-After` says how long to wait |
+| `internal` | 500 | A bug. The body carries a `request_id`; the orchestrator's log has the cause under it |
+| `precondition_failed` | — | CLI-only: a check on this machine failed. `details` lists the checks; it is never an HTTP response |
 
 ## Exit codes
 

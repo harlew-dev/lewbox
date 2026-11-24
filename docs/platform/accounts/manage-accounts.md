@@ -45,6 +45,8 @@ lewbox user set-password alice@example.com     # admins, for anyone
 lewbox user set-password you@example.com       # anyone, for themselves
 ```
 
+When you're signed in to a remote orchestrator, this also asks for your current password. An instance admin setting someone else's password enters their own. The CLI prompts without echo on a terminal, and in scripts you pass `--current-password-file PATH` with the password on its first line. Local mode needs none.
+
 This ends the account's other sessions, so a leaked password stops working everywhere at once. It doesn't revoke the account's [access tokens](access-tokens.md); revoke those with `lewbox token revoke`. Email-based resets come with email support.
 
 ## Disable or remove

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -81,6 +82,9 @@ type dnsProfileTest struct {
 	zoneID  string
 	step    string
 	message string
+	// down is set when Cloudflare could not be reached or answered 5xx, so
+	// the failure is a dependency outage rather than a rejected value.
+	down bool
 }
 
 // ListDNSProfiles returns every profile, ordered by name. Instance admins
@@ -149,7 +153,7 @@ func (s *Service) CreateDNSProfile(ctx context.Context, req CreateDNSProfileRequ
 
 	result := s.testDNSProfile(ctx, zone, token)
 	if result.step != "" {
-		return DNSProfile{}, precondition(map[string]string{"step": result.step}, "DNS profile test failed: %s", result.message)
+		return DNSProfile{}, dnsProfileTestFailure(result)
 	}
 
 	sealed, err := s.keyring.Seal([]byte(token))
@@ -241,7 +245,7 @@ func (s *Service) UpdateDNSProfile(ctx context.Context, ref string, req UpdateDN
 		}
 		result := s.testDNSProfile(ctx, row.Zone, string(token))
 		if result.step != "" {
-			return DNSProfile{}, precondition(map[string]string{"step": result.step}, "DNS profile test failed: %s", result.message)
+			return DNSProfile{}, dnsProfileTestFailure(result)
 		}
 		row.ZoneID = result.zoneID
 		row.TestedAt = sql.NullTime{Time: now, Valid: true}
@@ -380,7 +384,7 @@ func (s *Service) testDNSProfile(ctx context.Context, zone, token string) dnsPro
 		return dnsProfileTest{step: "zone", message: fmt.Sprintf("zone %s not found with this token", zone)}
 	}
 	if err != nil {
-		return dnsProfileTest{step: "zone", message: dnsZoneTestMessage(err)}
+		return dnsProfileTest{step: "zone", message: dnsZoneTestMessage(err), down: dnsDown(err)}
 	}
 
 	content, err := dnsTestContent()
@@ -394,12 +398,30 @@ func (s *Service) testDNSProfile(ctx context.Context, zone, token string) dnsPro
 		TTL:     60,
 	})
 	if err != nil {
-		return dnsProfileTest{step: "write", message: fmt.Sprintf("the token can read the zone but not edit its records: %s", dnsAPIErrorMessage(err))}
+		return dnsProfileTest{step: "write", message: fmt.Sprintf("the token can read the zone but not edit its records: %s", dnsAPIErrorMessage(err)), down: dnsDown(err)}
 	}
 	if err := client.DeleteRecord(ctx, found.ID, record.ID); err != nil {
-		return dnsProfileTest{step: "write", message: fmt.Sprintf("the token can read the zone but not edit its records: %s", dnsAPIErrorMessage(err))}
+		return dnsProfileTest{step: "write", message: fmt.Sprintf("the token can read the zone but not edit its records: %s", dnsAPIErrorMessage(err)), down: dnsDown(err)}
 	}
 	return dnsProfileTest{zoneID: found.ID}
+}
+
+// dnsProfileTestFailure maps a failed test: a provider that answered and
+// refused the values is a 422, one that could not be reached is a 503.
+func dnsProfileTestFailure(result dnsProfileTest) error {
+	code := CodeInvalid
+	if result.down {
+		code = CodeUnavailable
+	}
+	return &Error{Code: code, Message: fmt.Sprintf("DNS profile test failed: %s", result.message), Details: map[string]string{"step": result.step}}
+}
+
+// dnsDown reports whether err is a Cloudflare outage rather than a refusal.
+func dnsDown(err error) bool {
+	if apiErr, ok := errors.AsType[*cloudflare.APIError](err); ok {
+		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status >= 500
+	}
+	return true
 }
 
 // dnsZoneTestMessage reports why finding the zone failed. A refused token
@@ -430,7 +452,7 @@ func dnsTestContent() (string, error) {
 func (s *Service) findDNSProfile(ctx context.Context, ref string) (db.DnsProfile, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.DnsProfile{}, invalid("a DNS profile ID or name is required")
+		return db.DnsProfile{}, badRequest("a DNS profile ID or name is required")
 	}
 	var (
 		row db.DnsProfile
@@ -495,7 +517,7 @@ func dnsProfileProvider(raw string) (string, error) {
 		provider = "cloudflare"
 	}
 	if provider != "cloudflare" {
-		return "", invalid("only cloudflare is supported: AerolVM's installer supports no other DNS provider")
+		return "", invalidField("provider", "only cloudflare is supported: AerolVM's installer supports no other DNS provider")
 	}
 	return provider, nil
 }
@@ -504,7 +526,7 @@ func dnsProfileProvider(raw string) (string, error) {
 func dnsProfileZone(raw string) (string, error) {
 	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
 	if !dnsZoneName.MatchString(zone) {
-		return "", invalid("zone must be a domain name with a dot, such as example.com")
+		return "", invalidField("zone", "zone must be a domain name with a dot, such as example.com")
 	}
 	return zone, nil
 }
@@ -513,7 +535,7 @@ func dnsProfileZone(raw string) (string, error) {
 func dnsProfileToken(raw string) (string, error) {
 	token := strings.TrimSpace(raw)
 	if token == "" {
-		return "", invalid("api_token is required")
+		return "", invalidField("api_token", "api_token is required")
 	}
 	return token, nil
 }
@@ -526,7 +548,7 @@ func dnsProfileACMEEmail(raw string) (string, error) {
 	}
 	local, domain, ok := strings.Cut(email, "@")
 	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
-		return "", invalid("acme_email must be an email address such as ops@example.com")
+		return "", invalidField("acme_email", "acme_email must be an email address such as ops@example.com")
 	}
 	return email, nil
 }

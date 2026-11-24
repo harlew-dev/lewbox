@@ -69,7 +69,7 @@ func (c *Client) Logout(ctx context.Context) (service.LogoutResponse, error) {
 // Me describes the caller.
 func (c *Client) Me(ctx context.Context) (service.Me, error) {
 	var out service.Me
-	err := c.do(ctx, http.MethodGet, "/v0/me", nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, "/v0/profile", nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -133,19 +133,19 @@ func (c *Client) RemoveUser(ctx context.Context, ref string) (service.User, erro
 
 // SetUserDisabled blocks or allows sign-in.
 func (c *Client) SetUserDisabled(ctx context.Context, ref string, disabled bool) (service.User, error) {
-	action := "enable"
+	method := http.MethodDelete
 	if disabled {
-		action = "disable"
+		method = http.MethodPost
 	}
 	var out service.User
-	err := c.do(ctx, http.MethodPost, "/v0/users/"+url.PathEscape(ref)+"/"+action, nil, &out, defaultTimeout)
+	err := c.do(ctx, method, "/v0/users/"+url.PathEscape(ref)+"/suspension", nil, &out, defaultTimeout)
 	return out, err
 }
 
 // SetPassword changes an account's password.
 func (c *Client) SetPassword(ctx context.Context, ref string, req service.SetPasswordRequest) (service.User, error) {
 	var out service.User
-	err := c.do(ctx, http.MethodPut, "/v0/users/"+url.PathEscape(ref)+"/password", req, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodPatch, "/v0/users/"+url.PathEscape(ref)+"/password", req, &out, defaultTimeout)
 	return out, err
 }
 
@@ -219,7 +219,7 @@ func (c *Client) RemoveCluster(ctx context.Context, ref string, force bool) (ser
 // contain "/" (cluster/<x>), so it travels as a query parameter.
 func (c *Client) ResolveCluster(ctx context.Context, ref string) (service.Cluster, error) {
 	var out service.Cluster
-	err := c.do(ctx, http.MethodGet, "/v0/clusters/resolve?ref="+url.QueryEscape(ref), nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, "/v0/clusters/resolve?cluster="+url.QueryEscape(ref), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -274,7 +274,7 @@ func (c *Client) RemoveNode(ctx context.Context, ref string, req service.RemoveN
 // ReportNodeSettings records the profile versions a node applied.
 func (c *Client) ReportNodeSettings(ctx context.Context, ref string, req service.ReportNodeSettingsRequest) (service.Node, error) {
 	var out service.Node
-	err := c.do(ctx, http.MethodPut, "/v0/nodes/"+url.PathEscape(ref)+"/settings", req, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodPatch, "/v0/nodes/"+url.PathEscape(ref)+"/settings", req, &out, defaultTimeout)
 	return out, err
 }
 
@@ -438,7 +438,7 @@ func (c *Client) DeleteDNSProfile(ctx context.Context, ref string) (service.DNSP
 // TestDNSProfile tests a DNS profile's token now.
 func (c *Client) TestDNSProfile(ctx context.Context, ref string) (service.DNSProfile, error) {
 	var out service.DNSProfile
-	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodPost, "/v0/dns-profiles/"+url.PathEscape(ref)+"/check", nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -487,7 +487,7 @@ func (c *Client) DeleteStorageProfile(ctx context.Context, ref string) (service.
 // TestStorageProfile tests a storage profile's bucket and key now.
 func (c *Client) TestStorageProfile(ctx context.Context, ref string) (service.StorageProfile, error) {
 	var out service.StorageProfile
-	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/test", nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodPost, "/v0/storage-profiles/"+url.PathEscape(ref)+"/check", nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -509,7 +509,7 @@ func (c *Client) ListSubscriptions(ctx context.Context, org string) (service.Sub
 // SetSubscription creates or changes a subscription.
 func (c *Client) SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error) {
 	var out service.Subscription
-	err := c.doOrg(ctx, org, http.MethodPut, "/v0/subscriptions/"+url.PathEscape(region), req, &out)
+	err := c.doOrg(ctx, org, http.MethodPatch, "/v0/subscriptions/"+url.PathEscape(region), req, &out)
 	return out, err
 }
 

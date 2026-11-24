@@ -94,6 +94,9 @@ type StorageProfileCredentials struct {
 type storageProfileTest struct {
 	step    string
 	message string
+	// down is set when the bucket could not be reached or answered 5xx, so
+	// the failure is a dependency outage rather than a rejected value.
+	down bool
 }
 
 // ListStorageProfiles returns every profile, ordered by name. Instance
@@ -181,7 +184,7 @@ func (s *Service) CreateStorageProfile(ctx context.Context, req CreateStoragePro
 		PathStyle:       storageProfilePathStyle(req.PathStyle, endpoint),
 	}
 	if result := s.testStorageProfile(ctx, cfg, prefix); result.step != "" {
-		return StorageProfile{}, precondition(map[string]string{"step": result.step}, "storage profile test failed: %s", result.message)
+		return StorageProfile{}, storageProfileTestFailure(result)
 	}
 
 	sealed, err := s.keyring.Seal([]byte(secret))
@@ -321,7 +324,7 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 			PathStyle:       pathStyle,
 		}
 		if result := s.testStorageProfile(ctx, cfg, prefix); result.step != "" {
-			return StorageProfile{}, precondition(map[string]string{"step": result.step}, "storage profile test failed: %s", result.message)
+			return StorageProfile{}, storageProfileTestFailure(result)
 		}
 		if req.SecretAccessKey != nil {
 			sealed, err := s.keyring.Seal(secret)
@@ -479,11 +482,11 @@ func (s *Service) testStorageProfile(ctx context.Context, cfg objstore.Config, p
 	content := []byte("lewbox test object " + key)
 
 	if err := client.Put(ctx, key, content); err != nil {
-		return storageProfileTest{step: "write", message: storageTestMessage(cfg, err)}
+		return storageProfileTest{step: "write", message: storageTestMessage(cfg, err), down: storageDown(err)}
 	}
 	got, err := client.Get(ctx, key)
 	if err != nil {
-		return storageProfileTest{step: "read", message: storageTestMessage(cfg, err)}
+		return storageProfileTest{step: "read", message: storageTestMessage(cfg, err), down: storageDown(err)}
 	}
 	if !bytes.Equal(got, content) {
 		return storageProfileTest{step: "read", message: "the object read back differs from the one written"}
@@ -491,7 +494,7 @@ func (s *Service) testStorageProfile(ctx context.Context, cfg objstore.Config, p
 
 	objs, _, err := client.List(ctx, storageTestPrefix(prefix), "", 0)
 	if err != nil {
-		return storageProfileTest{step: "list", message: storageTestMessage(cfg, err)}
+		return storageProfileTest{step: "list", message: storageTestMessage(cfg, err), down: storageDown(err)}
 	}
 	found := false
 	for _, obj := range objs {
@@ -505,7 +508,7 @@ func (s *Service) testStorageProfile(ctx context.Context, cfg objstore.Config, p
 	}
 
 	if err := client.Delete(ctx, key); err != nil {
-		return storageProfileTest{step: "delete", message: storageTestMessage(cfg, err)}
+		return storageProfileTest{step: "delete", message: storageTestMessage(cfg, err), down: storageDown(err)}
 	}
 	return storageProfileTest{}
 }
@@ -525,6 +528,24 @@ func storageTestKey(prefix string) (string, error) {
 		return "", fmt.Errorf("make a test object name: %w", err)
 	}
 	return storageTestPrefix(prefix) + hex.EncodeToString(b[:]), nil
+}
+
+// storageProfileTestFailure maps a failed test: a bucket that answered and
+// refused the values is a 422, one that could not be reached is a 503.
+func storageProfileTestFailure(result storageProfileTest) error {
+	code := CodeInvalid
+	if result.down {
+		code = CodeUnavailable
+	}
+	return &Error{Code: code, Message: fmt.Sprintf("storage profile test failed: %s", result.message), Details: map[string]string{"step": result.step}}
+}
+
+// storageDown reports whether err is an S3 outage rather than a refusal.
+func storageDown(err error) bool {
+	if apiErr, ok := errors.AsType[*objstore.APIError](err); ok {
+		return apiErr.Status == http.StatusTooManyRequests || apiErr.Status >= 500
+	}
+	return true
 }
 
 // storageTestMessage reports why a step failed, in terms an operator can act
@@ -579,7 +600,7 @@ func storageProfileConfig(row db.StorageProfile, secret string) objstore.Config 
 func (s *Service) findStorageProfile(ctx context.Context, ref string) (db.StorageProfile, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.StorageProfile{}, invalid("a storage profile ID or name is required")
+		return db.StorageProfile{}, badRequest("a storage profile ID or name is required")
 	}
 	var (
 		row db.StorageProfile
@@ -647,7 +668,7 @@ func storageProfileProvider(raw string) (string, error) {
 		provider = "s3"
 	}
 	if provider != "s3" {
-		return "", invalid("only S3-compatible storage is supported")
+		return "", invalidField("provider", "only S3-compatible storage is supported")
 	}
 	return provider, nil
 }
@@ -662,7 +683,7 @@ func storageProfileEndpoint(raw string) (string, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
 		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil || u.Fragment != "" {
-		return "", invalid("endpoint must be an http:// or https:// URL with a host and no path, such as https://s3.example.com")
+		return "", invalidField("endpoint", "endpoint must be an http:// or https:// URL with a host and no path, such as https://s3.example.com")
 	}
 	return endpoint, nil
 }
@@ -673,7 +694,7 @@ func storageProfileRegion(raw, endpoint string) (string, error) {
 	region := strings.TrimSpace(raw)
 	if region == "" {
 		if endpoint == "" {
-			return "", invalid("region is required for AWS S3; use auto for Cloudflare R2")
+			return "", invalidField("region", "region is required for AWS S3; use auto for Cloudflare R2")
 		}
 		return "us-east-1", nil
 	}
@@ -684,22 +705,22 @@ func storageProfileRegion(raw, endpoint string) (string, error) {
 func storageProfileBucket(raw string) (string, error) {
 	bucket := strings.ToLower(strings.TrimSpace(raw))
 	if len(bucket) < 3 || len(bucket) > 63 {
-		return "", invalid("bucket must be 3-63 characters")
+		return "", invalidField("bucket", "bucket must be 3-63 characters")
 	}
 	first := bucket[0]
 	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) || net.ParseIP(bucket) != nil {
-		return "", invalid("bucket must start with a letter or digit and must not be an IP address")
+		return "", invalidField("bucket", "bucket must start with a letter or digit and must not be an IP address")
 	}
 	for i := 0; i < len(bucket); i++ {
 		ch := bucket[i]
 		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' {
 			continue
 		}
-		return "", invalid("bucket may only contain lowercase letters, digits, dots and hyphens")
+		return "", invalidField("bucket", "bucket may only contain lowercase letters, digits, dots and hyphens")
 	}
 	last := bucket[len(bucket)-1]
 	if !((last >= 'a' && last <= 'z') || (last >= '0' && last <= '9')) {
-		return "", invalid("bucket must end with a letter or digit")
+		return "", invalidField("bucket", "bucket must end with a letter or digit")
 	}
 	return bucket, nil
 }
@@ -713,7 +734,7 @@ func storageProfilePrefix(raw string) (string, error) {
 	}
 	for _, segment := range strings.Split(prefix, "/") {
 		if segment == "" || segment == "." || segment == ".." {
-			return "", invalid("prefix must not have an empty, %q or %q segment", ".", "..")
+			return "", invalidField("prefix", "prefix must not have an empty, %q or %q segment", ".", "..")
 		}
 		for i := 0; i < len(segment); i++ {
 			ch := segment[i]
@@ -721,7 +742,7 @@ func storageProfilePrefix(raw string) (string, error) {
 				ch == '.' || ch == '_' || ch == '-' {
 				continue
 			}
-			return "", invalid("prefix may only contain letters, digits, dots, underscores, hyphens and slashes")
+			return "", invalidField("prefix", "prefix may only contain letters, digits, dots, underscores, hyphens and slashes")
 		}
 	}
 	return prefix, nil
@@ -731,7 +752,7 @@ func storageProfilePrefix(raw string) (string, error) {
 func storageProfileRequired(raw, field string) (string, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return "", invalid("%s is required", field)
+		return "", invalidField(field, "%s is required", field)
 	}
 	return value, nil
 }

@@ -1,7 +1,7 @@
 # Snapshot archive: what AerolVM v0.7.0 does
 
 > [!NOTE]
-> **Design notes.** Findings from a test on the dev cluster on 2026-11-13, for [plans/08-dns-storage-archive.md](../../plans/08-dns-storage-archive.md) (DECISIONS D35, D36). To *use* Lewbox, start at the [docs home](../README.md).
+> **Design notes.** Findings from a test on the dev cluster on 2026-11-13, for the plan `08-dns-storage-archive.md` (DECISIONS D35, D36; plans live in `.agents/plans/`, which is local and gitignored). To *use* Lewbox, start at the [docs home](../README.md).
 
 ## Setup
 

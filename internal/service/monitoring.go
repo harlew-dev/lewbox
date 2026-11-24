@@ -22,6 +22,10 @@ const (
 	sampleInterval  = time.Minute
 	sampleRetention = 31 * 24 * time.Hour
 	pruneEvery      = 24 * time.Hour
+
+	// usageRetention keeps every range GET /v0/usage accepts (at most 400
+	// days), so a legal query never loses data that was there.
+	usageRetention = 400 * 24 * time.Hour
 )
 
 // UptimeDay is one UTC day of samples for a cluster or a node. Uptime is nil
@@ -220,7 +224,7 @@ func (s *Service) ClusterMetrics(ctx context.Context, ref, rng string) (ClusterM
 	case "30d":
 		span, bucket = 30*24*time.Hour, 6*3600
 	default:
-		return ClusterMetrics{}, invalid("range must be 24h, 7d or 30d")
+		return ClusterMetrics{}, invalidField("range", "range must be 24h, 7d or 30d")
 	}
 
 	now := s.now().UTC()
@@ -428,7 +432,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 }
 
 // recordSamples stores one check's cluster and node rows, then prunes old
-// samples once a day.
+// rows once a day.
 func (s *Service) recordSamples(ctx context.Context, clusterID, status string, latency time.Duration, healthOK, membersAvailable bool, members []aerolvm.Member) error {
 	now := s.now()
 	latencyMs := int64(-1)
@@ -482,10 +486,13 @@ func (s *Service) recordSamples(ctx context.Context, clusterID, status string, l
 			return fmt.Errorf("insert node sample %q: %w", node.Name, err)
 		}
 	}
-	return s.pruneSamples(ctx, now)
+	return s.pruneOld(ctx, now)
 }
 
-func (s *Service) pruneSamples(ctx context.Context, now time.Time) error {
+// pruneOld deletes what would otherwise grow forever: monitoring samples,
+// expired sessions and usage past its retention. It runs at most once a day,
+// from the same pass that records samples.
+func (s *Service) pruneOld(ctx context.Context, now time.Time) error {
 	s.pruneMu.Lock()
 	defer s.pruneMu.Unlock()
 	if !s.lastPrune.IsZero() && now.Sub(s.lastPrune) < pruneEvery {
@@ -498,6 +505,13 @@ func (s *Service) pruneSamples(ctx context.Context, now time.Time) error {
 	if err := s.q.DeleteNodeSamplesBefore(ctx, cutoff); err != nil {
 		return fmt.Errorf("prune node samples: %w", err)
 	}
+	// An expired session is refused on use anyway; this only clears the rows.
+	if _, err := s.q.DeleteExpiredSessions(ctx, now); err != nil {
+		return fmt.Errorf("prune sessions: %w", err)
+	}
+	if _, err := s.q.DeleteUsageBefore(ctx, now.Add(-usageRetention)); err != nil {
+		return fmt.Errorf("prune usage: %w", err)
+	}
 	s.lastPrune = now
 	return nil
 }
@@ -507,7 +521,7 @@ func healthDays(days int) (int, error) {
 		return defaultHealthDays, nil
 	}
 	if days < 1 || days > maxHealthDays {
-		return 0, invalid("days must be between 1 and %d", maxHealthDays)
+		return 0, invalidField("days", "days must be between 1 and %d", maxHealthDays)
 	}
 	return days, nil
 }

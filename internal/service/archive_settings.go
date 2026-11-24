@@ -40,7 +40,7 @@ func clusterArchiveRetention(raw string) (string, error) {
 		value = RetentionInstant
 	}
 	if _, ok := archiveRetentions[value]; !ok && value != RetentionNever {
-		return "", invalid("archive_local_retention must be instant, 1h, 1d, 7d or never")
+		return "", invalidField("archive_local_retention", "archive_local_retention must be instant, 1h, 1d, 7d or never")
 	}
 	return value, nil
 }
@@ -59,7 +59,7 @@ func clusterArchiveSnapshotName(raw string) (string, error) {
 		value = snapshotNameID
 	}
 	if value != snapshotNameID && value != snapshotNameName {
-		return "", invalid("archive_snapshot_name must be id or name")
+		return "", invalidField("archive_snapshot_name", "archive_snapshot_name must be id or name")
 	}
 	return value, nil
 }

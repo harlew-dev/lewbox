@@ -20,7 +20,7 @@ function stubPortal(organizations = [acmeMembership, beta]) {
       'GET /v0/sandboxes': () => json(200, { data: [] }),
       'GET /v0/sandbox-keys': () => json(200, { data: [] }),
       'GET /v0/regions': () => json(200, { data: [] }),
-      'GET /v0/me': () => json(200, { user: customerUser, organizations, via: 'session' }),
+      'GET /v0/profile': () => json(200, { user: customerUser, organizations, via: 'session' }),
     },
     customerUser,
     organizations,
@@ -65,7 +65,7 @@ describe('WorkspaceSwitcher', () => {
         'GET /v0/sandbox-keys': () => json(200, { data: [] }),
         'GET /v0/regions': () => json(200, { data: [] }),
         'GET /v0/instance': () => json(200, { name: 'Lewbox', signup: 'open' }),
-        'GET /v0/me': () => json(200, { user: customerUser, organizations, via: 'session' }),
+        'GET /v0/profile': () => json(200, { user: customerUser, organizations, via: 'session' }),
         'POST /v0/organizations': () => {
           organizations = [...organizations, gamma]
           return json(201, { ...acme, id: gamma.id, slug: 'gamma', name: 'Gamma', region: null })

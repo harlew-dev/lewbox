@@ -567,7 +567,7 @@ const AUTH_PATHS = new Set([
   '/v0/auth/signup',
   '/v0/auth/login',
   '/v0/auth/logout',
-  '/v0/me',
+  '/v0/profile',
 ])
 
 export function onUnauthorized(handler: () => void): () => void {
@@ -652,7 +652,7 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export function me(): Promise<Me> {
-  return request<Me>('/v0/me', { authRedirect: false })
+  return request<Me>('/v0/profile', { authRedirect: false })
 }
 
 export function signIn(email: string, password: string): Promise<SessionResponse> {
@@ -731,8 +731,8 @@ export function createUser(input: {
 }
 
 export function setUserDisabled(userRef: string, disabled: boolean): Promise<User> {
-  return request<User>(`/v0/users/${ref(userRef)}/${disabled ? 'disable' : 'enable'}`, {
-    method: 'POST',
+  return request<User>(`/v0/users/${ref(userRef)}/suspension`, {
+    method: disabled ? 'POST' : 'DELETE',
   })
 }
 
@@ -740,10 +740,14 @@ export function removeUser(userRef: string): Promise<User> {
   return request<User>(`/v0/users/${ref(userRef)}`, { method: 'DELETE' })
 }
 
-export function setPassword(userRef: string, password: string): Promise<User> {
+// Changing a password needs the caller's own current password as fresh proof.
+export function setPassword(
+  userRef: string,
+  input: { password: string; current_password: string },
+): Promise<User> {
   return request<User>(`/v0/users/${ref(userRef)}/password`, {
-    method: 'PUT',
-    body: { password },
+    method: 'PATCH',
+    body: input,
   })
 }
 
@@ -792,9 +796,14 @@ export function revokeSetupLink(id: string): Promise<SetupLink> {
   return request<SetupLink>(`/v0/setup-links/${ref(id)}`, { method: 'DELETE' })
 }
 
-// Public: the plan and region names behind a setup token.
+// Public: the plan and region names behind a setup token. The token travels
+// in the body, never in the URL.
 export function setupLinkInfo(token: string): Promise<SetupLinkInfo> {
-  return request<SetupLinkInfo>(`/v0/setup/${ref(token)}`, { authRedirect: false })
+  return request<SetupLinkInfo>('/v0/setup-links/check', {
+    method: 'POST',
+    body: { token },
+    authRedirect: false,
+  })
 }
 
 export function getOrganization(orgRef: string): Promise<Organization> {
@@ -841,8 +850,13 @@ export function listAccessTokens(): Promise<AccessTokenList> {
   return request<AccessTokenList>('/v0/access-tokens')
 }
 
-// A token that never expires is sent with an empty expires_in.
-export function createAccessToken(input: { name: string; expires_in: KeyLifetime }): Promise<NewAccessToken> {
+// A token that never expires is sent with an empty expires_in. current_password
+// is the caller's own password, as fresh proof.
+export function createAccessToken(input: {
+  name: string
+  expires_in: KeyLifetime
+  current_password: string
+}): Promise<NewAccessToken> {
   const body = { ...input, expires_in: input.expires_in === 'never' ? '' : input.expires_in }
   return request<NewAccessToken>('/v0/access-tokens', { method: 'POST', body })
 }
@@ -856,9 +870,10 @@ export function listAdminKeys(org: string): Promise<AdminKeyList> {
 }
 
 // A management key that never expires is sent with an empty expires_in.
+// current_password is the caller's own password, as fresh proof.
 export function createAdminKey(
   org: string,
-  input: { name: string; expires_in: KeyLifetime },
+  input: { name: string; expires_in: KeyLifetime; current_password: string },
 ): Promise<NewAdminKey> {
   const body = { ...input, expires_in: input.expires_in === 'never' ? '' : input.expires_in }
   return request<NewAdminKey>('/v0/admin-keys', { method: 'POST', body, org })
@@ -903,7 +918,7 @@ export function listSubscriptions(org: string): Promise<{ data: Subscription[] }
 }
 
 export function setSubscription(org: string, region: string, input: SubscriptionInput): Promise<Subscription> {
-  return request<Subscription>(`/v0/subscriptions/${ref(region)}`, { method: 'PUT', body: input, org })
+  return request<Subscription>(`/v0/subscriptions/${ref(region)}`, { method: 'PATCH', body: input, org })
 }
 
 // force removes it even when the region's keys can't be revoked.
@@ -1042,7 +1057,7 @@ export function deleteDNSProfile(profileRef: string): Promise<DNSProfile> {
 }
 
 export function testDNSProfile(profileRef: string): Promise<DNSProfile> {
-  return request<DNSProfile>(`/v0/dns-profiles/${ref(profileRef)}/test`, { method: 'POST' })
+  return request<DNSProfile>(`/v0/dns-profiles/${ref(profileRef)}/check`, { method: 'POST' })
 }
 
 // A bucket for snapshots and archives. The secret is never returned.
@@ -1096,7 +1111,7 @@ export function deleteStorageProfile(profileRef: string): Promise<StorageProfile
 }
 
 export function testStorageProfile(profileRef: string): Promise<StorageProfile> {
-  return request<StorageProfile>(`/v0/storage-profiles/${ref(profileRef)}/test`, { method: 'POST' })
+  return request<StorageProfile>(`/v0/storage-profiles/${ref(profileRef)}/check`, { method: 'POST' })
 }
 
 // The step a profile test failed at, from an error body's details, if any.

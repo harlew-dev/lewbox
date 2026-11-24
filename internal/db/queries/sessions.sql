@@ -16,3 +16,6 @@ DELETE FROM sessions WHERE user_id = ?;
 
 -- name: DeleteOtherSessionsByUser :exec
 DELETE FROM sessions WHERE user_id = ? AND id != ?;
+
+-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions WHERE expires_at < ?;

@@ -51,6 +51,10 @@ type AdminKeyList struct {
 type CreateAdminKeyRequest struct {
 	Name      string `json:"name"`
 	ExpiresIn string `json:"expires_in"`
+	// CurrentPassword is the caller's own password, as fresh proof (see
+	// requireFreshProof). Local mode needs none; an admin key, which has no
+	// password, cannot create another.
+	CurrentPassword string `json:"current_password,omitempty"`
 }
 
 const (
@@ -129,17 +133,17 @@ func parseLifetime(raw string) (time.Duration, error) {
 	if days, ok := strings.CutSuffix(raw, "d"); ok {
 		n, err := strconv.Atoi(days)
 		if err != nil {
-			return 0, invalid("expires_in must be a duration such as 90d or 720h")
+			return 0, invalidField("expires_in", "expires_in must be a duration such as 90d or 720h")
 		}
 		d = time.Duration(n) * 24 * time.Hour
 	} else {
 		var err error
 		if d, err = time.ParseDuration(raw); err != nil {
-			return 0, invalid("expires_in must be a duration such as 90d or 720h")
+			return 0, invalidField("expires_in", "expires_in must be a duration such as 90d or 720h")
 		}
 	}
 	if d < minKeyLifetime || d > maxKeyLifetime {
-		return 0, invalid("expires_in must be between 1h and 3650d")
+		return 0, invalidField("expires_in", "expires_in must be between 1h and 3650d")
 	}
 	return d, nil
 }
@@ -149,13 +153,13 @@ func parseLifetime(raw string) (time.Duration, error) {
 func keyName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
-		return "", invalid("name is required")
+		return "", invalidField("name", "name is required")
 	}
 	if err := displayName(name, "name", 64); err != nil {
 		return "", err
 	}
 	if _, err := uuid.Parse(name); err == nil {
-		return "", invalid("name must not be a UUID")
+		return "", invalidField("name", "name must not be a UUID")
 	}
 	return name, nil
 }
@@ -180,6 +184,9 @@ func (s *Service) CreateAdminKey(ctx context.Context, org string, req CreateAdmi
 			return NewAdminKey{}, err
 		}
 		expires = sql.NullTime{Time: now.Add(d), Valid: true}
+	}
+	if err := s.requireFreshProof(ctx, c.p, req.CurrentPassword); err != nil {
+		return NewAdminKey{}, err
 	}
 	token, digest, err := newAdminKeyToken()
 	if err != nil {
@@ -237,7 +244,7 @@ func (s *Service) RevokeAdminKey(ctx context.Context, org, ref string) (AdminKey
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return AdminKey{}, invalid("a key ID or name is required")
+		return AdminKey{}, badRequest("a key ID or name is required")
 	}
 	var (
 		row   db.AdminKey

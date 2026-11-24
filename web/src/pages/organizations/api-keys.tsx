@@ -20,6 +20,7 @@ import {
   Input,
   Label,
   ListSkeleton,
+  PasswordField,
   SecretReveal,
   Step,
   Steps,
@@ -42,7 +43,7 @@ import * as api from '../../lib/api'
 import { serverURL } from '../../lib/commands'
 import { formatDate, relativeTime } from '../../lib/format'
 import type { Permissions } from '../../lib/organizations'
-import { failureMessage, useLoad } from '../../lib/use-load'
+import { errorField, failureMessage, useLoad } from '../../lib/use-load'
 
 const statusColors: Record<api.AdminKey['status'], BadgeColor> = {
   active: 'lime',
@@ -216,15 +217,31 @@ function CreateKey({
 }) {
   const [name, setName] = useState('')
   const [expiresIn, setExpiresIn] = useState<api.KeyLifetime>('90d')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [currentError, setCurrentError] = useState('')
   const [key, setKey] = useState<api.NewAdminKey | null>(null)
-  const create = useAction(() => api.createAdminKey(org.slug, { name, expires_in: expiresIn }), {
-    toError: (failure) => ({ message: failureMessage(failure) }),
-  })
+  const create = useAction(
+    () => api.createAdminKey(org.slug, { name, expires_in: expiresIn, current_password: currentPassword }),
+    {
+      onError: (failure) => {
+        if (errorField(failure) !== 'current_password') return false
+        setCurrentError(failureMessage(failure))
+        return true
+      },
+      toError: (failure) => ({ message: failureMessage(failure) }),
+    },
+  )
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (currentPassword === '') {
+      setCurrentError('Enter your current password.')
+      return
+    }
+    setCurrentError('')
     const result = await create.run()
     if (result.ok) {
+      setCurrentPassword('')
       setKey(result.value)
       onCreated()
     }
@@ -275,6 +292,16 @@ function CreateKey({
             />
           </Field>
           <KeyExpiryField value={expiresIn} onChange={setExpiresIn} disabled={create.busy} />
+          <PasswordField
+            label="Current password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            error={currentError}
+            disabled={create.busy}
+            autoFocus={false}
+            required={false}
+          />
         </FieldGroup>
       </DialogBody>
       <DialogActions>

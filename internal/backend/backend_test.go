@@ -182,7 +182,7 @@ func TestBackendsAgree(t *testing.T) {
 		{
 			name: "set password",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				v, err := b.SetPassword(ctx, "second@example.com", service.SetPasswordRequest{Password: "second-password-2"})
+				v, err := b.SetPassword(ctx, "second@example.com", service.SetPasswordRequest{Password: "second-password-2", CurrentPassword: adminPassword})
 				return v, err
 			},
 			remote:  getSecond,
@@ -440,12 +440,12 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 		{
 			name: "create admin key",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				k, err := b.CreateAdminKey(ctx, "acme", service.CreateAdminKeyRequest{Name: "backend", ExpiresIn: "30d"})
+				k, err := b.CreateAdminKey(ctx, "acme", service.CreateAdminKeyRequest{Name: "backend", ExpiresIn: "30d", CurrentPassword: adminPassword})
 				token = k.Token
 				return k, err
 			},
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateAdminKey(ctx, "acme", service.CreateAdminKeyRequest{Name: "ci"})
+				return b.CreateAdminKey(ctx, "acme", service.CreateAdminKeyRequest{Name: "ci", CurrentPassword: adminPassword})
 			},
 			check: func(t *testing.T, v any) {
 				k, ok := v.(service.NewAdminKey)
@@ -541,10 +541,10 @@ func TestAccessTokenBackendsAgree(t *testing.T) {
 		{
 			name: "create token",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "laptop", User: adminEmail, ExpiresIn: "30d"})
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "laptop", User: adminEmail, ExpiresIn: "30d", CurrentPassword: adminPassword})
 			},
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				k, err := b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "ci"})
+				k, err := b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "ci", CurrentPassword: adminPassword})
 				token = k.Token
 				return k, err
 			},
@@ -559,10 +559,10 @@ func TestAccessTokenBackendsAgree(t *testing.T) {
 		{
 			name: "create another account's token",
 			local: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "a", User: "dev@example.com"})
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "a", User: "dev@example.com", CurrentPassword: adminPassword})
 			},
 			remote: func(ctx context.Context, b backend.Backend) (any, error) {
-				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "b", User: "dev@example.com"})
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "b", User: "dev@example.com", CurrentPassword: adminPassword})
 			},
 		},
 		both("list another account's tokens", listDev),
@@ -1400,7 +1400,7 @@ func TestLocalAuthHasNoSession(t *testing.T) {
 	}
 	if _, err := h.local.Logout(ctx); err == nil {
 		t.Fatal("local logout succeeded")
-	} else if se, ok := errors.AsType[*service.Error](err); !ok || se.Code != service.CodeInvalid {
+	} else if se, ok := errors.AsType[*service.Error](err); !ok || se.Code != service.CodeBadRequest {
 		t.Fatalf("local logout error = %v", err)
 	}
 	me, err := h.local.Me(ctx)

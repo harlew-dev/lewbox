@@ -7,7 +7,8 @@ Everything the CLI does goes through this API. The CLI's `--json` output is exac
 
 - Base URL: your orchestrator, for example `https://lewbox.example.com/v0`.
 - JSON in and out. Unknown fields in a request body are rejected.
-- Errors: `{"error":{"code","message","details"}}`, with the codes in [Output and errors](output-and-errors.md#errors).
+- Errors: `{"error":{"code","message","details"}}`, with the codes in [Output and errors](output-and-errors.md#errors). A bad field value is `422` with `details.field`; `400` means the request couldn't be read at all; a dependency that is down is `503` with `Retry-After`.
+- Every response carries `X-Request-ID`; a `500` repeats it in `details.request_id`. An unknown path is JSON `404`, and a known path with the wrong method is `405` with `Allow`.
 
 ## Authentication
 
@@ -21,7 +22,7 @@ TOKEN=$(curl -fsS -X POST https://lewbox.example.com/v0/auth/login \
 curl -fsS -H "Authorization: Bearer $TOKEN" https://lewbox.example.com/v0/clusters
 ```
 
-Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An [access token](../accounts/access-tokens.md) (`lbp_…`, see [below](#access-tokens)) works the same way and acts as its account; use one for scripts and CI. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
+Tokens look like `lbs_` followed by 64 hex characters and last 30 days. An [access token](../accounts/access-tokens.md) (`lbp_…`, see [below](#access-tokens)) works the same way and acts as its account; use one for scripts and CI. An organization's API key (`lba_…`, see [below](#organizations)) works the same way, for that organization's routes only. Every route except `GET /v0/health`, `GET /v0/instance`, `POST /v0/auth/signup`, `POST /v0/setup-links/check`, the public docs routes (`GET /v0/docs…` and `GET /v0/platform…`), `POST /v0/auth/login` and `POST /v0/auth/session` needs one. A missing token gets `401`. A regular account calling an admin-only route gets `403`.
 
 Browsers use `POST /v0/auth/session` instead. It takes the same body and sets an `HttpOnly` session cookie, so the token never reaches JavaScript:
 
@@ -36,6 +37,10 @@ Set-Cookie: __Host-lewbox_session=lbs_…; Path=/; HttpOnly; Secure; SameSite=St
 
 Over TLS the cookie is named `__Host-lewbox_session` and is `Secure`; on plain HTTP it is `lewbox_session`. A browser session lasts at most 7 days and ends after 12 hours without a request. Send the cookie back and omit `Authorization`; if both are present, `Authorization` wins.
 
+### Fresh proof
+
+Changing a password, creating an access token and creating an organization's admin key also take the caller's own `current_password`. A missing or wrong value is an error whose `details.field` is `current_password`. Wrong guesses share the account's sign-in failure budget, so too many answer `rate_limited`.
+
 ### CSRF and request bodies
 
 Browser cookie requests are protected against cross-site request forgery. A state-changing request that the browser marks as cross-site (`Sec-Fetch-Site: cross-site`, or a mismatched `Origin`) gets `403`:
@@ -44,7 +49,7 @@ Browser cookie requests are protected against cross-site request forgery. A stat
 {"error":{"code":"forbidden","message":"cross-origin request rejected"}}
 ```
 
-A cookie-authenticated `POST`, `PUT`, `PATCH` or `DELETE` with a body must also send `Content-Type: application/json` (parameters such as `charset` are allowed); anything else gets `415` with code `invalid_request`. Bearer requests are not affected: the CLI sends no `Sec-Fetch-Site` or `Origin` header and needs no special content type.
+A cookie-authenticated `POST`, `PUT`, `PATCH` or `DELETE` with a body must also send `Content-Type: application/json` (parameters such as `charset` are allowed); anything else gets `415` with code `bad_request`. Bearer requests are not affected: the CLI sends no `Sec-Fetch-Site` or `Origin` header and needs no special content type.
 
 API responses carry `Cache-Control: no-store`.
 
@@ -58,20 +63,19 @@ API responses carry `Cache-Control: no-store`.
 
 ## Routes
 
-`{ref}` takes an ID or a name: the slug for clusters, the name for nodes, the email for accounts.
+A path parameter takes an ID or a name, and is named after what it holds: `{cluster}` is a cluster slug or ID, `{node}` a node name or ID, `{user}` an account's email or ID, `{dns_profile}` and `{storage_profile}` a profile name or ID, `{member}` a membership ID, an account ID or an email, and `{region}` a cluster slug or ID.
 
 ### Auth
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/health` | anyone | `{"ok": true}` |
+| `GET /v0/health` | anyone | `{"ok": true}`. `503` while the database can't be reached, so container health checks and the deploy gate see it as not ready |
 | `GET /v0/instance` | anyone | `{name, signup}`: the instance's name and sign-up mode, for the sign-in page |
 | `POST /v0/auth/login` | anyone | `{email, password}` → `{token, expires_at, user}` |
 | `POST /v0/auth/session` | anyone | Same body, sets the browser session cookie → `{expires_at, user}`. The token is only in the cookie |
-| `POST /v0/auth/signup` | anyone | `{email, password, setup_token}` → the same body and cookie as `POST /v0/auth/session`. It creates only the account, with no workspace. A valid, unused `setup_token` allows sign-up in any mode and claims the link; without one, `403` when sign-up is closed. An invalid or used token is `400`; a taken email is `409` |
+| `POST /v0/auth/signup` | anyone | `{email, password, setup_token}` → the same body and cookie as `POST /v0/auth/session`. It creates only the account, with no workspace. A valid, unused `setup_token` allows sign-up in any mode and claims the link; without one, `403` when sign-up is closed. An invalid or used token is `422`; a taken email is `409` |
 | `POST /v0/auth/logout` | signed in | Ends this session and clears the session cookie → `{"ok": true}`. `400` for an access token or API key, which have no session |
-| `GET /v0/me` | signed in | `{user, organizations, via}` for an account, plus `access_token` when `via` is `access_token`; `{organization, admin_key, via}` for an API key |
-| `GET /v0/setup/{token}` | anyone | The public setup page for an unused, unexpired link: `{instance_name, plan: {name}, region: {name}, expires_at}`. Never a slug or who claimed it. `404` (`this setup link is invalid or has expired`) for an unknown, used or expired link |
+| `GET /v0/profile` | signed in | `{user, organizations, via}` for an account, plus `access_token` when `via` is `access_token`; `{organization, admin_key, via}` for an API key |
 
 ### Regions
 
@@ -90,13 +94,14 @@ Instance admins only.
 
 ### Setup links
 
-Instance admins create and revoke them; only the token's hash is stored, so `token` appears only in the create response. See `GET /v0/setup/{token}` above for the public page.
+Instance admins create and revoke them; only the token's hash is stored, so `token` appears only in the create response. The public page's lookup takes the token in the body, so it never reaches a URL or a proxy log.
 
 | Route | Who | |
 |---|---|---|
+| `POST /v0/setup-links/check` | anyone | `{token}` → what the public setup page shows for an unused, unexpired link: `{instance_name, plan: {name}, region: {name}, expires_at}`. Never a slug or who claimed it. `404` (`this setup link is invalid or has expired`) for an unknown, used or expired link |
 | `GET /v0/setup-links` | admin | `{data: [SetupLink]}`, newest first, never a token |
 | `POST /v0/setup-links` | admin | `{plan, region, expires_in_hours, note}` → `201` SetupLink plus `token`. `plan` and `region` are a slug or ID; `expires_in_hours` defaults to 168 and is 1–720. Unknown plan or region is `404` |
-| `DELETE /v0/setup-links/{id}` | admin | Revoke an unused link → the SetupLink. `409` when it has been used |
+| `DELETE /v0/setup-links/{setup_link}` | admin | Revoke an unused link → the SetupLink. `409` when it has been used |
 
 ### Plans
 
@@ -106,9 +111,9 @@ Instance admins only. A limit is a positive integer; `null` is unlimited and `0`
 |---|---|---|
 | `GET /v0/plans` | admin | `{data: [Plan]}`, ordered by slug |
 | `POST /v0/plans` | admin | `{slug, name, max_sandboxes, max_vcpus, max_memory_mb}` → `201` Plan |
-| `GET /v0/plans/{ref}` | admin | Plan, by ID or slug |
-| `PATCH /v0/plans/{ref}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
-| `DELETE /v0/plans/{ref}` | admin | → the Plan. `409` while a subscription uses it or it is the default plan |
+| `GET /v0/plans/{plan}` | admin | Plan, by ID or slug |
+| `PATCH /v0/plans/{plan}` | admin | Any of `slug`, `name` and the three limits. For a limit, absent means no change, `null` means unlimited |
+| `DELETE /v0/plans/{plan}` | admin | → the Plan. `409` while a subscription uses it or it is the default plan |
 
 ### DNS profiles
 
@@ -117,12 +122,12 @@ Instance admins only. A DNS profile is a saved Cloudflare token, kept sealed and
 | Route | Who | |
 |---|---|---|
 | `GET /v0/dns-profiles` | admin | `{data: [DNSProfile]}`, ordered by name |
-| `POST /v0/dns-profiles` | admin | `{name, provider, zone, api_token, acme_email}` → `201` DNSProfile. A failed test → `412`, with `details.step` set to `zone` or `write` |
-| `GET /v0/dns-profiles/{ref}` | admin | DNSProfile, by ID or name |
-| `PATCH /v0/dns-profiles/{ref}` | admin | Any of `name`, `zone`, `api_token` and `acme_email`. A new zone or token is tested before it is saved and bumps `version` |
-| `DELETE /v0/dns-profiles/{ref}` | admin | → the DNSProfile. `409` while a cluster uses it |
-| `POST /v0/dns-profiles/{ref}/test` | admin | Test now → DNSProfile. A failure is recorded in `test_error`, not returned as an error |
-| `POST /v0/dns-profiles/{ref}/credentials` | admin | `{name, provider, zone, zone_id, api_token, acme_email, version}`. The only response with the token |
+| `POST /v0/dns-profiles` | admin | `{name, provider, zone, api_token, acme_email}` → `201` DNSProfile. A failed test → `422` when Cloudflare refuses the values, or `503` when it can't be reached; `details.step` is `zone` or `write` |
+| `GET /v0/dns-profiles/{dns_profile}` | admin | DNSProfile, by ID or name |
+| `PATCH /v0/dns-profiles/{dns_profile}` | admin | Any of `name`, `zone`, `api_token` and `acme_email`. A new zone or token is tested before it is saved and bumps `version` |
+| `DELETE /v0/dns-profiles/{dns_profile}` | admin | → the DNSProfile. `409` while a cluster uses it |
+| `POST /v0/dns-profiles/{dns_profile}/check` | admin | Test now → DNSProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/dns-profiles/{dns_profile}/credentials` | admin | `{name, provider, zone, zone_id, api_token, acme_email, version}`. The only response with the token |
 
 ### Storage profiles
 
@@ -131,39 +136,39 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | Route | Who | |
 |---|---|---|
 | `GET /v0/storage-profiles` | admin | `{data: [StorageProfile]}`, ordered by name |
-| `POST /v0/storage-profiles` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key}` → `201` StorageProfile. A failed test → `412`, with `details.step` set to `write`, `read`, `list` or `delete` |
-| `GET /v0/storage-profiles/{ref}` | admin | StorageProfile, by ID or name |
-| `PATCH /v0/storage-profiles/{ref}` | admin | Any of `name`, `endpoint`, `region`, `bucket`, `prefix`, `path_style`, `access_key_id` and `secret_access_key`. A change other than the name is tested before it is saved and bumps `version` |
-| `DELETE /v0/storage-profiles/{ref}` | admin | → the StorageProfile. `409` while a cluster uses it |
-| `POST /v0/storage-profiles/{ref}/test` | admin | Test now → StorageProfile. A failure is recorded in `test_error`, not returned as an error |
-| `POST /v0/storage-profiles/{ref}/credentials` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key, version}`. The only response with the secret |
+| `POST /v0/storage-profiles` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key}` → `201` StorageProfile. A failed test → `422` when the bucket refuses the values, or `503` when it can't be reached; `details.step` is `write`, `read`, `list` or `delete` |
+| `GET /v0/storage-profiles/{storage_profile}` | admin | StorageProfile, by ID or name |
+| `PATCH /v0/storage-profiles/{storage_profile}` | admin | Any of `name`, `endpoint`, `region`, `bucket`, `prefix`, `path_style`, `access_key_id` and `secret_access_key`. A change other than the name is tested before it is saved and bumps `version` |
+| `DELETE /v0/storage-profiles/{storage_profile}` | admin | → the StorageProfile. `409` while a cluster uses it |
+| `POST /v0/storage-profiles/{storage_profile}/check` | admin | Test now → StorageProfile. A failure is recorded in `test_error`, not returned as an error |
+| `POST /v0/storage-profiles/{storage_profile}/credentials` | admin | `{name, provider, endpoint, region, bucket, prefix, path_style, access_key_id, secret_access_key, version}`. The only response with the secret |
 
 ### Clusters
 
 | Route | Who | |
 |---|---|---|
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
-| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, admin_token, admin_ip}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `admin_ip` (optional) is an IP at which `admin_url`'s host answers, used for the registration checks only when that host doesn't resolve yet (TLS is still verified against the host name; `400` if `admin_url` already names an IP). With a domain and a DNS profile, registering creates the domain's records; `stop_policy` is `keep` or `archive`; `archive_local_retention` is `instant` (default), `1h`, `1d`, `7d` or `never`; `archive_snapshot_name` is `id` (default) or `name`. A failed required check → `412` with the checks in `details`; `archive` without a storage profile, or a bad policy, retention or name style, → `400` |
-| `PATCH /v0/clusters/{ref}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. An empty body, a domain outside the profile's zone, a bad record mode, policy, retention or name style, `archive` without a profile, or clearing the profile while `archive` is set → `400`. → ClusterDetail |
-| `GET /v0/clusters/{ref}` | admin | ClusterDetail, from the last check |
-| `DELETE /v0/clusters/{ref}?force=true` | admin | Stop managing it → the Cluster. Refuses with `502` if its sandbox keys cannot be revoked, unless `force` is true |
-| `POST /v0/clusters/{ref}/check` | admin | Run the checks now → ClusterDetail |
-| `GET /v0/clusters/{ref}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, stop_policy, archive_local_retention, storage, dns}`. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
-| `GET /v0/clusters/{ref}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
-| `GET /v0/clusters/{ref}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
+| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, admin_token, admin_ip}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `admin_ip` (optional) is an IP at which `admin_url`'s host answers, used for the registration checks only when that host doesn't resolve yet (TLS is still verified against the host name; `422` if `admin_url` already names an IP). With a domain and a DNS profile, registering creates the domain's records; `stop_policy` is `keep` or `archive`; `archive_local_retention` is `instant` (default), `1h`, `1d`, `7d` or `never`; `archive_snapshot_name` is `id` (default) or `name`. A failed required check → `422` with the checks in `details`, or `503` when the cluster can't be reached; `archive` without a storage profile, or a bad policy, retention or name style, → `422` |
+| `PATCH /v0/clusters/{cluster}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. An empty body, a domain outside the profile's zone, a bad record mode, policy, retention or name style, `archive` without a profile, or clearing the profile while `archive` is set → `422`. → ClusterDetail |
+| `GET /v0/clusters/{cluster}` | admin | ClusterDetail, from the last check |
+| `DELETE /v0/clusters/{cluster}?force=true` | admin | Stop managing it → the Cluster. Refuses with `503` if its sandbox keys cannot be revoked, unless `force` is true |
+| `POST /v0/clusters/{cluster}/check` | admin | Run the checks now → ClusterDetail |
+| `GET /v0/clusters/{cluster}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, stop_policy, archive_local_retention, storage, dns}`. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
+| `GET /v0/clusters/{cluster}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
+| `GET /v0/clusters/{cluster}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
 | `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
-| `POST /v0/clusters/{ref}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
-| `GET /v0/clusters/resolve?ref=REF` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
+| `POST /v0/clusters/{cluster}/join-tokens` | admin | `{role, ttl}` → `201` JoinToken |
+| `GET /v0/clusters/resolve?cluster=REF` | admin | The Cluster for a slug, ID, or any of its nodes' names. Accepts `cluster/x` and `node/x` |
 
 ### Nodes
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/nodes?cluster={ref}` | admin | `{data: [Node]}`, optionally for one cluster |
-| `GET /v0/nodes/{ref}` | admin | Node |
-| `DELETE /v0/nodes/{ref}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
+| `GET /v0/nodes?cluster={slug or ID}` | admin | `{data: [Node]}`, optionally for one cluster |
+| `GET /v0/nodes/{node}` | admin | Node |
+| `DELETE /v0/nodes/{node}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
-| `PUT /v0/nodes/{ref}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention}`: the versions a node applied, a name or `null` for each profile, and the `archive_local_retention` it applied with its storage (`null` counts as `instant`). A version below 1 with a profile → `400`; a node in no cluster → `412`. → the Node |
+| `PATCH /v0/nodes/{node}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention}`: the versions a node applied, a name or `null` for each profile, and the `archive_local_retention` it applied with its storage (`null` counts as `instant`). A version below 1 with a profile → `422`; a node in no cluster → `409`. → the Node |
 
 ### Access tokens
 
@@ -172,8 +177,8 @@ An account's tokens for the API. `?user=` (an ID or email) names another account
 | Route | Who | |
 |---|---|---|
 | `GET /v0/access-tokens` | signed in (not an API key) | `{data: [AccessToken]}`, newest first, revoked ones included |
-| `POST /v0/access-tokens` | signed in, not with a token | `{name, expires_in, user}` → `201` AccessToken plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `user` is optional, as `?user=`. A token can't create another (`403`); a disabled account gets `409` |
-| `DELETE /v0/access-tokens/{ref}` | signed in (not an API key) | Revoke by ID or live name → the AccessToken. A token may revoke itself |
+| `POST /v0/access-tokens` | signed in, not with a token | `{name, expires_in, user, current_password}` → `201` AccessToken plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `user` is optional, as `?user=`. `current_password` is the caller's own. A token can't create another (`403`); a disabled account gets `409` |
+| `DELETE /v0/access-tokens/{access_token}` | signed in (not an API key) | Revoke by ID or live name → the AccessToken. A token may revoke itself |
 
 ### Accounts
 
@@ -181,11 +186,11 @@ An account's tokens for the API. `?user=` (an ID or email) names another account
 |---|---|---|
 | `GET /v0/users` | admin | `{data: [User]}` |
 | `POST /v0/users` | admin | `{email, password, instance_admin}` → `201` User |
-| `GET /v0/users/{ref}` | admin, or themselves | User |
-| `DELETE /v0/users/{ref}` | admin | → the User |
-| `POST /v0/users/{ref}/disable` | admin | Ends their sessions and revokes their access tokens → User |
-| `POST /v0/users/{ref}/enable` | admin | → User |
-| `PUT /v0/users/{ref}/password` | admin, or themselves | `{password}` → User |
+| `GET /v0/users/{user}` | admin, or themselves | User |
+| `DELETE /v0/users/{user}` | admin | → the User |
+| `POST /v0/users/{user}/suspension` | admin | Ends their sessions and revokes their access tokens → User |
+| `DELETE /v0/users/{user}/suspension` | admin | → User |
+| `PATCH /v0/users/{user}/password` | admin, or themselves | `{password, current_password}` → User. `current_password` is the caller's own, even when an admin changes someone else's |
 
 ### Organizations
 
@@ -193,23 +198,23 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/organizations?user={ref}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
-| `POST /v0/organizations` | signed in | `{slug, name, owner, setup_token}` → `201` Organization. `slug` is generated from `name` when it is empty. An instance admin may set `owner` (an email or ID, default you) and gets no default subscription unless it uses a setup token. Anyone else becomes the owner (`owner` is `403`), gets the default plan in the default region when both exist, and must have sign-up `open` (active workspace) or `approval` (pending); `closed` is `403`. With `setup_token`, the workspace is active in any mode, subscribed to the link's plan in its region, and the link is consumed. At most 10 workspaces may be owned by one account (`412`) |
-| `GET /v0/organizations/{ref}` | its members, admins, its keys | Organization |
-| `PATCH /v0/organizations/{ref}` | owner or admin; status: admin | `{name}` renames. Instance admins can also set `{status}`; `status` is `active` or `suspended` → Organization |
+| `GET /v0/organizations?user={user}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
+| `POST /v0/organizations` | signed in | `{slug, name, owner, setup_token}` → `201` Organization. `slug` is generated from `name` when it is empty. An instance admin may set `owner` (an email or ID, default you) and gets no default subscription unless it uses a setup token. Anyone else becomes the owner (`owner` is `403`), gets the default plan in the default region when both exist, and must have sign-up `open` (active workspace) or `approval` (pending); `closed` is `403`. With `setup_token`, the workspace is active in any mode, subscribed to the link's plan in its region, and the link is consumed. At most 10 workspaces may be owned by one account (`422`, a quota) |
+| `GET /v0/organizations/{organization}` | its members, admins, its keys | Organization |
+| `PATCH /v0/organizations/{organization}` | owner or admin; status: admin | `{name}` renames. Instance admins can also set `{status}`; `status` is `active` or `suspended` → Organization |
 | `GET /v0/organization` | as for the header's, or the key's own | Organization |
 | `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
-| `PATCH /v0/members/{ref}` | owner or admin | `{role}` → Member. `{ref}` is an email, account ID or member ID. The last owner stays (`409`) |
-| `DELETE /v0/members/{ref}` | owner or admin, or themselves | → the Member |
+| `PATCH /v0/members/{member}` | owner or admin | `{role}` → Member. `{member}` is an email, account ID or member ID. The last owner stays (`409`) |
+| `DELETE /v0/members/{member}` | owner or admin, or themselves | → the Member |
 | `GET /v0/admin-keys` | owner, admin, admins, its keys | `{data: [AdminKey]}`, newest first, revoked ones included |
-| `POST /v0/admin-keys` | owner or admin | `{name, expires_in}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never |
-| `DELETE /v0/admin-keys/{ref}` | owner or admin | Revoke by ID or live name → the AdminKey |
+| `POST /v0/admin-keys` | owner or admin | `{name, expires_in, current_password}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `current_password` is the caller's own |
+| `DELETE /v0/admin-keys/{admin_key}` | owner or admin | Revoke by ID or live name → the AdminKey |
 | `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
-| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the workspace's region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `412` if the organization is not active, the region is not ready, or the new quota has not been pushed successfully yet ("still being set up"); an unsubscribed region is `404`. A cluster failure is `502` and stores nothing |
-| `DELETE /v0/sandbox-keys/{ref}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `502` and the key stays live |
+| `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the workspace's region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `403` if the organization is pending or suspended, `409` if the region is not ready or the new quota has not been pushed successfully yet ("still being set up"); an unsubscribed region is `404`. A cluster failure is `503` and stores nothing |
+| `DELETE /v0/sandbox-keys/{sandbox_key}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `503` and the key stays live |
 
-"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`412`).
+"Admin" in the **Who** column is an instance admin, who can do everything in every organization. An API key can never change members or admin keys, but it can list, create and revoke sandbox keys for its own organization. It gets `403` on every route outside that organization (clusters, nodes, accounts, plans, settings). A suspended or pending organization's keys get `403`; its members can only read, and it cannot mint sandbox keys (`403`).
 
 ### Sandboxes and usage
 
@@ -218,13 +223,13 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 | Route | Who | |
 |---|---|---|
 | `GET /v0/sandboxes?region={slug}&status={status}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region and status |
-| `POST /v0/sandboxes/{id}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
-| `DELETE /v0/sandboxes/{id}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
+| `POST /v0/sandboxes/{sandbox}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
+| `DELETE /v0/sandboxes/{sandbox}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
 | `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`); filter on `kind` in the caller. `status` is `pending`, `pushing`, `active` or `error`. `partial_nodes` names nodes that did not answer and covers only the snapshot half; archives come from the database and are never partial. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
-| `DELETE /v0/snapshots/{name}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot. An `archive-…` name is `400`: delete it through the archive routes |
-| `GET /v0/archives/{id}` | its members, admins, its keys | The archive as a Snapshot of `kind: "archive"`. Another workspace's is `404`, like a missing one; a non-UUID ID is `400` |
-| `POST /v0/archives/{id}/restore` | owner, admin or member, admins, its keys | Create a new sandbox from the archive's registry ref, with its name, tags and size, and the tag `lewbox.restored_from=<old sandbox id>` → `{archive, sandbox}` where `archive` is a Snapshot. The archive is kept. `412` if the workspace is suspended, has no subscription in that region, or the archive is not `active` |
-| `DELETE /v0/archives/{id}` | same | Delete the snapshot and its keys in the bucket, then mark the row deleted → the Snapshot as it was before the delete, still with its `active`, `error` or `pending` status. The stored `deleted` state is never returned |
+| `DELETE /v0/snapshots/{snapshot}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot. An `archive-…` name is `422`: delete it through the archive routes |
+| `GET /v0/archives/{archive}` | its members, admins, its keys | The archive as a Snapshot of `kind: "archive"`. Another workspace's is `404`, like a missing one; a non-UUID ID is `404` too |
+| `POST /v0/archives/{archive}/restore` | owner, admin or member, admins, its keys | Create a new sandbox from the archive's registry ref, with its name, tags and size, and the tag `lewbox.restored_from=<old sandbox id>` → `{archive, sandbox}` where `archive` is a Snapshot. The archive is kept. `403` if the workspace is suspended; `409` if it has no subscription in that region or the archive is not `active`; `422` if the region's plan limit is reached |
+| `DELETE /v0/archives/{archive}` | same | Delete the snapshot and its keys in the bucket, then mark the row deleted → the Snapshot as it was before the delete, still with its `active`, `error` or `pending` status. The stored `deleted` state is never returned |
 | `GET /v0/usage?from={date}&to={date}&granularity=hour\|day&org={slug}` | its members, admins, its keys | `Usage`: one bucket per hour or day, zero-filled. `to` defaults to now, `from` to 30 days before; at most 400 days |
 | `GET /v0/limits` | its members, admins, its keys | `LimitsReport`: one entry per subscribed region, with its plan, limits, live use, quota and last push |
 
@@ -239,8 +244,8 @@ The organization comes from the `Lewbox-Organization` header. Only instance admi
 | Route | Who | |
 |---|---|---|
 | `GET /v0/subscriptions` | its members, admins, its keys | `{data: [Subscription]}`, by region slug |
-| `PUT /v0/subscriptions/{region}` | admin | `{plan, max_sandboxes, max_vcpus, max_memory_mb}` → Subscription. `{region}` is a cluster slug or ID; `plan` is a slug or ID. A workspace is in at most one region, so a different region is `409` (remove the current one first); the same region changes the plan. An absent override keeps the current one (`null` on a create), `null` clears it to the plan's; `0` is refused. Pushes the quota at once (best effort) |
-| `DELETE /v0/subscriptions/{region}?force=true` | admin | Unsubscribe → the Subscription. Revokes the organization's live keys there (refusing with `502` unless `force`), pushes the blocking quota and stops its running sandboxes |
+| `PATCH /v0/subscriptions/{region}` | admin | `{plan, max_sandboxes, max_vcpus, max_memory_mb}` → Subscription. `{region}` is a cluster slug or ID; `plan` is a slug or ID. A workspace is in at most one region, so a different region is `409` (remove the current one first); the same region changes the plan. An absent override keeps the current one (`null` on a create), `null` clears it to the plan's; `0` is refused. Pushes the quota at once (best effort) |
+| `DELETE /v0/subscriptions/{region}?force=true` | admin | Unsubscribe → the Subscription. Revokes the organization's live keys there (refusing with `503` unless `force`), pushes the blocking quota and stops its running sandboxes |
 
 ### Docs
 
@@ -350,7 +355,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 
 **Instance**: `{name, signup}`; public.
 
-**Me** for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. `via` is `session`, or `access_token` with the token in `access_token`. For an API key it is `{organization, admin_key, via}` instead.
+**Profile** (`GET /v0/profile`) for an account is `{user, organizations, via}` where each organization is `{id, slug, name, role, status}`. `via` is `session`, or `access_token` with the token in `access_token`. For an API key it is `{organization, admin_key, via}` instead.
 
 **AccessToken**: `{id, user_id, name, prefix, last4, status, created_at, last_used_at, expires_at, revoked_at}`. `status` is `active`, `expired` or `revoked`. The token is only in the create response.
 

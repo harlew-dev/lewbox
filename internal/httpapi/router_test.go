@@ -162,9 +162,9 @@ func TestSessionCookiePlainHTTP(t *testing.T) {
 		t.Errorf("session = %+v", session)
 	}
 
-	me, meBody := ts.do("GET", "/v0/me", "", nil, c)
+	me, meBody := ts.do("GET", "/v0/profile", "", nil, c)
 	if me.StatusCode != http.StatusOK || !strings.Contains(meBody, `"via":"session"`) {
-		t.Fatalf("GET /v0/me: status %d body %s", me.StatusCode, meBody)
+		t.Fatalf("GET /v0/profile: status %d body %s", me.StatusCode, meBody)
 	}
 }
 
@@ -184,14 +184,14 @@ func TestSessionCookieSecure(t *testing.T) {
 
 	// The plain name is not accepted on a secure request.
 	plain := &http.Cookie{Name: "lewbox_session", Value: c.Value}
-	me, _ := ts.do("GET", "/v0/me", "", map[string]string{"X-Forwarded-Proto": "https"}, plain)
+	me, _ := ts.do("GET", "/v0/profile", "", map[string]string{"X-Forwarded-Proto": "https"}, plain)
 	if me.StatusCode != http.StatusUnauthorized {
-		t.Errorf("GET /v0/me with the plain cookie: status %d", me.StatusCode)
+		t.Errorf("GET /v0/profile with the plain cookie: status %d", me.StatusCode)
 	}
 	// The __Host- cookie works.
-	me, meBody := ts.do("GET", "/v0/me", "", map[string]string{"X-Forwarded-Proto": "https"}, c)
+	me, meBody := ts.do("GET", "/v0/profile", "", map[string]string{"X-Forwarded-Proto": "https"}, c)
 	if me.StatusCode != http.StatusOK || !strings.Contains(meBody, `"via":"session"`) {
-		t.Errorf("GET /v0/me with the __Host cookie: status %d body %s", me.StatusCode, meBody)
+		t.Errorf("GET /v0/profile with the __Host cookie: status %d body %s", me.StatusCode, meBody)
 	}
 }
 
@@ -225,9 +225,9 @@ func TestLogoutClearsCookieAndSession(t *testing.T) {
 		}
 	}
 
-	me, _ := ts.do("GET", "/v0/me", "", nil, c)
+	me, _ := ts.do("GET", "/v0/profile", "", nil, c)
 	if me.StatusCode != http.StatusUnauthorized {
-		t.Errorf("GET /v0/me after logout: status %d", me.StatusCode)
+		t.Errorf("GET /v0/profile after logout: status %d", me.StatusCode)
 	}
 	if _, err := ts.svc.Authenticate(context.Background(), c.Value); err == nil {
 		t.Error("logout left the session valid")
@@ -246,12 +246,12 @@ func TestInvalidCookieIsCleared(t *testing.T) {
 		t.Error("bad cookie was not cleared on /v0/health")
 	}
 
-	me, _ := ts.do("GET", "/v0/me", "", nil, bad)
+	me, _ := ts.do("GET", "/v0/profile", "", nil, bad)
 	if me.StatusCode != http.StatusUnauthorized {
-		t.Errorf("GET /v0/me: status %d", me.StatusCode)
+		t.Errorf("GET /v0/profile: status %d", me.StatusCode)
 	}
 	if !hasCookie(me, "lewbox_session") {
-		t.Error("bad cookie was not cleared on /v0/me")
+		t.Error("bad cookie was not cleared on /v0/profile")
 	}
 }
 
@@ -276,7 +276,7 @@ func TestCookieRequestRequiresJSONContentType(t *testing.T) {
 	if res.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("status %d body %s", res.StatusCode, body)
 	}
-	if !strings.Contains(body, `"code":"invalid_request"`) {
+	if !strings.Contains(body, `"code":"bad_request"`) {
 		t.Errorf("body = %s", body)
 	}
 }
@@ -340,13 +340,13 @@ func TestSignupSetsSessionCookie(t *testing.T) {
 		t.Errorf("session = %+v", session)
 	}
 
-	me, meBody := ts.do("GET", "/v0/me", "", nil, c)
+	me, meBody := ts.do("GET", "/v0/profile", "", nil, c)
 	if me.StatusCode != http.StatusOK {
-		t.Fatalf("GET /v0/me: status %d body %s", me.StatusCode, meBody)
+		t.Fatalf("GET /v0/profile: status %d body %s", me.StatusCode, meBody)
 	}
 	var mine service.Me
 	if err := json.Unmarshal([]byte(meBody), &mine); err != nil || len(mine.Organizations) != 0 || mine.Organization != nil {
-		t.Fatalf("GET /v0/me: body %s (%v)", meBody, err)
+		t.Fatalf("GET /v0/profile: body %s (%v)", meBody, err)
 	}
 }
 
@@ -372,7 +372,7 @@ func TestSetupLinkPublicPage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, body := ts.do("GET", "/v0/setup/"+link.Token, "", nil)
+	res, body := ts.do("POST", "/v0/setup-links/check", `{"token":"`+link.Token+`"}`, nil)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("status %d body %s", res.StatusCode, body)
 	}
@@ -391,11 +391,11 @@ func TestSetupLinkPublicPage(t *testing.T) {
 	if _, err := ts.svc.CreateOrganization(ctx, service.CreateOrganizationRequest{Name: "From link", SetupToken: link.Token}); err != nil {
 		t.Fatal(err)
 	}
-	res, body = ts.do("GET", "/v0/setup/"+link.Token, "", nil)
+	res, body = ts.do("POST", "/v0/setup-links/check", `{"token":"`+link.Token+`"}`, nil)
 	if res.StatusCode != http.StatusNotFound || !strings.Contains(body, "this setup link is invalid or has expired") {
 		t.Errorf("used link: status %d body %s", res.StatusCode, body)
 	}
-	res, body = ts.do("GET", "/v0/setup/not-a-token", "", nil)
+	res, body = ts.do("POST", "/v0/setup-links/check", `{"token":"not-a-token"}`, nil)
 	if res.StatusCode != http.StatusNotFound || !strings.Contains(body, "this setup link is invalid or has expired") {
 		t.Errorf("unknown link: status %d body %s", res.StatusCode, body)
 	}

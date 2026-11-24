@@ -58,7 +58,7 @@ describe('api error parsing', () => {
 
     await expect(me()).resolves.toEqual({ user, via: 'session' })
     expect(fetchMock).toHaveBeenCalledWith(
-      '/v0/me',
+      '/v0/profile',
       expect.objectContaining({ credentials: 'same-origin' }),
     )
   })

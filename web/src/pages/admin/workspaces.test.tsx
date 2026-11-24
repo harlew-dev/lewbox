@@ -159,7 +159,7 @@ describe('new workspace', () => {
     const calls = stub({
       'GET /v0/users/dev%40acme.test': noAccount,
       'POST /v0/users': () => json(201, user),
-      'PUT /v0/subscriptions/eu-west': () => json(200, { ...euSubscription, plan: { slug: 'pro', name: 'Pro' } }),
+      'PATCH /v0/subscriptions/eu-west': () => json(200, { ...euSubscription, plan: { slug: 'pro', name: 'Pro' } }),
     })
     renderApp('/admin/workspaces')
     await fill()
@@ -173,9 +173,9 @@ describe('new workspace', () => {
     expect(password.value).not.toBe(generated)
 
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }))
-    await waitFor(() => expect(calls.some((call) => call.method === 'PUT')).toBe(true))
+    await waitFor(() => expect(calls.some((call) => call.method === 'PATCH')).toBe(true))
 
-    expect(writes(calls)).toEqual(['POST /v0/users', 'POST /v0/organizations', 'PUT /v0/subscriptions/eu-west'])
+    expect(writes(calls)).toEqual(['POST /v0/users', 'POST /v0/organizations', 'PATCH /v0/subscriptions/eu-west'])
     const sent = calls.filter((call) => call.method !== 'GET')
     expect(sent[0]!.body).toEqual({ email: 'dev@acme.test', password: password.value, instance_admin: false })
     const org = sent[1]!.body as { slug?: string; name: string; owner: string }
@@ -187,7 +187,7 @@ describe('new workspace', () => {
   it('uses an existing account without a password, and says which step failed', async () => {
     const calls = stub({
       'GET /v0/users/dev%40acme.test': () => json(200, user),
-      'PUT /v0/subscriptions/eu-west': () => json(502, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
+      'PATCH /v0/subscriptions/eu-west': () => json(503, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
     })
     renderApp('/admin/workspaces')
     await fill()
@@ -203,7 +203,7 @@ describe('new workspace', () => {
 
     // Trying again only retries the plan: the workspace isn't made twice.
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    await waitFor(() => expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(2))
+    await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2))
     expect(calls.filter((call) => call.method === 'POST' && call.url === '/v0/organizations')).toHaveLength(1)
   })
 
@@ -232,7 +232,7 @@ describe('new workspace', () => {
         const body = call.body as { name: string }
         return json(201, { ...acme, slug: 'acme-corp-abc123', name: body.name, role: undefined, region: null })
       },
-      'PUT /v0/subscriptions/eu-west': () => json(502, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
+      'PATCH /v0/subscriptions/eu-west': () => json(503, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
     })
     renderApp('/admin/workspaces')
     await fill()
@@ -248,9 +248,9 @@ describe('new workspace', () => {
     // The retry doesn't make the account again, nor call it "existing".
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('Adding EU West failed:')).toBeInTheDocument()
-    expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(1)
+    expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    await waitFor(() => expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(2))
+    await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(2))
     expect(screen.getByText('Created the account dev@acme.test.')).toBeInTheDocument()
     expect(screen.queryByText(/Used the existing account/)).toBeNull()
     expect(calls.filter((call) => call.method === 'POST' && call.url === '/v0/users')).toHaveLength(1)
@@ -262,7 +262,7 @@ describe('new workspace', () => {
   it('refreshes the workspaces when the dialog closes after making a workspace', async () => {
     const calls = stub({
       'GET /v0/users/dev%40acme.test': () => json(200, user),
-      'PUT /v0/subscriptions/eu-west': () => json(502, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
+      'PATCH /v0/subscriptions/eu-west': () => json(503, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
     })
     renderApp('/admin/workspaces')
     await fill()
@@ -283,7 +283,7 @@ describe('workspace cluster and plan', () => {
       ...detailRoutes({ ...acme, region: null }),
       'GET /v0/subscriptions': () => json(200, { data: [] }),
       'GET /v0/limits': () => json(200, { regions: [] }),
-      'PUT /v0/subscriptions/us-east': () => json(200, { ...euSubscription, region: usEast }),
+      'PATCH /v0/subscriptions/us-east': () => json(200, { ...euSubscription, region: usEast }),
     })
     renderApp('/admin/workspaces/acme')
 
@@ -301,7 +301,7 @@ describe('workspace cluster and plan', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Assign' }))
 
     await waitFor(() =>
-      expect(calls.find((call) => call.method === 'PUT')).toMatchObject({
+      expect(calls.find((call) => call.method === 'PATCH')).toMatchObject({
         url: '/v0/subscriptions/us-east',
         org: 'acme',
         body: { plan: 'free', max_sandboxes: 5, max_vcpus: null, max_memory_mb: null },
@@ -313,7 +313,7 @@ describe('workspace cluster and plan', () => {
     const calls = stubAPI({
       ...detailRoutes(acme),
       'DELETE /v0/subscriptions/eu-west': () =>
-        json(502, { error: { code: 'unavailable', message: 'could not revoke 1 sandbox keys on "eu-west"' } }),
+        json(503, { error: { code: 'unavailable', message: 'could not revoke 1 sandbox keys on "eu-west"' } }),
       'DELETE /v0/subscriptions/eu-west?force=true': () => json(200, euSubscription),
     })
     renderApp('/admin/workspaces/acme')
@@ -340,7 +340,7 @@ describe('workspace cluster and plan', () => {
     const calls = stubAPI({
       ...detailRoutes(acme),
       'DELETE /v0/subscriptions/eu-west': () =>
-        json(502, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
+        json(503, { error: { code: 'unavailable', message: 'cluster eu-west did not answer' } }),
     })
     renderApp('/admin/workspaces/acme')
 

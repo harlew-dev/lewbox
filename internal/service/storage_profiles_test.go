@@ -118,7 +118,7 @@ func TestCreateStorageProfileFailures(t *testing.T) {
 	wrong.SecretAccessKey = "wrong-secret"
 	wrong.AccessKeyID = "wrong-key"
 	_, err := s.CreateStorageProfile(localCtx(), wrong)
-	se := wantCode(t, err, CodePrecondition)
+	se := wantCode(t, err, CodeInvalid)
 	details, ok := se.Details.(map[string]string)
 	if !ok || details["step"] != "write" {
 		t.Errorf("details = %v", se.Details)
@@ -130,7 +130,7 @@ func TestCreateStorageProfileFailures(t *testing.T) {
 	missing := newStorageProfileRequest(fake, "backups")
 	missing.Bucket = "missing"
 	_, err = s.CreateStorageProfile(localCtx(), missing)
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeInvalid)
 	details, _ = se.Details.(map[string]string)
 	if details["step"] != "write" || !strings.Contains(se.Message, "bucket missing not found") {
 		t.Errorf("error = %v", se)
@@ -138,7 +138,7 @@ func TestCreateStorageProfileFailures(t *testing.T) {
 
 	fake.FailNext("GET", "lewbox-test/", 500, "InternalError", 1)
 	_, err = s.CreateStorageProfile(localCtx(), newStorageProfileRequest(fake, "backups"))
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeUnavailable)
 	details, _ = se.Details.(map[string]string)
 	if details["step"] != "read" {
 		t.Errorf("details = %v", details)
@@ -219,7 +219,7 @@ func TestUpdateStorageProfile(t *testing.T) {
 	if _, err := s.UpdateStorageProfile(localCtx(), "backups-2", UpdateStorageProfileRequest{Bucket: &missing}); err == nil {
 		t.Fatal("a failing profile was saved")
 	} else {
-		se := wantCode(t, err, CodePrecondition)
+		se := wantCode(t, err, CodeInvalid)
 		details, _ := se.Details.(map[string]string)
 		if details["step"] != "write" || !strings.Contains(se.Message, "bucket missing not found") {
 			t.Errorf("error = %v", se)

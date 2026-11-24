@@ -22,14 +22,14 @@ func clusterAdminIP(raw, adminURL string) (netip.Addr, error) {
 	}
 	addr, err := netip.ParseAddr(raw)
 	if err != nil || addr.Zone() != "" {
-		return netip.Addr{}, invalid("admin_ip must be an IP address, e.g. 203.0.113.10")
+		return netip.Addr{}, invalidField("admin_ip", "admin_ip must be an IP address, e.g. 203.0.113.10")
 	}
 	u, err := url.Parse(adminURL)
 	if err != nil {
-		return netip.Addr{}, invalid("admin_url is not a URL")
+		return netip.Addr{}, invalidField("admin_url", "admin_url is not a URL")
 	}
 	if _, err := netip.ParseAddr(u.Hostname()); err == nil {
-		return netip.Addr{}, invalid("admin_ip is only for an admin_url with a host name; admin_url already names an IP")
+		return netip.Addr{}, invalidField("admin_ip", "admin_ip is only for an admin_url with a host name; admin_url already names an IP")
 	}
 	return addr.Unmap(), nil
 }

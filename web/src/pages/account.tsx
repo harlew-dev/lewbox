@@ -7,6 +7,7 @@ import {
   ErrorNotice,
   NewPasswordFields,
   PageHeader,
+  PasswordField,
   SettingsSection,
   toast,
   useAction,
@@ -17,9 +18,10 @@ import { useAuth } from '../lib/auth'
 import { AccessTokensSection } from './access-tokens'
 import { roleLabel, useOrganizations } from '../lib/organizations'
 import { useDocumentTitle } from '../lib/use-document-title'
-import { failureMessage } from '../lib/use-load'
+import { errorField, failureMessage } from '../lib/use-load'
 
-function problems(password: string, confirmation: string): Record<string, string> {
+function problems(password: string, confirmation: string, current: string): Record<string, string> {
+  if (current === '') return { currentPassword: 'Enter your current password.' }
   if (password.length < 12) return { newPassword: 'Use at least 12 characters.' }
   if (password !== confirmation) return { confirmation: 'The passwords do not match.' }
   return {}
@@ -29,6 +31,7 @@ export function AccountPage() {
   useDocumentTitle('Account')
   const { user } = useAuth()
   const { current } = useOrganizations()
+  const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -36,18 +39,26 @@ export function AccountPage() {
   const change = useAction(
     async () => {
       if (!user) return
-      await api.setPassword(user.id, password)
+      await api.setPassword(user.id, { password, current_password: currentPassword })
     },
-    { toError: (failure) => ({ message: failureMessage(failure) }) },
+    {
+      onError: (failure) => {
+        if (errorField(failure) !== 'current_password') return false
+        setErrors((found) => ({ ...found, currentPassword: failureMessage(failure) }))
+        return true
+      },
+      toError: (failure) => ({ message: failureMessage(failure) }),
+    },
   )
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    const found = problems(password, confirmation)
+    const found = problems(password, confirmation, currentPassword)
     setErrors(found)
     if (Object.keys(found).length > 0) return
     const result = await change.run()
     if (result.ok) {
+      setCurrentPassword('')
       setPassword('')
       setConfirmation('')
       toast.success('Password changed. Other sessions were signed out.')
@@ -82,6 +93,16 @@ export function AccountPage() {
       >
         <form className="space-y-6" onSubmit={submit}>
           <ErrorNotice error={change.error} />
+          <PasswordField
+            label="Current password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            error={errors.currentPassword}
+            disabled={change.busy}
+            autoFocus={false}
+            required={false}
+          />
           <NewPasswordFields
             password={password}
             confirmation={confirmation}

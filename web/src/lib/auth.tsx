@@ -21,7 +21,7 @@ type Status = 'loading' | 'authenticated' | 'guest' | 'error'
 
 interface AuthContextValue {
   user: User | null
-  // The organizations the account belongs to, from /v0/me.
+  // The organizations the account belongs to, from /v0/profile.
   organizations: MeOrganization[]
   status: Status
   error: string
@@ -29,7 +29,7 @@ interface AuthContextValue {
   signUp: (input: { email: string; password: string; setup_token?: string }) => Promise<void>
   signOut: () => Promise<void>
   refresh: () => Promise<void>
-  // Reloads /v0/me without the loading state, after joining or leaving.
+  // Reloads /v0/profile without the loading state, after joining or leaving.
   reloadOrganizations: () => Promise<void>
 }
 

@@ -42,10 +42,10 @@ var errBadPasswordHash = errors.New("malformed password hash")
 // validatePassword enforces the length limits and reports an invalid request.
 func validatePassword(password string) error {
 	if len(password) < passwordMinLength {
-		return invalid("password must be at least %d characters", passwordMinLength)
+		return invalidField("password", "password must be at least %d characters", passwordMinLength)
 	}
 	if len(password) > passwordMaxLength {
-		return invalid("password must be at most %d characters", passwordMaxLength)
+		return invalidField("password", "password must be at most %d characters", passwordMaxLength)
 	}
 	return nil
 }
@@ -92,6 +92,17 @@ func verifyPassword(encoded, password string) (bool, error) {
 		return false, fmt.Errorf("hash password: %w", err)
 	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
+}
+
+// passwordNeedsRehash reports whether an encoded hash used fewer iterations
+// than passwordIterations, so a successful sign-in should store a new one.
+func passwordNeedsRehash(encoded string) bool {
+	parts := strings.Split(encoded, "$")
+	if len(parts) != 4 || parts[0] != passwordPrefix {
+		return false
+	}
+	iter, err := strconv.Atoi(parts[1])
+	return err == nil && iter < passwordIterations
 }
 
 // newSessionToken returns a bearer token and the SHA-256 hex digest that is

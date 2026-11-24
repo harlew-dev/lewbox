@@ -117,7 +117,7 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 	if req.InstanceName != nil {
 		name = strings.TrimSpace(*req.InstanceName)
 		if name == "" {
-			return Settings{}, invalid("instance_name must not be empty")
+			return Settings{}, invalidField("instance_name", "instance_name must not be empty")
 		}
 		if err := displayName(name, "instance_name", 100); err != nil {
 			return Settings{}, err
@@ -129,7 +129,7 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 		switch mode {
 		case signupOpen, signupApproval, signupClosed:
 		default:
-			return Settings{}, invalid("signup must be open, approval or closed")
+			return Settings{}, invalidField("signup", "signup must be open, approval or closed")
 		}
 	}
 	var plan db.Plan

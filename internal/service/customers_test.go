@@ -94,7 +94,7 @@ func TestCreateWorkspaceModes(t *testing.T) {
 	if pending.Status != orgPending || pending.Role != roleOwner {
 		t.Errorf("approval-mode workspace = %+v", pending)
 	}
-	if _, err := s.CreateAdminKey(ada, pending.Slug, CreateAdminKeyRequest{Name: "ci"}); err != nil {
+	if _, err := s.CreateAdminKey(ada, pending.Slug, CreateAdminKeyRequest{Name: "ci", CurrentPassword: testPassword}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
 
@@ -125,7 +125,7 @@ func TestCreateWorkspaceOwnershipLimit(t *testing.T) {
 		}
 	}
 	_, err := s.CreateOrganization(ada, CreateOrganizationRequest{Slug: "one-too-many", Name: "One too many"})
-	se := wantCode(t, err, CodePrecondition)
+	se := wantCode(t, err, CodeInvalid)
 	if !strings.Contains(se.Message, "at most 10 workspaces") {
 		t.Errorf("message = %q", se.Message)
 	}

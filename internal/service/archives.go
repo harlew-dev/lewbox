@@ -138,7 +138,7 @@ func (s *Service) findArchive(ctx context.Context, id string, req RegionScope, n
 	id = strings.TrimSpace(id)
 	parsed, err := uuid.Parse(id)
 	if err != nil {
-		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, invalid("archive ID %q is not a UUID", id)
+		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, notFound("archive %q not found", id)
 	}
 	var scope *db.Organization
 	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
@@ -507,10 +507,10 @@ func (s *Service) logChange(cluster db.Cluster, row db.Archive, to string) {
 // name, tags and size. The archive is kept, so it can be restored again.
 func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.Sandbox, error) {
 	if row.Status != archiveArchived {
-		return aerolvm.Sandbox{}, precondition(nil, "archive %q is %s, not archived", row.SandboxID, row.Status)
+		return aerolvm.Sandbox{}, conflict("archive %q is %s, not archived", row.SandboxID, row.Status)
 	}
 	if row.RegistryRef == "" {
-		return aerolvm.Sandbox{}, precondition(nil, "archive %q has no registry ref", row.SandboxID)
+		return aerolvm.Sandbox{}, conflict("archive %q has no registry ref", row.SandboxID)
 	}
 	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
 	if err != nil {
@@ -521,7 +521,7 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 		return aerolvm.Sandbox{}, fmt.Errorf("get archive organization: %w", err)
 	}
 	if !org.Team.Valid || org.Team.String == "" {
-		return aerolvm.Sandbox{}, precondition(nil, "workspace %q has no AerolVM team", org.Slug)
+		return aerolvm.Sandbox{}, conflict("workspace %q has no AerolVM team", org.Slug)
 	}
 	token, err := s.archiveToken(ctx, cluster, org)
 	if err != nil {
@@ -555,8 +555,7 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 	}
 	if err != nil {
 		if apiErr, ok := errors.AsType[*aerolvm.APIError](err); ok && apiErr.Status == http.StatusTooManyRequests {
-			return aerolvm.Sandbox{}, precondition(map[string]string{"region": cluster.Slug},
-				"region %q: the workspace's plan limit is reached", cluster.Slug)
+			return aerolvm.Sandbox{}, &Error{Code: CodeInvalid, Message: fmt.Sprintf("region %q: the workspace's plan limit is reached", cluster.Slug), Details: map[string]string{"region": cluster.Slug}}
 		}
 		return aerolvm.Sandbox{}, s.regionUnavailable(ctx, cluster.Slug, err)
 	}
@@ -579,7 +578,7 @@ func (s *Service) deleteArchive(ctx context.Context, row db.Archive) error {
 	switch row.Status {
 	case archiveArchived, archiveFailed, archivePending:
 	default:
-		return precondition(nil, "archive %q is %s and cannot be deleted", row.SandboxID, row.Status)
+		return conflict("archive %q is %s and cannot be deleted", row.SandboxID, row.Status)
 	}
 	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
 	if err != nil {

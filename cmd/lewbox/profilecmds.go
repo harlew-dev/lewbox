@@ -31,7 +31,7 @@ func newDNSProfileCmd(a *app) *cobra.Command {
 
 	show := &cobra.Command{
 		Use:   "show <id|name>",
-		Short: "Show a DNS profile (GET /v0/dns-profiles/{id|name})",
+		Short: "Show a DNS profile (GET /v0/dns-profiles/{dns_profile})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetDNSProfile(ctx, args[0])
@@ -73,7 +73,7 @@ func newDNSProfileCmd(a *app) *cobra.Command {
 	var updateTokenStdin bool
 	update := &cobra.Command{
 		Use:   "update <id|name>",
-		Short: "Change and test a DNS profile (PATCH /v0/dns-profiles/{id|name})",
+		Short: "Change and test a DNS profile (PATCH /v0/dns-profiles/{dns_profile})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateDNSProfileRequest{}
@@ -109,7 +109,7 @@ func newDNSProfileCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Delete a DNS profile no cluster uses (DELETE /v0/dns-profiles/{id|name})",
+		Short:   "Delete a DNS profile no cluster uses (DELETE /v0/dns-profiles/{dns_profile})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete DNS profile %q?", args[0])); err != nil {
@@ -123,7 +123,7 @@ func newDNSProfileCmd(a *app) *cobra.Command {
 
 	test := &cobra.Command{
 		Use:   "test <id|name>",
-		Short: "Test a DNS profile's token now (POST /v0/dns-profiles/{id|name}/test)",
+		Short: "Test a DNS profile's token now (POST /v0/dns-profiles/{dns_profile}/check)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.TestDNSProfile(ctx, args[0])
@@ -132,7 +132,7 @@ func newDNSProfileCmd(a *app) *cobra.Command {
 
 	credentials := &cobra.Command{
 		Use:   "credentials <id|name>",
-		Short: "Show a profile's token and settings, for a node (POST /v0/dns-profiles/{id|name}/credentials)",
+		Short: "Show a profile's token and settings, for a node (POST /v0/dns-profiles/{dns_profile}/credentials)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.DNSProfileCredentials(ctx, args[0])
@@ -164,7 +164,7 @@ func newStorageProfileCmd(a *app) *cobra.Command {
 
 	show := &cobra.Command{
 		Use:   "show <id|name>",
-		Short: "Show a storage profile (GET /v0/storage-profiles/{id|name})",
+		Short: "Show a storage profile (GET /v0/storage-profiles/{storage_profile})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetStorageProfile(ctx, args[0])
@@ -220,7 +220,7 @@ func newStorageProfileCmd(a *app) *cobra.Command {
 	var updatePathStyle, updateSecretStdin bool
 	update := &cobra.Command{
 		Use:   "update <id|name>",
-		Short: "Change and test a storage profile (PATCH /v0/storage-profiles/{id|name})",
+		Short: "Change and test a storage profile (PATCH /v0/storage-profiles/{storage_profile})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateStorageProfileRequest{}
@@ -273,7 +273,7 @@ func newStorageProfileCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Delete a storage profile no cluster uses (DELETE /v0/storage-profiles/{id|name})",
+		Short:   "Delete a storage profile no cluster uses (DELETE /v0/storage-profiles/{storage_profile})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete storage profile %q?", args[0])); err != nil {
@@ -287,7 +287,7 @@ func newStorageProfileCmd(a *app) *cobra.Command {
 
 	test := &cobra.Command{
 		Use:   "test <id|name>",
-		Short: "Test a storage profile's bucket and key now (POST /v0/storage-profiles/{id|name}/test)",
+		Short: "Test a storage profile's bucket and key now (POST /v0/storage-profiles/{storage_profile}/check)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.TestStorageProfile(ctx, args[0])
@@ -296,7 +296,7 @@ func newStorageProfileCmd(a *app) *cobra.Command {
 
 	credentials := &cobra.Command{
 		Use:   "credentials <id|name>",
-		Short: "Show a profile's secret key and settings, for a node (POST /v0/storage-profiles/{id|name}/credentials)",
+		Short: "Show a profile's secret key and settings, for a node (POST /v0/storage-profiles/{storage_profile}/credentials)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.StorageProfileCredentials(ctx, args[0])

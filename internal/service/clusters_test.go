@@ -165,7 +165,7 @@ func TestAddClusterFatalChecks(t *testing.T) {
 			Runtime:     "docker",
 			AdminToken:  clusterAdminToken,
 		})
-		se := wantCode(t, err, CodePrecondition)
+		se := wantCode(t, err, CodeUnavailable)
 		checks := se.Details.([]Check)
 		c, ok := findCheck(checks, "health")
 		if !ok || c.OK || !c.Fatal || !strings.Contains(c.Detail, "sandboxd") {
@@ -182,7 +182,7 @@ func TestAddClusterFatalChecks(t *testing.T) {
 		fake := newClusterFake(t)
 		fake.SetVersion("v0.6.12")
 		_, err := s.AddCluster(localCtx(), clusterRequest(fake, "old"))
-		se := wantCode(t, err, CodePrecondition)
+		se := wantCode(t, err, CodeInvalid)
 		c, ok := findCheck(se.Details.([]Check), "version")
 		if !ok || c.OK || !c.Fatal || !strings.Contains(c.Detail, "v0.6.13") {
 			t.Errorf("version check = %+v", c)
@@ -195,7 +195,7 @@ func TestAddClusterFatalChecks(t *testing.T) {
 		req := clusterRequest(fake, "noauth")
 		req.AdminToken = "wrong"
 		_, err := s.AddCluster(localCtx(), req)
-		se := wantCode(t, err, CodePrecondition)
+		se := wantCode(t, err, CodeInvalid)
 		c, ok := findCheck(se.Details.([]Check), "admin_token")
 		if !ok || c.OK || !c.Fatal || !strings.Contains(c.Detail, "SB_IDENTITY_ENABLED") {
 			t.Errorf("admin_token check = %+v", c)
@@ -215,7 +215,7 @@ func TestAddClusterFatalChecks(t *testing.T) {
 		req := clusterRequest(fake, "runner")
 		req.AdminToken = runner.Token
 		_, err = s.AddCluster(localCtx(), req)
-		se := wantCode(t, err, CodePrecondition)
+		se := wantCode(t, err, CodeInvalid)
 		c, ok := findCheck(se.Details.([]Check), "admin_token")
 		if !ok || c.OK || !c.Fatal || !strings.Contains(c.Detail, "admin") {
 			t.Errorf("admin_token check = %+v", c)

@@ -215,7 +215,7 @@ func TestListAndGetUsers(t *testing.T) {
 		wantCode(t, err, CodeNotFound)
 	}
 	if _, err := s.GetUser(localCtx(), ""); err != nil {
-		wantCode(t, err, CodeInvalid)
+		wantCode(t, err, CodeBadRequest)
 	}
 }
 
@@ -275,7 +275,7 @@ func TestSetPasswordKeepsOwnSession(t *testing.T) {
 	_, token2 := loginUser(t, s, u.Email, testPassword)
 
 	const newPassword = "another-good-password"
-	if _, err := s.SetPassword(WithPrincipal(context.Background(), p1), u.Email, SetPasswordRequest{Password: newPassword}); err != nil {
+	if _, err := s.SetPassword(WithPrincipal(context.Background(), p1), u.Email, SetPasswordRequest{Password: newPassword, CurrentPassword: testPassword}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Authenticate(context.Background(), token1); err != nil {
@@ -393,7 +393,7 @@ func TestMeAndLogout(t *testing.T) {
 		t.Errorf("local me = %+v, %v", me, err)
 	}
 	if _, err := s.Logout(localCtx()); err != nil {
-		wantCode(t, err, CodeInvalid)
+		wantCode(t, err, CodeBadRequest)
 	}
 
 	p, token := loginUser(t, s, u.Email, testPassword)

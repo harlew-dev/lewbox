@@ -96,7 +96,7 @@ func newSetupLinkCmd(a *app) *cobra.Command {
 	revoke := &cobra.Command{
 		Use:     "revoke <id>",
 		Aliases: []string{"rm", "delete"},
-		Short:   "Revoke an unused setup link (DELETE /v0/setup-links/{id})",
+		Short:   "Revoke an unused setup link (DELETE /v0/setup-links/{setup_link})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Revoke setup link %q? Anyone with it can no longer join.", args[0])); err != nil {

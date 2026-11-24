@@ -70,12 +70,12 @@ func (s *Service) AddNode(ctx context.Context, req AddNodeRequest) (Node, error)
 	}
 	name := strings.TrimSpace(req.Name)
 	if !nodeName.MatchString(name) {
-		return Node{}, invalid("name must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
+		return Node{}, invalidField("name", "name must be 1-63 lowercase letters, digits or hyphens, and start and end with a letter or digit")
 	}
 	// Names and IDs share one lookup argument (GetNode, RemoveNode), so a
 	// name must never parse as a UUID.
 	if _, err := uuid.Parse(name); err == nil {
-		return Node{}, invalid("name must not be a UUID")
+		return Node{}, invalidField("name", "name must not be a UUID")
 	}
 	nodeURL, err := normalizeURL(req.URL)
 	if err != nil {
@@ -238,7 +238,7 @@ func (s *Service) removeClusterNode(ctx context.Context, row db.Node, req Remove
 func (s *Service) findNode(ctx context.Context, ref string) (db.Node, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.Node{}, invalid("a node ID or name is required")
+		return db.Node{}, badRequest("a node ID or name is required")
 	}
 
 	var (
@@ -278,16 +278,21 @@ func (s *Service) decorateNode(ctx context.Context, r db.Node) (Node, error) {
 // normalizeURL requires an absolute http(s) URL with a host and no query or
 // fragment, and drops any trailing slash.
 func normalizeURL(raw string) (string, error) {
+	return normalizeURLField(raw, "url")
+}
+
+// normalizeURLField is normalizeURL for a named request field.
+func normalizeURLField(raw, field string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", invalid("url is required")
+		return "", invalidField(field, "%s is required", field)
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", invalid("url must be an absolute http or https URL, e.g. https://node-1.example.com:8443")
+		return "", invalidField(field, "%s must be an absolute http or https URL, e.g. https://node-1.example.com:8443", field)
 	}
 	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-		return "", invalid("url must not contain credentials, a query or a fragment")
+		return "", invalidField(field, "%s must not contain credentials, a query or a fragment", field)
 	}
 	u.Path = strings.TrimRight(u.Path, "/")
 	return u.String(), nil

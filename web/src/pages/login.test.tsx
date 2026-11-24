@@ -17,7 +17,7 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString()
-      if (url === '/v0/me') {
+      if (url === '/v0/profile') {
         return json(401, {
           error: { code: 'unauthorized', message: 'session expired or invalid' },
         })

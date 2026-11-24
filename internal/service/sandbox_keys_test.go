@@ -148,7 +148,7 @@ func TestSandboxKeyRegionDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.s.CreateSandboxKey(f.owner, "solo", CreateSandboxKeyRequest{Name: "none"})
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeConflict)
 	if !strings.Contains(se.Message, "not in a region") {
 		t.Errorf("message = %q", se.Message)
 	}
@@ -188,7 +188,7 @@ func TestSandboxKeyOrganizationStatus(t *testing.T) {
 	}
 	before := len(f.fake.Tokens())
 	_, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "blocked"})
-	se := wantCode(t, err, CodePrecondition)
+	se := wantCode(t, err, CodeForbidden)
 	if !strings.Contains(se.Message, "suspended") {
 		t.Errorf("message = %q", se.Message)
 	}
@@ -212,7 +212,7 @@ func TestSandboxKeyOrganizationStatus(t *testing.T) {
 		t.Fatalf("pending workspace = %+v, %v", pending, err)
 	}
 	_, err = f.s.CreateSandboxKey(pendingCtx, pending.Slug, CreateSandboxKeyRequest{Name: "waiting"})
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeForbidden)
 	if !strings.Contains(se.Message, "waiting for approval") {
 		t.Errorf("message = %q", se.Message)
 	}
@@ -244,7 +244,7 @@ func TestSandboxKeyAccess(t *testing.T) {
 	}
 
 	// The organization's API key uses the same routes.
-	key, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend"})
+	key, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend", CurrentPassword: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestCreateSandboxKeyWaitsForQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "laptop"})
-	se := wantCode(t, err, CodePrecondition)
+	se := wantCode(t, err, CodeConflict)
 	if !strings.Contains(se.Message, "still being set up") {
 		t.Errorf("message = %q", se.Message)
 	}

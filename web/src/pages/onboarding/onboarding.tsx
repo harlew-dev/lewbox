@@ -10,7 +10,7 @@ import {
   useAction,
 } from '@harlew-dev/ui'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Navigate, useNavigate, useSearchParams } from 'react-router'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 import * as api from '../../lib/api'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -21,30 +21,13 @@ import { failureMessage, useLoad } from '../../lib/use-load'
 import { Spinner } from '../../components/loading'
 import { OnboardingChrome } from './chrome'
 
-const setupKey = 'lewbox:setup'
-
-function rememberedSetup(): string {
-  try {
-    return sessionStorage.getItem(setupKey) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function rememberSetup(token: string) {
-  try {
-    sessionStorage.setItem(setupKey, token)
-  } catch {
-    // Not remembered; the URL still carries it for this visit.
-  }
-}
-
-function forgetSetup() {
-  try {
-    sessionStorage.removeItem(setupKey)
-  } catch {
-    // Nothing to clear.
-  }
+// The setup page hands its token over in router state (this history entry
+// only), so it stays out of the URL, server logs and sessionStorage. The link
+// is single-use, so the copy dies with the workspace it creates.
+function setupTokenFrom(state: unknown): string {
+  if (typeof state !== 'object' || state === null) return ''
+  const token = (state as { setupToken?: unknown }).setupToken
+  return typeof token === 'string' ? token : ''
 }
 
 // A signed-in account with no workspace creates its first one here.
@@ -54,16 +37,11 @@ export function OnboardingPage() {
   const { select } = useOrganizations()
   const instance = useInstance()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const fromUrl = searchParams.get('setup') ?? ''
-  const [token, setToken] = useState(() => fromUrl || rememberedSetup())
+  const location = useLocation()
+  const [token, setToken] = useState(() => setupTokenFrom(location.state))
   const [staleToken, setStaleToken] = useState(false)
   const created = useRef(false)
   const [name, setName] = useState('')
-
-  useEffect(() => {
-    if (fromUrl) rememberSetup(fromUrl)
-  }, [fromUrl])
 
   const info = useLoad(
     () => (token ? api.setupLinkInfo(token) : Promise.resolve(null)),
@@ -71,10 +49,9 @@ export function OnboardingPage() {
   )
 
   // A link can expire or be used between opening the page and creating the
-  // workspace. Forget it, so the form neither promises a plan nor sends it.
+  // workspace. Drop it, so the form neither promises a plan nor sends it.
   useEffect(() => {
     if (token && info.failure instanceof ApiError && info.failure.status === 404) {
-      forgetSetup()
       setStaleToken(true)
       setToken('')
     }
@@ -96,7 +73,6 @@ export function OnboardingPage() {
     created.current = true
     await reloadOrganizations()
     select(result.value.slug)
-    forgetSetup()
     navigate('/onboarding/getting-started', { replace: true })
   }
 

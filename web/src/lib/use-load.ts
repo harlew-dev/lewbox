@@ -8,6 +8,13 @@ export function failureMessage(failure: unknown): string {
   return 'Something went wrong.'
 }
 
+// The field an API error names in details.field, if any.
+export function errorField(failure: unknown): string {
+  if (!(failure instanceof ApiError)) return ''
+  const details = failure.details as { field?: unknown } | undefined
+  return typeof details?.field === 'string' ? details.field : ''
+}
+
 export interface LoadState<T> {
   data: T | null
   error: ActionError

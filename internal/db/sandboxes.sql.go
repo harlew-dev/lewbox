@@ -45,6 +45,18 @@ func (q *Queries) CountSandboxesByStatus(ctx context.Context) ([]CountSandboxesB
 	return items, nil
 }
 
+const deleteUsageBefore = `-- name: DeleteUsageBefore :execrows
+DELETE FROM usage_hourly WHERE hour < ?
+`
+
+func (q *Queries) DeleteUsageBefore(ctx context.Context, hour time.Time) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUsageBefore, hour)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getQuotaState = `-- name: GetQuotaState :one
 SELECT org_id, cluster_id, quota, pushed_at, error FROM quota_state WHERE org_id = ? AND cluster_id = ?
 `

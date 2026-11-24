@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import type * as api from './api'
 import { useAuth } from './auth'
 
-// The organizations the signed-in account belongs to (from /v0/me) and the
+// The organizations the signed-in account belongs to (from /v0/profile) and the
 // one the portal shows: the last one picked on this browser, otherwise the
 // first.
 interface OrganizationsValue {

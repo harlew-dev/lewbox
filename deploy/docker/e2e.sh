@@ -137,8 +137,8 @@ pass "the quickstart page has a title"
 
 # --- authentication ---------------------------------------------------------
 step "authentication is required"
-req GET /v0/me
-expect 401 "GET /v0/me without a cookie returns 401"
+req GET /v0/profile
+expect 401 "GET /v0/profile without a cookie returns 401"
 
 step "a browser session needs the right password"
 req POST /v0/auth/session \
@@ -158,10 +158,10 @@ if grep -q '"token"' "$BODY"; then fail "the session response leaked a token"; f
 pass "the session response has no token field"
 
 step "the cookie signs in and reads the API"
-req GET /v0/me -b "$JAR"
-expect 200 "GET /v0/me with the cookie returns 200"
-grep -q "$EMAIL" "$BODY" || fail "GET /v0/me does not name $EMAIL"
-pass "GET /v0/me names $EMAIL"
+req GET /v0/profile -b "$JAR"
+expect 200 "GET /v0/profile with the cookie returns 200"
+grep -q "$EMAIL" "$BODY" || fail "GET /v0/profile does not name $EMAIL"
+pass "GET /v0/profile names $EMAIL"
 
 req GET /v0/clusters -b "$JAR"
 expect 200 "GET /v0/clusters returns 200"
@@ -193,14 +193,14 @@ else
 	TOKEN=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "$BODY")
 fi
 [ -n "$TOKEN" ] || fail "POST /v0/auth/login returned no token"
-req GET /v0/me -H "Authorization: Bearer $TOKEN"
-expect 200 "GET /v0/me with a bearer token returns 200"
+req GET /v0/profile -H "Authorization: Bearer $TOKEN"
+expect 200 "GET /v0/profile with a bearer token returns 200"
 
 step "logging out ends the session"
 req POST /v0/auth/logout -b "$JAR" -c "$JAR"
 expect 200 "POST /v0/auth/logout returns 200"
-req GET /v0/me -b "$JAR"
-expect 401 "GET /v0/me after logout returns 401"
+req GET /v0/profile -b "$JAR"
+expect 401 "GET /v0/profile after logout returns 401"
 
 step "sign-in is rate limited"
 limited=0

@@ -126,7 +126,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body.Error.Code != "invalid_request" || body.Error.Message != "method not allowed" {
+	if body.Error.Code != "method_not_allowed" || body.Error.Message != "method not allowed" {
 		t.Fatalf("error = %+v", body.Error)
 	}
 }

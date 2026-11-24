@@ -34,8 +34,11 @@ type CreateUserRequest struct {
 }
 
 // SetPasswordRequest is the input to SetPassword.
+// CurrentPassword is the caller's own password: fresh proof that whoever
+// holds the session or access token also knows it. Local mode needs none.
 type SetPasswordRequest struct {
-	Password string `json:"password"`
+	Password        string `json:"password"`
+	CurrentPassword string `json:"current_password,omitempty"`
 }
 
 // LoginRequest is the input to Login.
@@ -258,6 +261,11 @@ func (s *Service) SetPassword(ctx context.Context, ref string, req SetPasswordRe
 	if err != nil {
 		return User{}, err
 	}
+	// Refuse before the lookup, so the answer never reveals whether another
+	// email has an account.
+	if !p.InstanceAdmin && !p.selfRef(strings.TrimSpace(ref)) {
+		return User{}, forbidden("only an instance admin can change another account's password")
+	}
 	row, err := s.findUser(ctx, ref)
 	if err != nil {
 		return User{}, err
@@ -266,6 +274,9 @@ func (s *Service) SetPassword(ctx context.Context, ref string, req SetPasswordRe
 		return User{}, forbidden("only an instance admin can change another account's password")
 	}
 	if err := validatePassword(req.Password); err != nil {
+		return User{}, err
+	}
+	if err := s.requireFreshProof(ctx, p, req.CurrentPassword); err != nil {
 		return User{}, err
 	}
 	hash, err := hashPassword(req.Password)
@@ -343,6 +354,7 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 	if !ok || row.Disabled != 0 {
 		return "", time.Time{}, db.User{}, unauthorized("email or password is wrong")
 	}
+	s.rehashPassword(ctx, row, req.Password)
 
 	token, expires, err = s.startSession(ctx, now, row.ID, kind, lifetime)
 	if err != nil {
@@ -350,6 +362,63 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 	}
 	s.limiter.clearEmail(email)
 	return token, expires, row, nil
+}
+
+// rehashPassword stores a new hash for a password that has just been
+// verified, when the stored one used fewer iterations than today's. It is
+// best effort: a failure leaves the old hash, which still works.
+func (s *Service) rehashPassword(ctx context.Context, row db.User, password string) {
+	if !passwordNeedsRehash(row.PasswordHash) {
+		return
+	}
+	hash, err := hashPassword(password)
+	if err == nil {
+		_, err = s.q.RehashUserPassword(ctx, db.RehashUserPasswordParams{
+			NewHash: hash,
+			ID:      row.ID,
+			OldHash: row.PasswordHash,
+		})
+	}
+	if err != nil && s.log != nil {
+		s.log.Warn("rehash password", "user_id", row.ID, "err", err)
+	}
+}
+
+// requireFreshProof checks the caller's current password before a sensitive
+// action (changing a password, creating an access token or an admin key), so
+// a stolen session or access token alone cannot do it. Local mode owns the
+// instance and needs no proof; an admin key has no password and is refused.
+// Wrong guesses share the account's sign-in failure budget, so this is not a
+// second way to guess the password.
+func (s *Service) requireFreshProof(ctx context.Context, p Principal, password string) error {
+	switch p.Kind {
+	case "local":
+		return nil
+	case "user":
+	default:
+		return forbidden("this needs a signed-in account and its password")
+	}
+	if password == "" {
+		return invalidField("current_password", "enter your current password to confirm")
+	}
+	row, err := s.q.GetUserByID(ctx, p.UserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return unauthorized("session expired or invalid: lewbox login")
+	}
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+	if retry, ok := s.limiter.allowEmail(s.now(), row.Email); !ok {
+		return loginRateLimited(retry)
+	}
+	ok, err := verifyPassword(row.PasswordHash, password)
+	if err != nil {
+		return fmt.Errorf("verify password: %w", err)
+	}
+	if !ok {
+		return invalidField("current_password", "current password is wrong")
+	}
+	return nil
 }
 
 // startSession creates a session of kind for an account and returns its token
@@ -381,13 +450,13 @@ func (s *Service) Logout(ctx context.Context) (LogoutResponse, error) {
 		return LogoutResponse{}, err
 	}
 	if p.Kind == "key" {
-		return LogoutResponse{}, invalid("an admin key has no session: revoke it with lewbox admin-key revoke")
+		return LogoutResponse{}, badRequest("an admin key has no session: revoke it with lewbox admin-key revoke")
 	}
 	if p.TokenID != "" {
-		return LogoutResponse{}, invalid("an access token has no session: revoke it with lewbox token revoke")
+		return LogoutResponse{}, badRequest("an access token has no session: revoke it with lewbox token revoke")
 	}
 	if p.Kind != "user" {
-		return LogoutResponse{}, invalid("local mode has no session")
+		return LogoutResponse{}, badRequest("local mode has no session")
 	}
 	if p.SessionID != "" {
 		if _, err := s.q.DeleteSession(ctx, p.SessionID); err != nil {
@@ -533,7 +602,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) (b
 func (s *Service) findUser(ctx context.Context, ref string) (db.User, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return db.User{}, invalid("a user ID or email is required")
+		return db.User{}, badRequest("a user ID or email is required")
 	}
 
 	var (
@@ -558,19 +627,19 @@ func (s *Service) findUser(ctx context.Context, ref string) (db.User, error) {
 func normalizeEmail(raw string) (string, error) {
 	email := strings.ToLower(strings.TrimSpace(raw))
 	if email == "" {
-		return "", invalid("email is required")
+		return "", invalidField("email", "email is required")
 	}
 	if len(email) > 254 {
-		return "", invalid("email must be at most 254 characters")
+		return "", invalidField("email", "email must be at most 254 characters")
 	}
 	at := strings.IndexByte(email, '@')
 	if at <= 0 || at != strings.LastIndexByte(email, '@') || at == len(email)-1 {
-		return "", invalid("email must contain one @ with text on both sides")
+		return "", invalidField("email", "email must contain one @ with text on both sides")
 	}
 	// Email and ID share one lookup argument, so an email must never parse
 	// as a UUID.
 	if _, err := uuid.Parse(email); err == nil {
-		return "", invalid("email must not be a UUID")
+		return "", invalidField("email", "email must not be a UUID")
 	}
 	return email, nil
 }

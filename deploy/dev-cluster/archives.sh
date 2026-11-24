@@ -89,7 +89,7 @@ email="arch-$RUN@e2e.dev"
 admin POST /v0/users -d "{\"email\":\"$email\",\"password\":\"customer-password-123\"}" >/dev/null
 ORG="arch-$RUN"
 admin POST /v0/organizations -d "{\"slug\":\"$ORG\",\"name\":\"archive workspace\",\"owner\":\"$email\"}" >/dev/null
-admin PUT "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: $ORG" -d "{\"plan\":\"$plan\"}" >/dev/null
+admin PATCH "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: $ORG" -d "{\"plan\":\"$plan\"}" >/dev/null
 cust POST /v0/auth/session -d "{\"email\":\"$email\",\"password\":\"customer-password-123\"}" >/dev/null
 expect "the region says stopped sandboxes are archived" "[.data[] | select(.slug == \"$CLUSTER\" and .stop_policy == \"archive\")] | length == 1" "$(cust GET /v0/regions)"
 k=$(cust POST /v0/sandbox-keys -d "{\"name\":\"arch\",\"region\":\"$CLUSTER\"}")

@@ -16,7 +16,7 @@ func TestAccessTokens(t *testing.T) {
 	f := newOrgFixture(t, WithClock(func() time.Time { return clock }))
 	s := f.s
 
-	tok, err := s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop", ExpiresIn: "30d"})
+	tok, err := s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop", ExpiresIn: "30d", CurrentPassword: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,14 +29,14 @@ func TestAccessTokens(t *testing.T) {
 	if tok.Status != keyStatusActive || tok.ExpiresAt == nil || !tok.ExpiresAt.Equal(now.Add(30*24*time.Hour)) {
 		t.Errorf("token = %+v", tok.AccessToken)
 	}
-	_, err = s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop"})
+	_, err = s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop", CurrentPassword: testPassword})
 	wantCode(t, err, CodeConflict)
 	for _, bad := range []CreateAccessTokenRequest{{Name: ""}, {Name: "x", ExpiresIn: "soon"}, {Name: "x", ExpiresIn: "1m"}, {Name: "0192f0c4-a3b2-7c6d-8e9f-0a1b2c3d4e5f"}} {
 		_, err = s.CreateAccessToken(f.member, bad)
 		wantCode(t, err, CodeInvalid)
 	}
 	// Another account's name is free.
-	if _, err := s.CreateAccessToken(f.viewer, CreateAccessTokenRequest{Name: "laptop"}); err != nil {
+	if _, err := s.CreateAccessToken(f.viewer, CreateAccessTokenRequest{Name: "laptop", CurrentPassword: testPassword}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -60,7 +60,7 @@ func TestAccessTokens(t *testing.T) {
 		t.Fatalf("me = %+v, %v", me, err)
 	}
 	_, err = s.Logout(tctx)
-	wantCode(t, err, CodeInvalid)
+	wantCode(t, err, CodeBadRequest)
 
 	// A token can't mint another, but can list and revoke.
 	_, err = s.CreateAccessToken(tctx, CreateAccessTokenRequest{Name: "more"})
@@ -104,7 +104,7 @@ func TestAccessTokens(t *testing.T) {
 	wantCode(t, err, CodeConflict)
 	_, err = s.RevokeAccessToken(f.member, "", "laptop")
 	wantCode(t, err, CodeNotFound)
-	if _, err := s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop"}); err != nil {
+	if _, err := s.CreateAccessToken(f.member, CreateAccessTokenRequest{Name: "laptop", CurrentPassword: testPassword}); err != nil {
 		t.Errorf("reuse a revoked token's name: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestAccessTokensForInstanceAdmins(t *testing.T) {
 	s := f.s
 
 	// An instance admin's token manages the instance.
-	tok, err := s.CreateAccessToken(f.root, CreateAccessTokenRequest{Name: "ci", ExpiresIn: "90d"})
+	tok, err := s.CreateAccessToken(f.root, CreateAccessTokenRequest{Name: "ci", ExpiresIn: "90d", CurrentPassword: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAccessTokensForInstanceAdmins(t *testing.T) {
 
 	// Local mode has no account, so it names one. Admins can manage anyone's.
 	_, err = s.CreateAccessToken(localCtx(), CreateAccessTokenRequest{Name: "ops"})
-	wantCode(t, err, CodeInvalid)
+	wantCode(t, err, CodeBadRequest)
 	theirs, err := s.CreateAccessToken(localCtx(), CreateAccessTokenRequest{Name: "ops", User: "owner@example.com"})
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ BuildKit. You do **not** need the Docker `buildx` plugin.
 # The runtime image, lewbox:local.
 make docker
 
-# Every check inside the image: gofmt, go vet, Go tests and the web tests.
+# Every check inside the image: gofmt, go vet, the Go tests with the race detector and the web tests.
 make docker-test
 
 # Run it locally on http://localhost:8080.

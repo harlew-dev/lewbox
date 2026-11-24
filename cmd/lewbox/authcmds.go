@@ -366,7 +366,7 @@ func (a *app) logoutRemote(ctx context.Context, apiURL, token string) error {
 	return err
 }
 
-// newWhoamiCmd mirrors GET /v0/me and adds the selected context.
+// newWhoamiCmd mirrors GET /v0/profile and adds the selected context.
 func newWhoamiCmd(a *app) *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",

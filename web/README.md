@@ -44,7 +44,7 @@ Open `http://localhost:5173/`. The Vite server proxies `/v0` to the Go server, s
 
 The console never holds a token. `POST /v0/auth/session` sets an `HttpOnly` cookie and returns the user and the expiry, never a token; every later request sends the cookie. `src/lib/api.ts` is the only place that calls `fetch`, and it always uses `credentials: 'same-origin'`.
 
-A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-up, sign-out and `/v0/me` calls opt out of that redirect. `AuthProvider` also keeps the account's organizations from `/v0/me`; `reloadOrganizations()` refreshes them after joining, leaving or renaming one.
+A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-up, sign-out and `/v0/profile` calls opt out of that redirect. `AuthProvider` also keeps the account's organizations from `/v0/profile`; `reloadOrganizations()` refreshes them after joining, leaving or renaming one.
 
 ## Two sides: portal and console
 
@@ -61,7 +61,7 @@ Instance admins land on `/admin`; one who belongs to no organization is sent the
 
 Sign-up creates only the account: `/signup` sends the new user to `/onboarding` with no workspace. Onboarding (`src/pages/onboarding/`) is outside the portal layout and uses the library's `CenteredLayout` with the logo and an account menu (signed in as, sign out). Its form creates the first workspace and opens the short `/onboarding/getting-started` carousel (`src/components/carousel.tsx`). When sign-up is closed and the visitor has no setup link, onboarding only says to ask the operator for one.
 
-A setup link is a public page at `/setup/<token>` (`src/pages/setup.tsx`): it asks `GET /v0/setup/<token>` for the plan and region names, then signs the visitor up with the token (or lets a signed-in visitor continue). The token is remembered in `sessionStorage` under `lewbox:setup` so a reload keeps it, and onboarding passes it as `setup_token` when creating the workspace. Instance admins create and revoke links on the Workspaces page's **Setup links** tab (`src/pages/admin/setup-links.tsx`); the full URL is shown once, in a `SecretReveal`.
+A setup link is a public page at `/setup/<token>` (`src/pages/setup.tsx`): it asks `POST /v0/setup-links/check` with the token in the body for the plan and region names, then signs the visitor up with the token (or lets a signed-in visitor continue). Onboarding receives the token in router state, never in the URL or `sessionStorage`, and passes it as `setup_token` when creating the workspace; a reload of onboarding loses it. Instance admins create and revoke links on the Workspaces page's **Setup links** tab (`src/pages/admin/setup-links.tsx`); the full URL is shown once, in a `SecretReveal`.
 
 ## Content Security Policy
 
@@ -92,7 +92,7 @@ Both routes are outside `RequireAuth`, so the books are public. They use the lib
    Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, charts from `@harlew-dev/ui/chart`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges, the sandbox and key tables, the key expiry picker, limit meters, the usage chart).
 3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`.
 4. Use `useLoad` for reads (`every` refreshes in the background; `refresh()` reloads without the loading state) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts.
-5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/me` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
+5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/profile` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
 6. If the page is documentation, add it to the right book's `README.md` (`docs/consumer/` or `docs/platform/`) so it appears in that nav, and link it with a relative `.md` path.
 
 ## Tests
@@ -101,7 +101,7 @@ Both routes are outside `RequireAuth`, so the books are public. They use the lib
 make test
 ```
 
-This runs `gofmt`, `go vet`, the Go tests, the web typecheck (`tsc --noEmit`) and the Vitest suite. The web tests run in jsdom with Testing Library; test files sit next to the code as `*.test.ts` or `*.test.tsx`. `make test` installs dependencies first and does not need a production console build.
+This runs `gofmt`, `go vet`, the Go tests under the race detector, the web typecheck (`tsc --noEmit`) and the Vitest suite. `make check` runs only the static checks (`gofmt`, `go vet`, the typecheck). The web tests run in jsdom with Testing Library; test files sit next to the code as `*.test.ts` or `*.test.tsx`. `make test` installs dependencies first and does not need a production console build.
 
 ## Update the component library
 

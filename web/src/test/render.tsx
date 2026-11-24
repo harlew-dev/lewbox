@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, type InitialEntry } from 'react-router'
 import { App } from '../app'
 import { vi } from 'vitest'
 import { AppLinkProvider } from '../components/app-link'
@@ -60,7 +60,7 @@ export interface Call {
 }
 
 // Stubs fetch with routes keyed "METHOD /path?query", or "METHOD /path" for
-// any query. /v0/me answers with `user` and `organizations`, /v0/instance
+// any query. /v0/profile answers with `user` and `organizations`, /v0/instance
 // with a closed instance, unless a route says otherwise;
 // anything else unknown fails the test.
 export function stubAPI(
@@ -83,7 +83,7 @@ export function stubAPI(
       }
       calls.push(call)
       const handler = routes[`${method} ${url}`] ?? routes[`${method} ${url.split('?')[0]}`]
-      if (!handler && url === '/v0/me') return json(200, { user, organizations, via: 'session' })
+      if (!handler && url === '/v0/profile') return json(200, { user, organizations, via: 'session' })
       if (!handler && url === '/v0/instance') return json(200, { name: 'Lewbox', signup: 'closed' })
       if (!handler) throw new Error(`unexpected request: ${method} ${url}`)
       return handler(call)
@@ -93,7 +93,7 @@ export function stubAPI(
 }
 
 // Renders routes at `path` inside the console's providers.
-export function renderAt(path: string, routes: ReactNode) {
+export function renderAt(path: InitialEntry, routes: ReactNode) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AppLinkProvider>
@@ -110,7 +110,7 @@ export function renderAt(path: string, routes: ReactNode) {
 }
 
 // Renders the whole app at `path`, with every route.
-export function renderApp(path: string) {
+export function renderApp(path: InitialEntry) {
   return renderAt(path, <Route path="*" element={<App />} />)
 }
 

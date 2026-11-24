@@ -259,6 +259,51 @@ func (a *app) call(fn func(ctx context.Context, b backend.Backend, args []string
 	}
 }
 
+// callWithFreshProof is call for commands that need the caller's current
+// password as fresh proof (D43). Local mode needs none: it is already root on
+// the box. On a terminal the CLI asks without echo; otherwise the password
+// comes from --current-password-file, never from a flag value that would land
+// in shell history.
+func (a *app) callWithFreshProof(file string, fn func(ctx context.Context, b backend.Backend, sel cliconfig.Selection, password string, args []string) (any, error)) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		b, sel, err := a.resolve(cmd.Context())
+		if err != nil {
+			return err
+		}
+		password, err := a.currentPassword(cmd, sel, file)
+		if err != nil {
+			return err
+		}
+		resp, err := fn(cmd.Context(), b, sel, password, args)
+		if err != nil {
+			return err
+		}
+		return a.write(resp)
+	}
+}
+
+// currentPassword reads the caller's password for fresh proof. Local mode
+// needs none. It comes from the first line of the file named by
+// --current-password-file when one is given; otherwise a terminal asks for
+// it without echo, as login does.
+func (a *app) currentPassword(cmd *cobra.Command, sel cliconfig.Selection, file string) (string, error) {
+	if sel.Mode == cliconfig.ModeLocal {
+		return "", nil
+	}
+	if file == "" {
+		if f, ok := a.stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+			return promptPassword(cmd, f, "Current password: ")
+		}
+		return "", usagef("stdin is not a terminal: pass --current-password-file")
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("read --current-password-file: %w", err)
+	}
+	line, _, _ := strings.Cut(string(b), "\n")
+	return strings.TrimSuffix(line, "\r"), nil
+}
+
 // jsonMode reports whether output is JSON: --json, LEWBOX_OUTPUT=json, or a
 // stdout that isn't a terminal.
 func (a *app) jsonMode() bool {
@@ -458,7 +503,7 @@ func newNodeCmd(a *app) *cobra.Command {
 
 	get := &cobra.Command{
 		Use:   "get <id|name>",
-		Short: "Show a node (GET /v0/nodes/{id|name})",
+		Short: "Show a node (GET /v0/nodes/{node})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetNode(ctx, args[0])
@@ -469,7 +514,7 @@ func newNodeCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "remove <id|name>",
 		Aliases: []string{"rm", "delete"},
-		Short:   "Remove a node (DELETE /v0/nodes/{id|name})",
+		Short:   "Remove a node (DELETE /v0/nodes/{node})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Remove node %q?", args[0])); err != nil {
@@ -541,7 +586,7 @@ func newClusterCmd(a *app) *cobra.Command {
 
 	get := &cobra.Command{
 		Use:   "get <id|slug>",
-		Short: "Show a cluster (GET /v0/clusters/{id|slug})",
+		Short: "Show a cluster (GET /v0/clusters/{cluster})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetCluster(ctx, args[0])
@@ -550,7 +595,7 @@ func newClusterCmd(a *app) *cobra.Command {
 
 	check := &cobra.Command{
 		Use:   "check <id|slug>",
-		Short: "Run the cluster checks now (POST /v0/clusters/{id|slug}/check)",
+		Short: "Run the cluster checks now (POST /v0/clusters/{cluster}/check)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.CheckCluster(ctx, args[0])
@@ -561,7 +606,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "remove <id|slug>",
 		Aliases: []string{"rm", "delete"},
-		Short:   "Unregister a cluster (DELETE /v0/clusters/{id|slug})",
+		Short:   "Unregister a cluster (DELETE /v0/clusters/{cluster})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Remove cluster %q?", args[0])); err != nil {
@@ -577,7 +622,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	var joinRole, joinTTL string
 	joinCommand := &cobra.Command{
 		Use:   "join-command <id|slug>",
-		Short: "Mint a join token (POST /v0/clusters/{id|slug}/join-tokens)",
+		Short: "Mint a join token (POST /v0/clusters/{cluster}/join-tokens)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.CreateJoinToken(ctx, args[0], service.JoinTokenRequest{
@@ -593,7 +638,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	var setRetention, setSnapshotName string
 	set := &cobra.Command{
 		Use:   "set <id|slug>",
-		Short: "Change a cluster's DNS and storage settings (PATCH /v0/clusters/{id|slug})",
+		Short: "Change a cluster's DNS and storage settings (PATCH /v0/clusters/{cluster})",
 		Long: "Set the cluster's domain and profiles, or turn the records Lewbox\n" +
 			"keeps on or off. The next cluster check reconciles the records, and\n" +
 			"`lewbox node configure` applies the profiles on each node.",
@@ -645,7 +690,7 @@ func newClusterCmd(a *app) *cobra.Command {
 
 	nodeSettings := &cobra.Command{
 		Use:   "node-settings <id|slug>",
-		Short: "Show what a cluster's nodes must apply (GET /v0/clusters/{id|slug}/node-settings)",
+		Short: "Show what a cluster's nodes must apply (GET /v0/clusters/{cluster}/node-settings)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.ClusterNodeSettings(ctx, args[0])
@@ -655,7 +700,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	var healthDays int
 	health := &cobra.Command{
 		Use:   "health <id|slug>",
-		Short: "Show uptime history (GET /v0/clusters/{id|slug}/health)",
+		Short: "Show uptime history (GET /v0/clusters/{cluster}/health)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.ClusterHealth(ctx, args[0], healthDays)
@@ -666,7 +711,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	var metricsRange string
 	metrics := &cobra.Command{
 		Use:   "metrics <id|slug>",
-		Short: "Show node metrics (GET /v0/clusters/{id|slug}/metrics)",
+		Short: "Show node metrics (GET /v0/clusters/{cluster}/metrics)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.ClusterMetrics(ctx, args[0], metricsRange)
@@ -745,7 +790,7 @@ func newUserCmd(a *app) *cobra.Command {
 
 	get := &cobra.Command{
 		Use:   "get <id|email>",
-		Short: "Show an account (GET /v0/users/{id|email})",
+		Short: "Show an account (GET /v0/users/{user})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetUser(ctx, args[0])
@@ -755,7 +800,7 @@ func newUserCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "remove <id|email>",
 		Aliases: []string{"rm", "delete"},
-		Short:   "Remove an account (DELETE /v0/users/{id|email})",
+		Short:   "Remove an account (DELETE /v0/users/{user})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Remove user %q?", args[0])); err != nil {
@@ -769,7 +814,7 @@ func newUserCmd(a *app) *cobra.Command {
 
 	disable := &cobra.Command{
 		Use:   "disable <id|email>",
-		Short: "Block sign-in and end sessions (POST /v0/users/{id|email}/disable)",
+		Short: "Block sign-in and end sessions (POST /v0/users/{user}/suspension)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Disable user %q?", args[0])); err != nil {
@@ -783,7 +828,7 @@ func newUserCmd(a *app) *cobra.Command {
 
 	enable := &cobra.Command{
 		Use:   "enable <id|email>",
-		Short: "Allow sign-in again (POST /v0/users/{id|email}/enable)",
+		Short: "Allow sign-in again (DELETE /v0/users/{user}/suspension)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.SetUserDisabled(ctx, args[0], false)
@@ -791,21 +836,23 @@ func newUserCmd(a *app) *cobra.Command {
 	}
 
 	var setPasswordStdin bool
+	var setPasswordCurrentFile string
 	setPassword := &cobra.Command{
 		Use:   "set-password <id|email>",
-		Short: "Change a password (PUT /v0/users/{id|email}/password)",
+		Short: "Change a password (PATCH /v0/users/{user}/password)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			password, err := readNewPassword(cmd, setPasswordStdin, false)
 			if err != nil {
 				return err
 			}
-			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.SetPassword(ctx, args[0], service.SetPasswordRequest{Password: password})
+			return a.callWithFreshProof(setPasswordCurrentFile, func(ctx context.Context, b backend.Backend, _ cliconfig.Selection, current string, args []string) (any, error) {
+				return b.SetPassword(ctx, args[0], service.SetPasswordRequest{Password: password, CurrentPassword: current})
 			})(cmd, args)
 		},
 	}
 	setPassword.Flags().BoolVar(&setPasswordStdin, "password-stdin", false, "read the password from stdin")
+	setPassword.Flags().StringVar(&setPasswordCurrentFile, "current-password-file", "", "read your current password from this file's first line (remote backend; asked on a terminal)")
 
 	user.AddCommand(create, list, get, remove, disable, enable, setPassword)
 	return user
@@ -912,6 +959,14 @@ func serve(ctx context.Context, addr string, h http.Handler, log *slog.Logger) e
 		Addr:              addr,
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
+		// A request can wait on AerolVM: a stop writes the VM's memory to
+		// disk and an archive restore creates a sandbox from a snapshot, both
+		// bounded by the service's lifecycle timeout (5m). Twice that leaves
+		// the slowest legitimate request room before the connection is cut.
+		ReadTimeout:    60 * time.Second,
+		WriteTimeout:   10 * time.Minute,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 64 << 10,
 	}
 
 	errc := make(chan error, 1)

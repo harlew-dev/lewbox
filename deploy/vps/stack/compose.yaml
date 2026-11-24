@@ -39,6 +39,9 @@ services:
   lewbox:
     image: lewbox:${LEWBOX_TAG:?run lewbox-deploy vX.Y.Z first}
     restart: unless-stopped
+    # The server drains for 10 s on shutdown; Docker's default 10 s would
+    # kill it mid-drain.
+    stop_grace_period: 30s
     # Only on the internal network; Caddy reaches it as lewbox:8080.
     volumes:
       - /srv/lewbox:/data

@@ -13,6 +13,7 @@ import {
   DropdownMenu,
   ErrorNotice,
   NewPasswordFields,
+  PasswordField,
   toast,
   useAction,
 } from '@harlew-dev/ui'
@@ -26,9 +27,14 @@ import {
 } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
-import { failureMessage } from '../../lib/use-load'
+import { errorField, failureMessage } from '../../lib/use-load'
 
-function newPasswordProblems(password: string, confirmation: string): Record<string, string> {
+function newPasswordProblems(
+  password: string,
+  confirmation: string,
+  current: string,
+): Record<string, string> {
+  if (current === '') return { currentPassword: 'Enter your password.' }
   if (password.length < 12) return { newPassword: 'Use at least 12 characters.' }
   if (password !== confirmation) return { confirmation: 'The passwords do not match.' }
   return {}
@@ -134,20 +140,30 @@ function SetPassword({
   onClose: () => void
   onChanged: () => void
 }) {
+  const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const save = useAction(() => api.setPassword(user.id, password), {
-    toError: (failure) => ({ message: failureMessage(failure) }),
-  })
+  const save = useAction(
+    () => api.setPassword(user.id, { password, current_password: currentPassword }),
+    {
+      onError: (failure) => {
+        if (errorField(failure) !== 'current_password') return false
+        setErrors((found) => ({ ...found, currentPassword: failureMessage(failure) }))
+        return true
+      },
+      toError: (failure) => ({ message: failureMessage(failure) }),
+    },
+  )
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    const problems = newPasswordProblems(password, confirmation)
+    const problems = newPasswordProblems(password, confirmation, currentPassword)
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     const result = await save.run()
     if (result.ok) {
+      setCurrentPassword('')
       toast.success('Password changed. Their sessions have ended.')
       onChanged()
       onClose()
@@ -160,15 +176,28 @@ function SetPassword({
       <DialogDescription>For {user.email}. Their signed-in sessions end.</DialogDescription>
       <ErrorNotice error={save.error} className="mt-6" />
       <DialogBody>
-        <NewPasswordFields
-          password={password}
-          confirmation={confirmation}
-          onPasswordChange={setPassword}
-          onConfirmationChange={setConfirmation}
-          errors={errors}
-          disabled={save.busy}
-          requirements={['At least 12 characters.']}
-        />
+        <div className="space-y-6">
+          <NewPasswordFields
+            password={password}
+            confirmation={confirmation}
+            onPasswordChange={setPassword}
+            onConfirmationChange={setConfirmation}
+            errors={errors}
+            disabled={save.busy}
+            requirements={['At least 12 characters.']}
+          />
+          <PasswordField
+            label="Your password"
+            description="To confirm it's you."
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            error={errors.currentPassword}
+            disabled={save.busy}
+            autoFocus={false}
+            required={false}
+          />
+        </div>
       </DialogBody>
       <DialogActions>
         <Button plain onClick={onClose} disabled={save.busy}>

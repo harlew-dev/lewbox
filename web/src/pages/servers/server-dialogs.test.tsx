@@ -205,9 +205,15 @@ describe('AddNodeDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Create an access token' }))
     expect(await screen.findByLabelText('Name')).toHaveValue('Node node-2')
+    fireEvent.change(screen.getByLabelText('Current password'), {
+      target: { value: 'admin-password-1' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Create token' }))
     expect(await screen.findByText('Copy your access token')).toBeInTheDocument()
-    expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ name: 'Node node-2' })
+    expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({
+      name: 'Node node-2',
+      current_password: 'admin-password-1',
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByText('Copy your access token')).not.toBeInTheDocument())

@@ -392,7 +392,7 @@ func TestAddClusterAdminIP(t *testing.T) {
 	req := clusterRequest(clusterFake, "eu-west")
 	req.AdminURL, req.EndpointURL = unresolved, unresolved
 	_, err = s.AddCluster(localCtx(), req)
-	wantCode(t, err, CodePrecondition)
+	wantCode(t, err, CodeUnavailable)
 
 	req.AdminIP = "127.0.0.1"
 	detail, err := s.AddCluster(localCtx(), req)

@@ -90,7 +90,7 @@ func TestCreateDNSProfileFailures(t *testing.T) {
 	_, err := s.CreateDNSProfile(localCtx(), CreateDNSProfileRequest{
 		Name: "cf-eu", Zone: "example.com", APIToken: "wrong-token",
 	})
-	se := wantCode(t, err, CodePrecondition)
+	se := wantCode(t, err, CodeInvalid)
 	details, ok := se.Details.(map[string]string)
 	if !ok || details["step"] != "zone" {
 		t.Errorf("details = %v", se.Details)
@@ -102,7 +102,7 @@ func TestCreateDNSProfileFailures(t *testing.T) {
 	_, err = s.CreateDNSProfile(localCtx(), CreateDNSProfileRequest{
 		Name: "cf-eu", Zone: "missing.example", APIToken: dnsTestToken,
 	})
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeInvalid)
 	details, _ = se.Details.(map[string]string)
 	if details["step"] != "zone" || !strings.Contains(se.Message, "not found with this token") {
 		t.Errorf("error = %v", se)
@@ -112,7 +112,7 @@ func TestCreateDNSProfileFailures(t *testing.T) {
 	_, err = s.CreateDNSProfile(localCtx(), CreateDNSProfileRequest{
 		Name: "cf-eu", Zone: "example.com", APIToken: dnsTestToken,
 	})
-	se = wantCode(t, err, CodePrecondition)
+	se = wantCode(t, err, CodeUnavailable)
 	details, _ = se.Details.(map[string]string)
 	if details["step"] != "write" || !strings.Contains(se.Message, "can read the zone but not edit its records") {
 		t.Errorf("error = %v", se)
@@ -177,7 +177,7 @@ func TestUpdateDNSProfile(t *testing.T) {
 	if _, err := s.UpdateDNSProfile(localCtx(), "cf-west", UpdateDNSProfileRequest{APIToken: &token}); err == nil {
 		t.Fatal("a token the fake does not accept was saved")
 	} else {
-		wantCode(t, err, CodePrecondition)
+		wantCode(t, err, CodeInvalid)
 	}
 	fake.Token = token
 	updated, err = s.UpdateDNSProfile(localCtx(), "cf-west", UpdateDNSProfileRequest{APIToken: &token})

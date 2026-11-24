@@ -100,7 +100,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 	}
 
 	// An API key sees its own workspace only.
-	key, err := f.s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend"})
+	key, err := f.s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend", CurrentPassword: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}

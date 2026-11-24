@@ -62,14 +62,14 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	now := s.now()
 	from, err := parseUsageTime(req.From, now.Add(-30*24*time.Hour))
 	if err != nil {
-		return Usage{}, invalid("from: %s", err)
+		return Usage{}, invalidField("from", "from must be a date such as 2026-01-01 or a time such as 2026-01-01T12:00:00Z")
 	}
 	to, err := parseUsageTime(req.To, now)
 	if err != nil {
-		return Usage{}, invalid("to: %s", err)
+		return Usage{}, invalidField("to", "to must be a date such as 2026-01-01 or a time such as 2026-01-01T12:00:00Z")
 	}
 	if !to.After(from) {
-		return Usage{}, invalid("to must be after from")
+		return Usage{}, invalidField("to", "to must be after from")
 	}
 	if to.Sub(from) > 400*24*time.Hour {
 		return Usage{}, invalid("the range must be at most 400 days")
@@ -84,7 +84,7 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	case "hour":
 		step = time.Hour
 	default:
-		return Usage{}, invalid("granularity must be hour or day")
+		return Usage{}, invalidField("granularity", "granularity must be hour or day")
 	}
 
 	start := from.UTC().Truncate(step)

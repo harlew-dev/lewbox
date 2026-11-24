@@ -85,6 +85,9 @@ ON CONFLICT(org_id, cluster_id, hour) DO UPDATE SET
     memory_mb_seconds = memory_mb_seconds + excluded.memory_mb_seconds,
     peak_sandboxes = max(peak_sandboxes, excluded.peak_sandboxes);
 
+-- name: DeleteUsageBefore :execrows
+DELETE FROM usage_hourly WHERE hour < ?;
+
 -- name: ListUsageHourly :many
 SELECT * FROM usage_hourly
 WHERE (sqlc.arg(org_id) = '' OR org_id = sqlc.arg(org_id))

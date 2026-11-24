@@ -34,7 +34,7 @@ func newSnapshotCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
-		Short:   "Delete a snapshot (DELETE /v0/snapshots/{name})",
+		Short:   "Delete a snapshot (DELETE /v0/snapshots/{snapshot})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete snapshot %q?", args[0])); err != nil {

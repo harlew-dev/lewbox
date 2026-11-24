@@ -68,6 +68,9 @@ describe('workspace settings', () => {
     expect(await screen.findByText(customerUser.email)).toBeInTheDocument()
 
     await openKeys()
+    fireEvent.change(screen.getByLabelText('Current password'), {
+      target: { value: 'customer-password-1' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(await screen.findByText(token)).toBeInTheDocument()
@@ -75,7 +78,44 @@ describe('workspace settings', () => {
     expect(screen.getByRole('button', { name: 'Copy management key' })).toBeInTheDocument()
     const create = calls.find((call) => call.method === 'POST' && call.url === '/v0/admin-keys')
     expect(create?.org).toBe('acme')
-    expect(create?.body).toEqual({ name: 'backend', expires_in: '90d' })
+    expect(create?.body).toEqual({
+      name: 'backend',
+      expires_in: '90d',
+      current_password: 'customer-password-1',
+    })
+  })
+
+  it('requires the current password to create a management key', async () => {
+    const calls = stubSettings()
+    renderApp('/settings/api-keys')
+
+    await openKeys()
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
+
+    expect(await screen.findByText('Enter your current password.')).toBeInTheDocument()
+    expect(calls.some((call) => call.method === 'POST')).toBe(false)
+  })
+
+  it('shows a wrong current password on the field when creating a management key', async () => {
+    stubSettings({
+      'POST /v0/admin-keys': () =>
+        json(400, {
+          error: {
+            code: 'invalid_request',
+            message: 'current password is wrong',
+            details: { field: 'current_password' },
+          },
+        }),
+    })
+    renderApp('/settings/api-keys')
+
+    await openKeys()
+    fireEvent.change(screen.getByLabelText('Current password'), {
+      target: { value: 'wrong-password' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
+
+    expect(await screen.findByText('current password is wrong')).toBeInTheDocument()
   })
 
   it('sends an empty expiry for a management key that never expires', async () => {
@@ -88,10 +128,17 @@ describe('workspace settings', () => {
     fireEvent.pointerDown(never)
     fireEvent.click(never)
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Expires' })).toHaveTextContent('Never'))
+    fireEvent.change(screen.getByLabelText('Current password'), {
+      target: { value: 'customer-password-1' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(await screen.findByText(token)).toBeInTheDocument()
-    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({ name: 'backend', expires_in: '' })
+    expect(calls.find((call) => call.method === 'POST')?.body).toEqual({
+      name: 'backend',
+      expires_in: '',
+      current_password: 'customer-password-1',
+    })
   })
 
   it('renames the workspace on the General tab', async () => {

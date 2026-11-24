@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/harlew-dev/lewbox/internal/backend"
+	"github.com/harlew-dev/lewbox/internal/cliconfig"
 	"github.com/harlew-dev/lewbox/internal/service"
 )
 
@@ -26,9 +27,10 @@ mode, which has no account of its own, --user is required.`,
 	}
 
 	var (
-		user         string
-		expiresIn    string
-		neverExpires bool
+		user                string
+		expiresIn           string
+		neverExpires        bool
+		currentPasswordFile string
 	)
 	create := &cobra.Command{
 		Use:   "create <name>",
@@ -42,13 +44,14 @@ mode, which has no account of its own, --user is required.`,
 			if neverExpires {
 				lifetime = ""
 			}
-			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: args[0], ExpiresIn: lifetime, User: user})
+			return a.callWithFreshProof(currentPasswordFile, func(ctx context.Context, b backend.Backend, _ cliconfig.Selection, current string, args []string) (any, error) {
+				return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: args[0], ExpiresIn: lifetime, User: user, CurrentPassword: current})
 			})(cmd, args)
 		},
 	}
 	create.Flags().StringVar(&expiresIn, "expires-in", "90d", "how long the token works, such as 30d or 720h")
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the token works until it is revoked")
+	create.Flags().StringVar(&currentPasswordFile, "current-password-file", "", "read your current password from this file's first line (remote backend; asked on a terminal)")
 
 	list := &cobra.Command{
 		Use:     "list",
@@ -63,7 +66,7 @@ mode, which has no account of its own, --user is required.`,
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Revoke an access token; it stops working at once (DELETE /v0/access-tokens/{id|name})",
+		Short:   "Revoke an access token; it stops working at once (DELETE /v0/access-tokens/{access_token})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Revoke access token %q? Anything using it stops working.", args[0])); err != nil {

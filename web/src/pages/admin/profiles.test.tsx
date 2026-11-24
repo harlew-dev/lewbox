@@ -56,7 +56,7 @@ describe('DNS profiles tab', () => {
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/dns-profiles': () => json(200, { data: [] }),
       'POST /v0/dns-profiles': () =>
-        json(412, { error: { code: 'precondition_failed', message: 'DNS profile test failed: no edit access', details: { step: 'write' } } }),
+        json(422, { error: { code: 'invalid_request', message: 'DNS profile test failed: no edit access', details: { step: 'write' } } }),
     })
     renderApp('/admin/settings?tab=dns')
     fireEvent.click((await screen.findAllByRole('button', { name: 'New DNS profile' }))[0]!)
@@ -92,13 +92,13 @@ describe('DNS profiles tab', () => {
     const calls = stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/dns-profiles': () => json(200, { data: [dns] }),
-      'POST /v0/dns-profiles/cf-prod/test': () => json(200, dns),
+      'POST /v0/dns-profiles/cf-prod/check': () => json(200, dns),
       'DELETE /v0/dns-profiles/cf-prod': () =>
         json(409, { error: { code: 'conflict', message: 'DNS profile cf-prod is used by 2 clusters', details: null } }),
     })
     renderApp('/admin/settings?tab=dns')
     fireEvent.click(await screen.findByRole('button', { name: 'Test cf-prod' }))
-    await waitFor(() => expect(calls.some((call) => call.url === '/v0/dns-profiles/cf-prod/test')).toBe(true))
+    await waitFor(() => expect(calls.some((call) => call.url === '/v0/dns-profiles/cf-prod/check')).toBe(true))
     fireEvent.click(screen.getByRole('button', { name: 'Delete cf-prod' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete profile' }))
     expect(await screen.findByText('DNS profile cf-prod is used by 2 clusters')).toBeInTheDocument()
@@ -141,7 +141,7 @@ describe('Storage profiles tab', () => {
       'GET /v0/storage-profiles': () => json(200, { data: [storage] }),
       'PATCH /v0/storage-profiles/s3-main': () =>
         fail
-          ? json(412, { error: { code: 'precondition_failed', message: 'storage profile test failed: access denied', details: { step: 'list' } } })
+          ? json(422, { error: { code: 'invalid_request', message: 'storage profile test failed: access denied', details: { step: 'list' } } })
           : json(200, storage),
     })
     renderApp('/admin/settings?tab=storage')

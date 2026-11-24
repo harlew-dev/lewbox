@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -229,6 +230,27 @@ func TestSamplePruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	user := createUser(t, s, "prune@example.com", false)
+	expiredToken, liveToken := "expired-session", "live-session"
+	for _, session := range []db.CreateSessionParams{
+		{ID: uuid.NewV7().String(), UserID: user.ID, TokenHash: expiredToken,
+			CreatedAt: clock.Add(-8 * 24 * time.Hour), ExpiresAt: clock.Add(-time.Hour), LastUsedAt: clock.Add(-8 * 24 * time.Hour), Kind: "web"},
+		{ID: uuid.NewV7().String(), UserID: user.ID, TokenHash: liveToken,
+			CreatedAt: clock, ExpiresAt: clock.Add(time.Hour), LastUsedAt: clock, Kind: "web"},
+	} {
+		if err := s.q.CreateSession(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldUsageHour := clock.Add(-usageRetention - time.Hour)
+	for _, hour := range []time.Time{oldUsageHour, clock.Add(-time.Hour)} {
+		if err := s.q.UpsertUsageHourly(context.Background(), db.UpsertUsageHourlyParams{
+			OrgID: "org-prune", ClusterID: "cluster-prune", Hour: hour, SandboxSeconds: 60,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if _, err := s.CheckCluster(localCtx(), "eu-west"); err != nil {
 		t.Fatal(err)
 	}
@@ -244,6 +266,22 @@ func TestSamplePruning(t *testing.T) {
 		if sample.At.Equal(old) {
 			t.Error("an old node sample survived the prune")
 		}
+	}
+
+	if _, err := s.q.GetSessionByTokenHash(context.Background(), expiredToken); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("an expired session survived the prune: %v", err)
+	}
+	if _, err := s.q.GetSessionByTokenHash(context.Background(), liveToken); err != nil {
+		t.Errorf("a live session was pruned: %v", err)
+	}
+	usage, err := s.q.ListUsageHourly(context.Background(), db.ListUsageHourlyParams{
+		OrgID: "org-prune", FromHour: oldUsageHour.Add(-time.Hour), ToHour: clock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(usage) != 1 || !usage[0].Hour.Equal(clock.Add(-time.Hour)) {
+		t.Errorf("usage after prune = %+v; want only the recent hour", usage)
 	}
 
 	// Pruning is once a day: a stale row written after it stays until tomorrow.

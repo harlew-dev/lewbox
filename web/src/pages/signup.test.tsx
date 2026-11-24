@@ -10,14 +10,14 @@ function instance(signup: string) {
 
 describe('sign-up', () => {
   it('hides the sign-up link when sign-up is closed', async () => {
-    stubAPI({ 'GET /v0/me': signedOut, 'GET /v0/instance': instance('closed') })
+    stubAPI({ 'GET /v0/profile': signedOut, 'GET /v0/instance': instance('closed') })
     renderApp('/login')
     expect(await screen.findByRole('heading', { name: 'Sign in to Acme Cloud' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Create an account' })).toBeNull()
   })
 
   it('links to sign-up when it is open', async () => {
-    stubAPI({ 'GET /v0/me': signedOut, 'GET /v0/instance': instance('approval') })
+    stubAPI({ 'GET /v0/profile': signedOut, 'GET /v0/instance': instance('approval') })
     renderApp('/login')
     expect(await screen.findByRole('link', { name: 'Create an account' })).toHaveAttribute('href', '/signup')
   })
@@ -25,7 +25,7 @@ describe('sign-up', () => {
   it('creates only the account and goes on to onboarding', async () => {
     let signedUp = false
     const calls = stubAPI({
-      'GET /v0/me': () =>
+      'GET /v0/profile': () =>
         signedUp
           ? json(200, { user: customerUser, organizations: [], via: 'session' })
           : signedOut(),
@@ -48,7 +48,7 @@ describe('sign-up', () => {
   })
 
   it('says so when sign-up is closed', async () => {
-    stubAPI({ 'GET /v0/me': signedOut, 'GET /v0/instance': instance('closed') })
+    stubAPI({ 'GET /v0/profile': signedOut, 'GET /v0/instance': instance('closed') })
     renderApp('/signup')
     expect(await screen.findByRole('heading', { name: 'Sign-up is closed' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Email')).toBeNull()

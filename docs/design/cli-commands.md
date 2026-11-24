@@ -126,7 +126,7 @@ Details in [aerolvm.md](aerolvm-integration.md).
 | `lewbox login [<url>] [--email <e> --password-stdin] [--token[=<t>]]` | Signs in to a Lewbox server and saves a context. It prompts for email and password. `--token` saves an access token (`lbp_…`) or admin key (`lba_…`) instead, read from stdin or a no-echo prompt (`--key-stdin` is the old name). A browser and device-code flow comes later | `POST /v0/auth/login` | ✅ |
 | `lewbox token create\|list\|revoke [--user <email>]` | An account's access tokens (D38) | `/v0/access-tokens` | ✅ |
 | `lewbox logout [--all]` | Ends the session and deletes the saved token, for the current context (or all of them) | `POST /v0/auth/logout` | ✅ |
-| `lewbox whoami` | Account, whether it is an instance admin, how you're signed in (session or local) and the context. Organizations and roles come later | `GET /v0/me` | ✅ |
+| `lewbox whoami` | Account, whether it is an instance admin, how you're signed in (session or local) and the context. Organizations and roles come later | `GET /v0/profile` | ✅ |
 | `lewbox context list\|use <name>\|remove <name>` | One context per Lewbox server you use (for example `local`, `prod`). `--context` and `LEWBOX_CONTEXT` choose one for a single command | local only | ✅ |
 
 ### Accounts and organizations
@@ -134,10 +134,10 @@ Details in [aerolvm.md](aerolvm-integration.md).
 | Command | What it does | API | Status |
 |---|---|---|---|
 | `lewbox user create <email> [--instance-admin] [--password-stdin]` | Creates an account; prompts for the password on a terminal. On the orchestrator host, in local mode, this is also how you create the first instance admin (or set `LEWBOX_BOOTSTRAP_ADMIN_EMAIL` and `…_PASSWORD` for `serve`). An email invite comes with SMTP | `POST /v0/users` (add to MVP §12) | ✅ |
-| `lewbox user list\|get <email\|id>` | Lists or shows accounts (instance admins; anyone can get their own) | `GET /v0/users`, `GET /v0/users/{ref}` | ✅ |
-| `lewbox user disable\|enable <email\|id>` | Blocks or allows sign-in; disabling ends the account's sessions. The last enabled instance admin can't be disabled | `POST /v0/users/{ref}/disable\|enable` | ✅ |
-| `lewbox user remove <email\|id>` | Deletes an account and its sessions. Asks to confirm; refuses the last enabled instance admin | `DELETE /v0/users/{ref}` | ✅ |
-| `lewbox user set-password <id\|email> [--password-stdin]` | Sets a password (instance admins, or yourself). Ends that account's other sessions. A reset-by-email flow comes with SMTP | `PUT /v0/users/{ref}/password` | ✅ |
+| `lewbox user list\|get <email\|id>` | Lists or shows accounts (instance admins; anyone can get their own) | `GET /v0/users`, `GET /v0/users/{user}` | ✅ |
+| `lewbox user disable\|enable <email\|id>` | Blocks or allows sign-in; disabling ends the account's sessions. The last enabled instance admin can't be disabled | `POST`/`DELETE /v0/users/{user}/suspension` | ✅ |
+| `lewbox user remove <email\|id>` | Deletes an account and its sessions. Asks to confirm; refuses the last enabled instance admin | `DELETE /v0/users/{user}` | ✅ |
+| `lewbox user set-password <id\|email> [--password-stdin]` | Sets a password (instance admins, or yourself). Ends that account's other sessions. A reset-by-email flow comes with SMTP | `PATCH /v0/users/{user}/password` | ✅ |
 | `lewbox passwd` | Changes your own password | ❓ | 📋 (use `user set-password <you>`) |
 | `lewbox org create <slug> --name <name> [--owner <email>]` | Creates an organization (instance admins). The owner defaults to you | `POST /v0/organizations` | ✅ |
 | `lewbox org list\|get\|update\|suspend\|restore <slug>` | `list --user <email>` lists an account's organizations; `update --name` renames | `GET/PATCH /v0/organizations` | ✅ |
@@ -157,14 +157,14 @@ A Lewbox cluster is one AerolVM cluster. A single machine is a one-node cluster 
 |---|---|---|---|
 | `lewbox cluster add <slug> --admin-url <url> --endpoint-url <url> --preview-domain <d> --runtime docker\|firecracker --admin-token-stdin` | Registers a cluster that already exists, and validates it (MVP §7.1) | `POST /v0/clusters` | ✅ |
 | `lewbox cluster list` | Slug, runtime, endpoint, nodes, health | `GET /v0/clusters` | ✅ |
-| `lewbox cluster get <slug>` | Everything about one cluster, including its nodes and what the last check found | `GET /v0/clusters/{id}` | ✅ |
-| `lewbox cluster check <slug>` | Runs validation now and prints each requirement from MVP §5 as ✓ or ✗, with how to fix it | `POST /v0/clusters/{id}/check` | ✅ |
-| `lewbox cluster setup <slug>` | Prints the settings each node needs: the `SB_AUDIT_EXPORT_*` snippet with this cluster's ingest URL and HMAC key, identity and TTL settings, and the create policy for its runtime | `GET /v0/clusters/{id}` | 📋 |
-| `lewbox cluster update <slug> [--endpoint-url …] [--admin-url …] [--admin-token-stdin] [--name …]` | Changes endpoints, or rotates the admin token | `PATCH /v0/clusters/{id}` | 📋 |
-| `lewbox cluster remove <slug>` | Unregisters the cluster. It refuses while workspaces are entitled to it, unless you pass `--force`. Nothing on the cluster is changed | `DELETE /v0/clusters/{id}` | ✅ (no `--force` check for workspaces yet: there are none) |
-| `lewbox cluster join-command <slug> [--role worker\|ingress\|server\|mixed] [--ttl 2h] [--reusable]` | Prints the `install.sh … join` line for a machine that won't run the Lewbox CLI. It wraps `aerolvm join-command` | `POST /v0/clusters/{id}/join-tokens` | ✅ |
-| `lewbox cluster upgrade <slug> [--version <tag>] [--batch <n\|n%>] [--pause-after <n>]` | Rolling AerolVM upgrade of every node. The default is the version this Lewbox release is tested with | `POST /v0/clusters/{id}/upgrade` | 📋 |
-| `lewbox cluster upgrade status\|pause\|resume\|rollback <slug>` | | `/v0/clusters/{id}/upgrade` | 📋 |
+| `lewbox cluster get <slug>` | Everything about one cluster, including its nodes and what the last check found | `GET /v0/clusters/{cluster}` | ✅ |
+| `lewbox cluster check <slug>` | Runs validation now and prints each requirement from MVP §5 as ✓ or ✗, with how to fix it | `POST /v0/clusters/{cluster}/check` | ✅ |
+| `lewbox cluster setup <slug>` | Prints the settings each node needs: the `SB_AUDIT_EXPORT_*` snippet with this cluster's ingest URL and HMAC key, identity and TTL settings, and the create policy for its runtime | `GET /v0/clusters/{cluster}` | 📋 |
+| `lewbox cluster update <slug> [--endpoint-url …] [--admin-url …] [--admin-token-stdin] [--name …]` | Changes endpoints, or rotates the admin token | `PATCH /v0/clusters/{cluster}` | 📋 |
+| `lewbox cluster remove <slug>` | Unregisters the cluster. It refuses while workspaces are entitled to it, unless you pass `--force`. Nothing on the cluster is changed | `DELETE /v0/clusters/{cluster}` | ✅ (no `--force` check for workspaces yet: there are none) |
+| `lewbox cluster join-command <slug> [--role worker\|ingress\|server\|mixed] [--ttl 2h] [--reusable]` | Prints the `install.sh … join` line for a machine that won't run the Lewbox CLI. It wraps `aerolvm join-command` | `POST /v0/clusters/{cluster}/join-tokens` | ✅ |
+| `lewbox cluster upgrade <slug> [--version <tag>] [--batch <n\|n%>] [--pause-after <n>]` | Rolling AerolVM upgrade of every node. The default is the version this Lewbox release is tested with | `POST /v0/clusters/{cluster}/upgrade` | 📋 |
+| `lewbox cluster upgrade status\|pause\|resume\|rollback <slug>` | | `/v0/clusters/{cluster}/upgrade` | 📋 |
 
 ### Nodes
 

@@ -42,7 +42,7 @@ func newSandboxCmd(a *app) *cobra.Command {
 	var stopRegion string
 	stop := &cobra.Command{
 		Use:   "stop <id>",
-		Short: "Stop a sandbox (POST /v0/sandboxes/{id}/stop)",
+		Short: "Stop a sandbox (POST /v0/sandboxes/{sandbox}/stop)",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.StopSandbox(ctx, args[0], service.RegionScope{Region: stopRegion, Org: a.org})
@@ -54,7 +54,7 @@ func newSandboxCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
-		Short:   "Delete a sandbox (DELETE /v0/sandboxes/{id})",
+		Short:   "Delete a sandbox (DELETE /v0/sandboxes/{sandbox})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete sandbox %q?", args[0])); err != nil {

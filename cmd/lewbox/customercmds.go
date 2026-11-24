@@ -178,7 +178,7 @@ func newSubscriptionCmd(a *app) *cobra.Command {
 	var setPlan, setSandboxes, setVcpus, setMemory string
 	set := &cobra.Command{
 		Use:   "set <region>",
-		Short: "Create or change a subscription (PUT /v0/subscriptions/{region})",
+		Short: "Create or change a subscription (PATCH /v0/subscriptions/{region})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !cmd.Flags().Changed("plan") {
@@ -279,7 +279,7 @@ func newPlanCmd(a *app) *cobra.Command {
 
 	show := &cobra.Command{
 		Use:   "show <id|slug>",
-		Short: "Show a plan (GET /v0/plans/{id|slug})",
+		Short: "Show a plan (GET /v0/plans/{plan})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 			return b.GetPlan(ctx, args[0])
@@ -289,7 +289,7 @@ func newPlanCmd(a *app) *cobra.Command {
 	var updateName, updateSandboxes, updateVcpus, updateMemory string
 	update := &cobra.Command{
 		Use:   "update <id|slug>",
-		Short: "Change a plan (PATCH /v0/plans/{id|slug})",
+		Short: "Change a plan (PATCH /v0/plans/{plan})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdatePlanRequest{}
@@ -322,7 +322,7 @@ func newPlanCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "delete <id|slug>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Delete a plan no organization uses (DELETE /v0/plans/{id|slug})",
+		Short:   "Delete a plan no organization uses (DELETE /v0/plans/{plan})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Delete plan %q?", args[0])); err != nil {

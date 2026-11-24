@@ -18,6 +18,9 @@ services:
         VERSION: ${LEWBOX_VERSION:-dev}
     image: lewbox:local
     restart: unless-stopped
+    # The server drains for 10 s on shutdown; Docker's default 10 s would
+    # kill it mid-drain.
+    stop_grace_period: 30s
     ports:
       - "${LEWBOX_HTTP_PORT:-8080}:8080"
     volumes:

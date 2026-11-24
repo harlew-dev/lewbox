@@ -274,10 +274,10 @@ func TestNodeErrors(t *testing.T) {
 		status int
 	}{
 		{"duplicate", []string{"node", "add", "eu-west-1", "--url", "https://b.example"}, `{"name":"eu-west-1","url":"https://b.example"}`, 409},
-		{"bad name", []string{"node", "add", "EU_West", "--url", "https://b.example"}, `{"name":"EU_West","url":"https://b.example"}`, 400},
-		{"uuid name", []string{"node", "add", "0192f0c4a3b27c6d8e9f0a1b2c3d4e5f", "--url", "https://b.example"}, `{"name":"0192f0c4a3b27c6d8e9f0a1b2c3d4e5f","url":"https://b.example"}`, 400},
-		{"bad url", []string{"node", "add", "b", "--url", "b.example:8443"}, `{"name":"b","url":"b.example:8443"}`, 400},
-		{"url with query", []string{"node", "add", "b", "--url", "https://b.example?x=1"}, `{"name":"b","url":"https://b.example?x=1"}`, 400},
+		{"bad name", []string{"node", "add", "EU_West", "--url", "https://b.example"}, `{"name":"EU_West","url":"https://b.example"}`, 422},
+		{"uuid name", []string{"node", "add", "0192f0c4a3b27c6d8e9f0a1b2c3d4e5f", "--url", "https://b.example"}, `{"name":"0192f0c4a3b27c6d8e9f0a1b2c3d4e5f","url":"https://b.example"}`, 422},
+		{"bad url", []string{"node", "add", "b", "--url", "b.example:8443"}, `{"name":"b","url":"b.example:8443"}`, 422},
+		{"url with query", []string{"node", "add", "b", "--url", "https://b.example?x=1"}, `{"name":"b","url":"https://b.example?x=1"}`, 422},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestNodeErrors(t *testing.T) {
 
 	t.Run("unknown field", func(t *testing.T) {
 		status, body := e.http("POST", "/v0/nodes", `{"name":"b","url":"https://b.example","region":"eu"}`)
-		if status != 400 || !strings.Contains(body, `"code":"invalid_request"`) {
+		if status != 400 || !strings.Contains(body, `"code":"bad_request"`) {
 			t.Errorf("status %d body %s", status, body)
 		}
 	})
@@ -370,8 +370,8 @@ func TestClusterSet(t *testing.T) {
 	// the same way by both entry points.
 	e.sameError([]string{"cluster", "set", "eu-west", "--domain", "eu.example.com", "--dns-profile", "cf-prod", "--dns-records", "sometimes"},
 		"PATCH", "/v0/clusters/eu-west",
-		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"sometimes"}`, 400)
-	if status, body := e.http("PATCH", "/v0/clusters/eu-west", `{}`); status != 400 || !strings.Contains(body, "nothing to change") {
+		`{"domain":"eu.example.com","dns_profile":"cf-prod","dns_records":"sometimes"}`, 422)
+	if status, body := e.http("PATCH", "/v0/clusters/eu-west", `{}`); status != 422 || !strings.Contains(body, "nothing to change") {
 		t.Errorf("empty update: status %d body %s", status, body)
 	}
 }
@@ -440,10 +440,10 @@ func TestClusterHTTP(t *testing.T) {
 	if status, out := e.http("POST", "/v0/clusters/eu-west/check", ""); status != http.StatusOK {
 		t.Fatalf("POST check: status %d body %s", status, out)
 	}
-	if status, out := e.http("GET", "/v0/clusters/resolve?ref=cluster/eu-west", ""); status != http.StatusOK {
+	if status, out := e.http("GET", "/v0/clusters/resolve?cluster=cluster/eu-west", ""); status != http.StatusOK {
 		t.Fatalf("GET resolve cluster/x: status %d body %s", status, out)
 	}
-	if status, out := e.http("GET", "/v0/clusters/resolve?ref=node/node-a", ""); status != http.StatusOK {
+	if status, out := e.http("GET", "/v0/clusters/resolve?cluster=node/node-a", ""); status != http.StatusOK {
 		t.Fatalf("GET resolve node/x: status %d body %s", status, out)
 	}
 
@@ -1063,9 +1063,9 @@ func TestMonitoring(t *testing.T) {
 	}
 
 	e.sameError([]string{"cluster", "metrics", "eu-west", "--range", "1h"},
-		"GET", "/v0/clusters/eu-west/metrics?range=1h", "", 400)
+		"GET", "/v0/clusters/eu-west/metrics?range=1h", "", 422)
 	e.sameError([]string{"cluster", "health", "eu-west", "--days", "91"},
-		"GET", "/v0/clusters/eu-west/health?days=91", "", 400)
+		"GET", "/v0/clusters/eu-west/health?days=91", "", 422)
 }
 
 func TestPlansSettingsAndSignup(t *testing.T) {
@@ -1099,7 +1099,7 @@ func TestPlansSettingsAndSignup(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &login); err != nil {
 		t.Fatal(err)
 	}
-	status, body = e.httpWith("GET", "/v0/me", "", login.Token)
+	status, body = e.httpWith("GET", "/v0/profile", "", login.Token)
 	var me service.Me
 	if err := json.Unmarshal([]byte(body), &me); err != nil || status != http.StatusOK || len(me.Organizations) != 0 || me.Organization != nil {
 		t.Fatalf("me after signup: status %d body %s (%v)", status, body, err)
@@ -1203,7 +1203,7 @@ func TestSubscriptions(t *testing.T) {
 	}
 
 	created := e.sameOrgBody("acme", []string{"subscription", "set", "eu-west", "--plan", "free", "--max-sandboxes", "1", "--org", "acme"},
-		"PUT", "/v0/subscriptions/eu-west", `{"plan":"free","max_sandboxes":1}`, 200)
+		"PATCH", "/v0/subscriptions/eu-west", `{"plan":"free","max_sandboxes":1}`, 200)
 	e.sameOrg("acme", []string{"subscription", "list", "--org", "acme"}, "GET", "/v0/subscriptions", 200)
 	e.sameOrg("acme", []string{"limits", "--org", "acme"}, "GET", "/v0/limits", 200)
 	regions := e.sameOrg("acme", []string{"region", "list", "--org", "acme"}, "GET", "/v0/regions", 200)
@@ -1304,7 +1304,7 @@ func TestDNSProfiles(t *testing.T) {
 	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
 		t.Errorf("failed test = %s", tested)
 	}
-	status, body = e.http("POST", "/v0/dns-profiles/cf-us/test", "")
+	status, body = e.http("POST", "/v0/dns-profiles/cf-us/check", "")
 	if status != http.StatusOK {
 		t.Fatalf("POST dns-profile test: status %d body %s", status, body)
 	}
@@ -1337,8 +1337,8 @@ func TestDNSProfiles(t *testing.T) {
 	}
 	status, body = e.http("POST", "/v0/dns-profiles",
 		`{"name":"cf-bad","zone":"missing.example","api_token":"`+token+`"}`)
-	if status != http.StatusPreconditionFailed || badErr != body {
-		t.Errorf("bad zone error = %d %q, want 412 %q", status, badErr, body)
+	if status != http.StatusUnprocessableEntity || badErr != body {
+		t.Errorf("bad zone error = %d %q, want 422 %q", status, badErr, body)
 	}
 }
 
@@ -1421,7 +1421,7 @@ func TestStorageProfiles(t *testing.T) {
 	if !strings.Contains(tested, `"test_error"`) || strings.Contains(tested, `"test_error":""`) {
 		t.Errorf("failed test = %s", tested)
 	}
-	status, body = e.http("POST", "/v0/storage-profiles/backups-2/test", "")
+	status, body = e.http("POST", "/v0/storage-profiles/backups-2/check", "")
 	if status != http.StatusOK {
 		t.Fatalf("POST storage-profile test: status %d body %s", status, body)
 	}
@@ -1457,8 +1457,8 @@ func TestStorageProfiles(t *testing.T) {
 	status, body = e.http("POST", "/v0/storage-profiles",
 		`{"name":"backups-bad","endpoint":"`+fake.URL+`","bucket":"missing","access_key_id":"`+
 			fake.AccessKeyID+`","secret_access_key":"`+secret+`"}`)
-	if status != http.StatusPreconditionFailed || badErr != body {
-		t.Errorf("missing bucket error = %d %q, want 412 %q", status, badErr, body)
+	if status != http.StatusUnprocessableEntity || badErr != body {
+		t.Errorf("missing bucket error = %d %q, want 422 %q", status, badErr, body)
 	}
 }
 
@@ -1608,9 +1608,82 @@ func TestAccessTokenParity(t *testing.T) {
 	e.same([]string{"token", "list", "--user", adminEmail}, "GET", "/v0/access-tokens", "", 200)
 }
 
+func TestFreshProofCLI(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if _, errOut, code := e.cli("org", "create", "acme"); code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+	if _, errOut, code := e.cliIn("second-password-1\n", "user", "create", "second@example.com", "--password-stdin"); code != 0 {
+		t.Fatalf("user create: %s", errOut)
+	}
+
+	// Local mode owns the box and needs no proof, so the flag is ignored.
+	if _, errOut, code := e.cli("token", "create", "local", "--user", adminEmail, "--current-password-file", "/does/not/exist"); code != 0 {
+		t.Errorf("local token create: exit %d stderr %s", code, errOut)
+	}
+
+	// Remote: the signed-in session, with no terminal.
+	t.Setenv("LEWBOX_API_URL", e.srv.URL)
+	t.Setenv("LEWBOX_TOKEN", e.token)
+	remote := func(input string, args ...string) (string, string, int) {
+		var stdout, stderr bytes.Buffer
+		code := runWithInput(context.Background(), append([]string{"--json"}, args...), strings.NewReader(input), &stdout, &stderr)
+		return stdout.String(), stderr.String(), code
+	}
+
+	if _, errOut, code := remote("", "token", "create", "ci"); code != 2 || !strings.Contains(errOut, "--current-password-file") {
+		t.Errorf("token create without a terminal or file: exit %d stderr %s", code, errOut)
+	}
+
+	wrong := filepath.Join(t.TempDir(), "wrong")
+	if err := os.WriteFile(wrong, []byte("not-the-password\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := remote("", "token", "create", "ci", "--current-password-file", wrong); code != 1 || !strings.Contains(errOut, `"field":"current_password"`) {
+		t.Errorf("token create with the wrong password: exit %d stderr %s", code, errOut)
+	}
+
+	right := filepath.Join(t.TempDir(), "right")
+	if err := os.WriteFile(right, []byte(adminPassword+"\nextra\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, code := remote("", "token", "create", "ci", "--current-password-file", right)
+	if code != 0 {
+		t.Fatalf("token create: exit %d stderr %s", code, errOut)
+	}
+	var token service.NewAccessToken
+	if err := json.Unmarshal([]byte(out), &token); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(token.Token, "lbp_") {
+		t.Errorf("token = %+v", token)
+	}
+
+	out, errOut, code = remote("", "admin-key", "create", "backend", "--org", "acme", "--current-password-file", right)
+	if code != 0 {
+		t.Fatalf("admin-key create: exit %d stderr %s", code, errOut)
+	}
+	var key service.NewAdminKey
+	if err := json.Unmarshal([]byte(out), &key); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(key.Token, "lba_") {
+		t.Errorf("admin key = %+v", key)
+	}
+
+	if _, errOut, code := remote("new-second-password-2\n", "user", "set-password", "second@example.com", "--password-stdin", "--current-password-file", right); code != 0 {
+		t.Errorf("set-password: exit %d stderr %s", code, errOut)
+	}
+}
+
 func TestLoginWithAccessToken(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	current := filepath.Join(t.TempDir(), "current")
+	if err := os.WriteFile(current, []byte(adminPassword+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	out, errOut, code := e.cli("token", "create", "laptop", "--user", adminEmail, "--never-expires")
 	if code != 0 {
 		t.Fatalf("token create: %s", errOut)
@@ -1642,7 +1715,7 @@ func TestLoginWithAccessToken(t *testing.T) {
 	if out, errOut, code := remote("", "whoami"); code != 0 || !strings.Contains(out, `"name":"laptop"`) {
 		t.Errorf("whoami: exit %d stdout %s stderr %s", code, out, errOut)
 	}
-	if _, errOut, code := remote("", "token", "create", "more"); code != 1 || !strings.Contains(errOut, "cannot create another") {
+	if _, errOut, code := remote("", "token", "create", "more", "--current-password-file", current); code != 1 || !strings.Contains(errOut, "cannot create another") {
 		t.Errorf("token create with a token: exit %d stderr %s", code, errOut)
 	}
 
@@ -1650,7 +1723,7 @@ func TestLoginWithAccessToken(t *testing.T) {
 	if _, errOut, code := remote("", "logout"); code != 0 || !strings.Contains(errOut, "still works") {
 		t.Errorf("logout: exit %d stderr %s", code, errOut)
 	}
-	if status, _ := e.httpWith("GET", "/v0/me", "", tok.Token); status != 200 {
+	if status, _ := e.httpWith("GET", "/v0/profile", "", tok.Token); status != 200 {
 		t.Errorf("token after logout: status %d", status)
 	}
 

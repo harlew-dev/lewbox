@@ -34,7 +34,7 @@ Over HTTP, send `POST /v0/sandbox-keys` with `{"name": "laptop"}`. `region` is o
 
 **API keys** lists live keys first, then revoked ones. Revoking stops the token within a few seconds.
 
-A member can revoke only the keys they created; owners and admins can revoke any key in the workspace. Over HTTP, send `DELETE /v0/sandbox-keys/{id or name}`.
+A member can revoke only the keys they created; owners and admins can revoke any key in the workspace. Over HTTP, send `DELETE /v0/sandbox-keys/{sandbox_key}`.
 
 Keys are refused while your workspace is pending or suspended, and for a few seconds after your provider first sets up your region (try again).
 

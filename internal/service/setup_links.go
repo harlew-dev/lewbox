@@ -109,7 +109,7 @@ func (s *Service) CreateSetupLink(ctx context.Context, req CreateSetupLinkReques
 		hours = defaultSetupLinkTTL
 	}
 	if hours < minSetupLinkTTL || hours > maxSetupLinkTTL {
-		return SetupLink{}, invalid("expires_in_hours must be between %d and %d", minSetupLinkTTL, maxSetupLinkTTL)
+		return SetupLink{}, invalidField("expires_in_hours", "expires_in_hours must be between %d and %d", minSetupLinkTTL, maxSetupLinkTTL)
 	}
 	note := strings.TrimSpace(req.Note)
 	if note != "" {
@@ -176,7 +176,7 @@ func (s *Service) RevokeSetupLink(ctx context.Context, id string) (SetupLink, er
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return SetupLink{}, invalid("a setup link ID is required")
+		return SetupLink{}, badRequest("a setup link ID is required")
 	}
 	row, err := s.q.GetSetupLinkByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -321,8 +321,8 @@ func (s *Service) claimSetupLink(ctx context.Context, token, userID string, now 
 	})
 }
 
-// setupLinkInvalid is the 400 for a token that cannot be used.
-func setupLinkInvalid() error { return invalid(setupLinkInvalidMessage) }
+// setupLinkInvalid is the 422 for a token that cannot be used.
+func setupLinkInvalid() error { return invalidField("setup_token", "%s", setupLinkInvalidMessage) }
 
 // setupLinkNotFound is the 404 for the public page.
 func setupLinkNotFound() error { return notFound(setupLinkInvalidMessage) }

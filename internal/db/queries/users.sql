@@ -31,6 +31,11 @@ RETURNING *;
 -- name: SetUserPassword :exec
 UPDATE users SET password_hash = ? WHERE id = ?;
 
+-- name: RehashUserPassword :execrows
+-- Upgrades a hash only if it is still the one that was checked, so a
+-- password change that lands in between is never overwritten.
+UPDATE users SET password_hash = sqlc.arg(new_hash) WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_hash);
+
 -- name: DeleteUser :execrows
 -- Never deletes the last enabled instance admin; see SetUserDisabled.
 DELETE FROM users

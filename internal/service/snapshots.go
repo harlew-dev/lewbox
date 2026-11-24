@@ -229,10 +229,10 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return Snapshot{}, invalid("a snapshot name is required")
+		return Snapshot{}, badRequest("a snapshot name is required")
 	}
 	if isArchiveSnapshot(name) {
-		return Snapshot{}, invalid("%s is an archived sandbox: delete it with the archive API", name)
+		return Snapshot{}, invalidField("snapshot", "%s is an archived sandbox: delete it with the archive API", name)
 	}
 	var org *db.Organization
 	if strings.TrimSpace(req.Org) != "" || !p.InstanceAdmin {
@@ -266,7 +266,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 		return Snapshot{}, notFound("snapshot %q not found", name)
 	case 1:
 	default:
-		return Snapshot{}, invalid("snapshot %q exists in more than one region or workspace; choose a region", name)
+		return Snapshot{}, invalidField("region", "snapshot %q exists in more than one region or workspace; choose a region", name)
 	}
 	found := matches[0]
 

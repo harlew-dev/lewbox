@@ -155,7 +155,7 @@ func (s *Service) ReportNodeSettings(ctx context.Context, ref string, req Report
 		return Node{}, err
 	}
 	if !row.ClusterID.Valid {
-		return Node{}, precondition(nil, "node %q is in no cluster: report settings only for a node in a cluster", row.Name)
+		return Node{}, conflict("node %q is in no cluster: report settings only for a node in a cluster", row.Name)
 	}
 	storageID, storageVersion, err := s.reportedStorageProfile(ctx, req)
 	if err != nil {
@@ -195,7 +195,7 @@ func (s *Service) reportedStorageProfile(ctx context.Context, req ReportNodeSett
 		return sql.NullString{}, sql.NullInt64{}, nil
 	}
 	if req.StorageVersion < 1 {
-		return sql.NullString{}, sql.NullInt64{}, invalid("storage_version must be at least 1 when a storage profile is reported")
+		return sql.NullString{}, sql.NullInt64{}, invalidField("storage_version", "storage_version must be at least 1 when a storage profile is reported")
 	}
 	row, err := s.findStorageProfile(ctx, *req.StorageProfile)
 	if err == nil {
@@ -215,7 +215,7 @@ func (s *Service) reportedDNSProfile(ctx context.Context, req ReportNodeSettings
 		return sql.NullString{}, sql.NullInt64{}, nil
 	}
 	if req.DNSVersion < 1 {
-		return sql.NullString{}, sql.NullInt64{}, invalid("dns_version must be at least 1 when a DNS profile is reported")
+		return sql.NullString{}, sql.NullInt64{}, invalidField("dns_version", "dns_version must be at least 1 when a DNS profile is reported")
 	}
 	row, err := s.findDNSProfile(ctx, *req.DNSProfile)
 	if err == nil {

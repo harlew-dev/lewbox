@@ -128,7 +128,7 @@ func TestOrganizationVisibility(t *testing.T) {
 
 	// No organization named and not an admin key: the caller must choose.
 	_, err = s.ListMembers(f.member, "")
-	if se := wantCode(t, err, CodeInvalid); !strings.Contains(se.Message, "choose a workspace") {
+	if se := wantCode(t, err, CodeBadRequest); !strings.Contains(se.Message, "choose a workspace") {
 		t.Errorf("message = %q", se.Message)
 	}
 }
@@ -248,7 +248,7 @@ func TestAdminKeys(t *testing.T) {
 	_, err = s.CreateAdminKey(f.viewer, "acme", CreateAdminKeyRequest{Name: "ci"})
 	wantCode(t, err, CodeForbidden)
 
-	key, err := s.CreateAdminKey(f.admin, "acme", CreateAdminKeyRequest{Name: "backend", ExpiresIn: "30d"})
+	key, err := s.CreateAdminKey(f.admin, "acme", CreateAdminKeyRequest{Name: "backend", ExpiresIn: "30d", CurrentPassword: testPassword})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestAdminKeys(t *testing.T) {
 	if key.Status != keyStatusActive || key.CreatedBy != "admin@example.com" || key.ExpiresAt == nil || !key.ExpiresAt.Equal(now.Add(30*24*time.Hour)) {
 		t.Errorf("key = %+v", key.AdminKey)
 	}
-	_, err = s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend"})
+	_, err = s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend", CurrentPassword: testPassword})
 	wantCode(t, err, CodeConflict)
 	for _, bad := range []CreateAdminKeyRequest{{Name: ""}, {Name: "x", ExpiresIn: "soon"}, {Name: "x", ExpiresIn: "1m"}, {Name: "0192f0c4-a3b2-7c6d-8e9f-0a1b2c3d4e5f"}} {
 		_, err = s.CreateAdminKey(f.owner, "acme", bad)
@@ -297,7 +297,7 @@ func TestAdminKeys(t *testing.T) {
 	_, err = s.ListNodes(kctx, ListNodesRequest{})
 	wantCode(t, err, CodeForbidden)
 	_, err = s.Logout(kctx)
-	wantCode(t, err, CodeInvalid)
+	wantCode(t, err, CodeBadRequest)
 	if _, err := s.CreateOrganization(f.root, CreateOrganizationRequest{Slug: "other"}); err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestRevokeAndSuspend(t *testing.T) {
 	f := newOrgFixture(t)
 	s := f.s
 
-	never, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "never"})
+	never, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "never", CurrentPassword: testPassword})
 	if err != nil || never.ExpiresAt != nil {
 		t.Fatalf("never-expiring key = %+v, %v", never, err)
 	}
@@ -344,7 +344,7 @@ func TestRevokeAndSuspend(t *testing.T) {
 	if _, err := s.ListMembers(f.member, "acme"); err != nil {
 		t.Errorf("member read while suspended: %v", err)
 	}
-	_, err = s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "more"})
+	_, err = s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "more", CurrentPassword: testPassword})
 	wantCode(t, err, CodeForbidden)
 	active := "active"
 	if _, err := s.UpdateOrganization(f.root, "acme", UpdateOrganizationRequest{Status: &active}); err != nil {
@@ -362,7 +362,7 @@ func TestRevokeAndSuspend(t *testing.T) {
 	wantCode(t, err, CodeConflict)
 	_, err = s.RevokeAdminKey(f.admin, "acme", "never")
 	wantCode(t, err, CodeNotFound)
-	if _, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "never"}); err != nil {
+	if _, err := s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "never", CurrentPassword: testPassword}); err != nil {
 		t.Errorf("reuse a revoked key's name: %v", err)
 	}
 

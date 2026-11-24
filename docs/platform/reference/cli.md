@@ -37,7 +37,7 @@ Shows the context, mode (local or remote), API URL, health, signed-in account an
 
 ### `lewbox health`
 
-Calls `GET /v0/health`.
+Calls `GET /v0/health`. It reports ready only when the database answers too, so it fails while the orchestrator can't reach its data.
 
 ### `lewbox completion bash|zsh|fish|powershell`
 
@@ -68,9 +68,9 @@ Ends the session on the server and deletes the saved token, for the current cont
 
 The signed-in account, how you're signed in (`session`, `access_token`, `admin_key` or `local`), and the context. With an access token it also shows the token.
 
-### `lewbox token create NAME [--expires-in DUR | --never-expires] [--user EMAIL]`
+### `lewbox token create NAME [--expires-in DUR | --never-expires] [--user EMAIL] [--current-password-file PATH]`
 
-Creates an [access token](../accounts/access-tokens.md) and prints its `lbp_…` token, once. The token acts as the account, with its rights: an instance admin's token can run every operator command. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Any account can create its own tokens, but not while signed in with a token. `--user` names another account (instance admins only); it is required in local mode, which has no account. Aliases: `tokens`, `access-token`, `access-tokens`.
+Creates an [access token](../accounts/access-tokens.md) and prints its `lbp_…` token, once. The token acts as the account, with its rights: an instance admin's token can run every operator command. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Any account can create its own tokens, but not while signed in with a token. A remote orchestrator also asks for your **current password**: the CLI prompts without echo on a terminal, or reads its first line from `--current-password-file`. Local mode needs none. `--user` names another account (instance admins only); it is required in local mode, which has no account. Aliases: `tokens`, `access-token`, `access-tokens`.
 
 ### `lewbox token list [--user EMAIL]` · `lewbox token revoke ID|NAME [--user EMAIL]`
 
@@ -304,9 +304,9 @@ Creates an account. Prompts for the password twice on a terminal.
 
 Lists accounts (admins only), or shows one (admins, or the account itself).
 
-### `lewbox user set-password ID|EMAIL [--password-stdin]`
+### `lewbox user set-password ID|EMAIL [--password-stdin] [--current-password-file PATH]`
 
-Sets a password: admins for anyone, anyone for themselves. Ends that account's other sessions.
+Sets a password: admins for anyone, anyone for themselves. A remote orchestrator also asks for **your own** current password (the admin's, when an admin sets someone else's): the CLI prompts without echo on a terminal, or reads its first line from `--current-password-file`. Local mode needs none. Ends that account's other sessions.
 
 ### `lewbox user disable ID|EMAIL` · `lewbox user enable ID|EMAIL`
 
@@ -346,9 +346,9 @@ Makes it the current context's default organization for `member`, `admin-key` an
 
 The organization's members. Roles are `owner`, `admin`, `member` (default) and `viewer`. Owners and admins manage members; only owners manage owners; anyone can remove themselves. The last owner stays. `remove` asks to confirm.
 
-### `lewbox admin-key create NAME [--expires-in DUR | --never-expires]`
+### `lewbox admin-key create NAME [--expires-in DUR | --never-expires] [--current-password-file PATH]`
 
-Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Owners and admins.
+Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. A remote orchestrator also asks for your **current password**: the CLI prompts without echo on a terminal, or reads its first line from `--current-password-file`. Local mode needs none. Owners and admins.
 
 ### `lewbox admin-key list` · `lewbox admin-key revoke ID|NAME`
 
@@ -356,7 +356,7 @@ Lists the keys, revoked ones included, with their status and last use; or revoke
 
 ### `lewbox key create NAME [--region SLUG] [--expires-in DUR | --never-expires]`
 
-Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the organization's region (a workspace has one); without a plan there the key is refused with `412`. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
+Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the organization's region (a workspace has one); without a plan there the key is refused with `409`, and a pending or suspended workspace with `403`. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
 
 ### `lewbox key list` · `lewbox key revoke ID|NAME`
 

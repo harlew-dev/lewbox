@@ -46,7 +46,7 @@ func Handler(api http.Handler, dist fs.FS) http.Handler {
 
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			header.Set("Allow", "GET, HEAD")
-			writeError(w, http.StatusMethodNotAllowed, "invalid_request", "method not allowed")
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 			return
 		}
 

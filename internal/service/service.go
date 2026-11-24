@@ -12,11 +12,16 @@ import (
 
 	"github.com/harlew-dev/lewbox/internal/aerolvm"
 	"github.com/harlew-dev/lewbox/internal/db"
+	"github.com/harlew-dev/lewbox/internal/logsafe"
 	"github.com/harlew-dev/lewbox/internal/secrets"
 )
 
 // requestCallTimeout bounds one AerolVM call made while serving a request.
 const requestCallTimeout = 10 * time.Second
+
+// healthPingTimeout bounds the database check behind Health. It stays under
+// Docker's 3 s HEALTHCHECK timeout.
+const healthPingTimeout = 2 * time.Second
 
 // lifecycleCallTimeout bounds a stop, delete or create that may be slow on
 // Firecracker: a stop writes the VM's memory to disk (13 s for 512 MB on the
@@ -107,7 +112,7 @@ func (s *Service) SetSyncInterval(d time.Duration) {
 // SetLogger gives a running service the server's logger.
 func (s *Service) SetLogger(log *slog.Logger) {
 	if log != nil {
-		s.log = log
+		s.log = logsafe.WrapLogger(log)
 	}
 }
 
@@ -136,7 +141,15 @@ type HealthResponse struct {
 	OK bool `json:"ok"`
 }
 
-// Health reports whether this Lewbox instance is up.
+// Health reports whether this Lewbox instance can serve: the process is up
+// and the database answers. The Docker HEALTHCHECK, `lewbox orchestrator
+// status` and the VPS deploy gate read it as readiness, so a public route
+// must not say more than that when the database is unreachable.
 func (s *Service) Health(ctx context.Context) (HealthResponse, error) {
+	pingCtx, cancel := context.WithTimeout(ctx, healthPingTimeout)
+	defer cancel()
+	if _, err := s.q.Ping(pingCtx); err != nil {
+		return HealthResponse{OK: false}, unavailable("database not reachable")
+	}
 	return HealthResponse{OK: true}, nil
 }

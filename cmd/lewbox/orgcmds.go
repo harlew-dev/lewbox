@@ -90,7 +90,7 @@ func newOrgCmd(a *app) *cobra.Command {
 
 	get := &cobra.Command{
 		Use:   "get [<id|slug>]",
-		Short: "Show an organization (GET /v0/organizations/{id|slug})",
+		Short: "Show an organization (GET /v0/organizations/{organization})",
 		Long:  "Show an organization: the one named, or --org, the context's default, or an admin key's own (GET /v0/organization).",
 		Args:  usageArgs(cobra.MaximumNArgs(1)),
 		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
@@ -104,7 +104,7 @@ func newOrgCmd(a *app) *cobra.Command {
 	var updateName string
 	update := &cobra.Command{
 		Use:   "update <id|slug>",
-		Short: "Rename an organization (PATCH /v0/organizations/{id|slug})",
+		Short: "Rename an organization (PATCH /v0/organizations/{organization})",
 		Args:  usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := service.UpdateOrganizationRequest{}
@@ -138,10 +138,10 @@ func newOrgCmd(a *app) *cobra.Command {
 			},
 		}
 	}
-	suspend := status("suspend", "Suspend an organization: its admin keys stop working (PATCH /v0/organizations/{id|slug})",
+	suspend := status("suspend", "Suspend an organization: its admin keys stop working (PATCH /v0/organizations/{organization})",
 		"suspended", "Suspend organization %q? Its admin keys stop working.")
-	restore := status("restore", "Restore a suspended organization (PATCH /v0/organizations/{id|slug})", "active", "")
-	approve := status("approve", "Approve a pending organization (PATCH /v0/organizations/{id|slug})", "active", "")
+	restore := status("restore", "Restore a suspended organization (PATCH /v0/organizations/{organization})", "active", "")
+	approve := status("approve", "Approve a pending organization (PATCH /v0/organizations/{organization})", "active", "")
 
 	use := &cobra.Command{
 		Use:   "use <id|slug>",
@@ -208,7 +208,7 @@ func newMemberCmd(a *app) *cobra.Command {
 
 	setRole := &cobra.Command{
 		Use:   "set-role <email|id> <role>",
-		Short: "Change a member's role (PATCH /v0/members/{email|id})",
+		Short: "Change a member's role (PATCH /v0/members/{member})",
 		Args:  usageArgs(cobra.ExactArgs(2)),
 		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
 			return b.SetMemberRole(ctx, org, args[0], service.SetMemberRoleRequest{Role: args[1]})
@@ -218,7 +218,7 @@ func newMemberCmd(a *app) *cobra.Command {
 	remove := &cobra.Command{
 		Use:     "remove <email|id>",
 		Aliases: []string{"rm"},
-		Short:   "Take an account out of the organization (DELETE /v0/members/{email|id})",
+		Short:   "Take an account out of the organization (DELETE /v0/members/{member})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Remove %q from the organization?", args[0])); err != nil {
@@ -243,8 +243,9 @@ func newAdminKeyCmd(a *app) *cobra.Command {
 	}
 
 	var (
-		expiresIn    string
-		neverExpires bool
+		expiresIn           string
+		neverExpires        bool
+		currentPasswordFile string
 	)
 	create := &cobra.Command{
 		Use:   "create <name>",
@@ -258,13 +259,14 @@ func newAdminKeyCmd(a *app) *cobra.Command {
 			if neverExpires {
 				lifetime = ""
 			}
-			return a.callOrg(func(ctx context.Context, b backend.Backend, org string, args []string) (any, error) {
-				return b.CreateAdminKey(ctx, org, service.CreateAdminKeyRequest{Name: args[0], ExpiresIn: lifetime})
+			return a.callWithFreshProof(currentPasswordFile, func(ctx context.Context, b backend.Backend, sel cliconfig.Selection, current string, args []string) (any, error) {
+				return b.CreateAdminKey(ctx, a.orgFor(sel), service.CreateAdminKeyRequest{Name: args[0], ExpiresIn: lifetime, CurrentPassword: current})
 			})(cmd, args)
 		},
 	}
 	create.Flags().StringVar(&expiresIn, "expires-in", "90d", "how long the key works, such as 30d or 720h")
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the key works until it is revoked")
+	create.Flags().StringVar(&currentPasswordFile, "current-password-file", "", "read your current password from this file's first line (remote backend; asked on a terminal)")
 
 	list := &cobra.Command{
 		Use:     "list",
@@ -279,7 +281,7 @@ func newAdminKeyCmd(a *app) *cobra.Command {
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Revoke an admin key; it stops working at once (DELETE /v0/admin-keys/{id|name})",
+		Short:   "Revoke an admin key; it stops working at once (DELETE /v0/admin-keys/{admin_key})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Revoke admin key %q? Anything using it stops working.", args[0])); err != nil {
@@ -346,7 +348,7 @@ func newSandboxKeyCmd(a *app) *cobra.Command {
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",
 		Aliases: []string{"rm", "remove"},
-		Short:   "Revoke a sandbox key; it stops working within a few seconds (DELETE /v0/sandbox-keys/{id|name})",
+		Short:   "Revoke a sandbox key; it stops working within a few seconds (DELETE /v0/sandbox-keys/{sandbox_key})",
 		Args:    usageArgs(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := a.confirm(fmt.Sprintf("Revoke sandbox key %q? Anything using it stops working.", args[0])); err != nil {
