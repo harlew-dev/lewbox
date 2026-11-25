@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// These tests keep the hand-written console client in src/lib/api.ts honest
+// These tests keep the hand-written console client in src/lib/api honest
 // against the Go API. They parse both sides rather than importing one from
 // the other, because the console has no Go types and the API has no TS ones.
 
@@ -23,7 +23,7 @@ var (
 	handleFunc = regexp.MustCompile(`mux\.HandleFunc\("([A-Z]+) "\s*\+\s*Prefix\s*\+\s*"([^"]+)"`)
 	// The static docs handlers are registered with serveDocs, not HandleFunc.
 	serveDocsCall = regexp.MustCompile(`serveDocs\(mux, Prefix\+"([^"]+)"`)
-	// A statement in api.ts: return request<Type>('PATH', ...
+	// A statement in a resource module: return request<Type>('PATH', ...
 	requestCall = regexp.MustCompile(`return request<[^>\n]*>\(`)
 	// ${ref(value)} is one path segment.
 	pathRef = regexp.MustCompile(`\$\{ref\([^}]*\)\}`)
@@ -41,11 +41,13 @@ var (
 type apiCall struct {
 	method string
 	path   string
+	file   string
 	line   int
 }
 
-// TestAPIRoutesExist fails when api.ts calls a path and method that the
-// router does not serve: a typo, a renamed route, or a route that was removed.
+// TestAPIRoutesExist fails when the console client calls a path and method
+// that the router does not serve: a typo, a renamed route, or a route that
+// was removed.
 func TestAPIRoutesExist(t *testing.T) {
 	registered := registeredRoutes(t)
 	if len(registered) < 50 {
@@ -53,11 +55,11 @@ func TestAPIRoutesExist(t *testing.T) {
 	}
 	calls := apiCalls(t)
 	if len(calls) < 50 {
-		t.Fatalf("parsed only %d console API calls; has api.ts changed shape?", len(calls))
+		t.Fatalf("parsed only %d console API calls; have the API resource modules changed shape?", len(calls))
 	}
 	for _, call := range calls {
 		if _, ok := registered[call.method+" "+call.path]; !ok {
-			t.Errorf("api.ts:%d calls %s %s, but the router has no such route", call.line, call.method, call.path)
+			t.Errorf("%s:%d calls %s %s, but the router has no such route", call.file, call.line, call.method, call.path)
 		}
 	}
 }
@@ -76,49 +78,75 @@ func registeredRoutes(t *testing.T) map[string]bool {
 	for _, m := range handleFunc.FindAllStringSubmatch(string(src), -1) {
 		routes[m[1]+" "+prefix[1]+routeParam.ReplaceAllString(m[2], "{}")] = true
 	}
-	// The two books are served by serveDocs under GET prefixes. api.ts reads
-	// their nav and pages through the same request helper.
+	// The two books are served by serveDocs under GET prefixes. The console
+	// client reads their nav and pages through the same request helper.
 	for _, m := range serveDocsCall.FindAllStringSubmatch(string(src), -1) {
 		routes["GET "+prefix[1]+m[1]] = true
 	}
 	return routes
 }
 
+// apiFiles returns the resource modules of the console client: every
+// TypeScript file under src/lib/api except the shared client and the barrel.
+func apiFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir("src/lib/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".ts") {
+			continue
+		}
+		if entry.Name() == "client.ts" || entry.Name() == "index.ts" {
+			continue
+		}
+		files = append(files, filepath.Join("src/lib/api", entry.Name()))
+	}
+	if len(files) < 10 {
+		t.Fatalf("found only %d API resource modules in src/lib/api; has the client been split?", len(files))
+	}
+	return files
+}
+
 // apiCalls returns every request the console makes, with a normalized path:
 // path parameters are {}, and query strings are dropped.
 func apiCalls(t *testing.T) []apiCall {
 	t.Helper()
-	src, err := os.ReadFile("src/lib/api.ts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(src)
 	calls := make([]apiCall, 0, 80)
-	for _, loc := range requestCall.FindAllStringIndex(text, -1) {
-		args, ok := callArguments(text, loc[1]-1)
-		if !ok {
-			t.Errorf("api.ts:%d: cannot find the end of this request call", lineAt(text, loc[0]))
-			continue
+	for _, file := range apiFiles(t) {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
 		}
-		line := lineAt(text, loc[0])
-		methods := callMethods(args)
-		paths := make([]string, 0, 2)
-		if path, ok := quotedPath(args); ok {
-			if normal, ok := normalizePath(path); ok {
-				paths = append(paths, normal)
+		text := string(src)
+		for _, loc := range requestCall.FindAllStringIndex(text, -1) {
+			args, ok := callArguments(text, loc[1]-1)
+			if !ok {
+				t.Errorf("%s:%d: cannot find the end of this request call", file, lineAt(text, loc[0]))
+				continue
 			}
-		} else {
-			// A call whose path is an expression still names its paths as
-			// literals, as docsNav does with the book ternary.
-			for _, m := range literalPath.FindAllStringSubmatch(args, -1) {
-				if normal, ok := normalizePath(m[1]); ok {
+			line := lineAt(text, loc[0])
+			methods := callMethods(args)
+			paths := make([]string, 0, 2)
+			if path, ok := quotedPath(args); ok {
+				if normal, ok := normalizePath(path); ok {
 					paths = append(paths, normal)
 				}
+			} else {
+				// A call whose path is an expression still names its paths as
+				// literals, as docsNav does with the book ternary.
+				for _, m := range literalPath.FindAllStringSubmatch(args, -1) {
+					if normal, ok := normalizePath(m[1]); ok {
+						paths = append(paths, normal)
+					}
+				}
 			}
-		}
-		for _, method := range methods {
-			for _, path := range paths {
-				calls = append(calls, apiCall{method: method, path: path, line: line})
+			for _, method := range methods {
+				for _, path := range paths {
+					calls = append(calls, apiCall{method: method, path: path, file: file, line: line})
+				}
 			}
 		}
 	}
@@ -224,7 +252,6 @@ var (
 func TestErrorCodesExist(t *testing.T) {
 	known := serviceErrorCodes(t)
 	known["internal"] = true // httpapi's error for anything unexpected
-	// Minted by api.ts itself, never by the server.
 	known["unknown"] = true
 	known["invalid_response"] = true
 	if len(known) < 10 {
@@ -313,7 +340,7 @@ var renamedTypes = map[string]string{
 func TestInterfaceFieldsExist(t *testing.T) {
 	ts := parseTSInterfaces(t)
 	if len(ts) < 30 {
-		t.Fatalf("parsed only %d console interfaces; has api.ts changed shape?", len(ts))
+		t.Fatalf("parsed only %d console interfaces; have the type modules changed shape?", len(ts))
 	}
 	goTypes := parseGoTypes(t)
 	if len(goTypes) < 30 {
@@ -370,42 +397,52 @@ func allTSFields(name string, ts map[string]tsInterface, seen map[string]bool) [
 	return out
 }
 
-// parseTSInterfaces reads every exported interface in api.ts and its fields.
+// parseTSInterfaces reads every exported interface in src/types and its
+// fields.
 func parseTSInterfaces(t *testing.T) map[string]tsInterface {
 	t.Helper()
-	src, err := os.ReadFile("src/lib/api.ts")
+	files, err := filepath.Glob("src/types/*.ts")
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(string(src), "\n")
+	if len(files) < 10 {
+		t.Fatalf("found only %d type modules in src/types; has the client been split?", len(files))
+	}
 	start := regexp.MustCompile(`^export interface (\w+)(?: extends ([\w, ]+))? \{`)
 	out := make(map[string]tsInterface)
-	for i := 0; i < len(lines); {
-		m := start.FindStringSubmatch(lines[i])
-		if m == nil {
-			i++
-			continue
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
 		}
-		iface := tsInterface{}
-		if m[2] != "" {
-			for _, parent := range strings.Split(m[2], ",") {
-				if parent = strings.TrimSpace(parent); parent != "" {
-					iface.extends = append(iface.extends, parent)
+		lines := strings.Split(string(src), "\n")
+		for i := 0; i < len(lines); {
+			m := start.FindStringSubmatch(lines[i])
+			if m == nil {
+				i++
+				continue
+			}
+			iface := tsInterface{}
+			if m[2] != "" {
+				for _, parent := range strings.Split(m[2], ",") {
+					if parent = strings.TrimSpace(parent); parent != "" {
+						iface.extends = append(iface.extends, parent)
+					}
 				}
 			}
-		}
-		depth := braceDepth(lines[i])
-		j := i + 1
-		for ; j < len(lines) && depth > 0; j++ {
-			if depth == 1 {
-				if field := fieldName(lines[j]); field != "" {
-					iface.fields = append(iface.fields, field)
+			depth := braceDepth(lines[i])
+			j := i + 1
+			for ; j < len(lines) && depth > 0; j++ {
+				if depth == 1 {
+					if field := fieldName(lines[j]); field != "" {
+						iface.fields = append(iface.fields, field)
+					}
 				}
+				depth += braceDepth(lines[j])
 			}
-			depth += braceDepth(lines[j])
+			out[m[1]] = iface
+			i = j
 		}
-		out[m[1]] = iface
-		i = j
 	}
 	return out
 }

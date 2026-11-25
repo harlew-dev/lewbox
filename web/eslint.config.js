@@ -32,17 +32,17 @@ export default tseslint.config(
   },
   {
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/lib/api.ts'],
+    ignores: ['src/lib/api/client.ts'],
     rules: {
       'no-restricted-globals': [
         'error',
         {
           name: 'fetch',
-          message: 'HTTP calls live only in src/lib/api.ts; add a method there and call it.',
+          message: 'HTTP calls live only in src/lib/api/client.ts; add a method there and call it.',
         },
         {
           name: 'XMLHttpRequest',
-          message: 'HTTP calls live only in src/lib/api.ts; add a method there and call it.',
+          message: 'HTTP calls live only in src/lib/api/client.ts; add a method there and call it.',
         },
       ],
     },

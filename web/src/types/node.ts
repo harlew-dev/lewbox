@@ -1,0 +1,24 @@
+export interface Node {
+  id: string
+  name: string
+  url: string
+  created_at: string
+  cluster?: string
+  role?: string
+  version?: string
+  alive?: boolean
+  last_seen_at?: string
+  // What the node last applied, and whether it is behind its cluster's
+  // profiles. Null for a node in no cluster.
+  settings?: NodeSettingsState | null
+}
+
+export interface NodeSettingsState {
+  applied_at: string | null
+  outdated: boolean
+  reasons: string[]
+}
+
+export interface NodeList {
+  data: Node[]
+}
