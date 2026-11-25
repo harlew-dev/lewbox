@@ -107,6 +107,18 @@ func (ts *testServer) do(method, path, body string, headers map[string]string, c
 	return res, string(b)
 }
 
+// csrfOf reads the CSRF token from a sign-in or profile body.
+func csrfOf(t *testing.T, body string) map[string]string {
+	t.Helper()
+	var got struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal([]byte(body), &got); err != nil || got.CSRFToken == "" {
+		t.Fatalf("no csrf_token in %s (%v)", body, err)
+	}
+	return map[string]string{"X-CSRF-Token": got.CSRFToken}
+}
+
 func (ts *testServer) loginJSON() string {
 	return `{"email":"` + adminEmail + `","password":"` + adminPassword + `"}`
 }
@@ -215,7 +227,7 @@ func TestLogoutClearsCookieAndSession(t *testing.T) {
 	}
 	c := cookieNamed(t, res, "lewbox_session")
 
-	out, outBody := ts.do("POST", "/v0/auth/logout", "", nil, c)
+	out, outBody := ts.do("POST", "/v0/auth/logout", "", csrfOf(t, body), c)
 	if out.StatusCode != http.StatusOK {
 		t.Fatalf("logout: status %d body %s", out.StatusCode, outBody)
 	}
@@ -435,6 +447,7 @@ func TestAuthenticatedRequestBudget(t *testing.T) {
 		t.Fatalf("sign in: status %d body %s", res.StatusCode, body)
 	}
 	cookie := cookieNamed(t, res, "lewbox_session")
+	csrf := csrfOf(t, body)
 
 	for i := 0; i < 2; i++ {
 		res, body = ts.do("GET", "/v0/profile", "", nil, cookie)
@@ -467,9 +480,71 @@ func TestAuthenticatedRequestBudget(t *testing.T) {
 	}
 
 	// Signing out is a recovery route: it works even with the budget spent.
-	res, body = ts.do("POST", "/v0/auth/logout", "", nil, cookie)
+	res, body = ts.do("POST", "/v0/auth/logout", "", csrf, cookie)
 	if res.StatusCode != http.StatusOK {
 		t.Errorf("logout: status %d body %s", res.StatusCode, body)
+	}
+}
+
+// A cookie-authenticated write needs the session's CSRF token; reads, bearer
+// requests and signing in don't. The token comes back from sign-in and, for
+// cookie sessions only, from the profile.
+func TestCookieWritesNeedCSRFToken(t *testing.T) {
+	ts := newTestServer(t)
+	res, body := ts.do("POST", "/v0/auth/session", ts.loginJSON(), nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("sign in: status %d body %s", res.StatusCode, body)
+	}
+	c := cookieNamed(t, res, "lewbox_session")
+	csrf := csrfOf(t, body)
+	node := `{"name":"n1","url":"https://n1.example"}`
+
+	for name, headers := range map[string]map[string]string{
+		"missing": nil,
+		"wrong":   {"X-CSRF-Token": "not-the-token"},
+		"other":   {"X-CSRF-Token": ts.svc.CSRFToken("lbs_someone-elses-session")},
+	} {
+		res, body = ts.do("POST", "/v0/nodes", node, headers, c)
+		if res.StatusCode != http.StatusForbidden || !strings.Contains(body, "CSRF") {
+			t.Errorf("%s token: status %d body %s", name, res.StatusCode, body)
+		}
+	}
+	// A refused write does nothing.
+	if list, err := ts.svc.ListNodes(service.WithPrincipal(context.Background(), service.LocalPrincipal()), service.ListNodesRequest{}); err != nil || len(list.Data) != 0 {
+		t.Fatalf("nodes after refused writes = %+v, %v", list, err)
+	}
+
+	res, body = ts.do("POST", "/v0/nodes", node, csrf, c)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("with token: status %d body %s", res.StatusCode, body)
+	}
+
+	// Reads need no token, and the profile hands it back to a reloaded page.
+	res, body = ts.do("GET", "/v0/profile", "", nil, c)
+	if res.StatusCode != http.StatusOK || csrfOf(t, body)["X-CSRF-Token"] != csrf["X-CSRF-Token"] {
+		t.Errorf("profile: status %d body %s", res.StatusCode, body)
+	}
+
+	// Bearer requests need no token and never receive one.
+	res, body = ts.do("POST", "/v0/auth/login", ts.loginJSON(), nil)
+	var login service.LoginResponse
+	if err := json.Unmarshal([]byte(body), &login); err != nil {
+		t.Fatal(err)
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + login.Token}
+	res, body = ts.do("POST", "/v0/nodes", `{"name":"n2","url":"https://n2.example"}`, bearer)
+	if res.StatusCode != http.StatusCreated {
+		t.Errorf("bearer write: status %d body %s", res.StatusCode, body)
+	}
+	res, body = ts.do("GET", "/v0/profile", "", bearer)
+	if strings.Contains(body, "csrf_token") {
+		t.Errorf("bearer profile carries a CSRF token: %s", body)
+	}
+
+	// Signing in again while a cookie is set needs no token.
+	res, body = ts.do("POST", "/v0/auth/session", ts.loginJSON(), nil, c)
+	if res.StatusCode != http.StatusOK {
+		t.Errorf("sign in with a cookie: status %d body %s", res.StatusCode, body)
 	}
 }
 

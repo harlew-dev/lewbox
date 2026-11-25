@@ -389,8 +389,49 @@ func withAuth(svc *service.Service, log *slog.Logger, opts RouterOptions, next h
 			}})
 			return
 		}
+		// Checked before the request counts against any budget, so a forged
+		// request cannot spend the owner's.
+		if needsCSRFToken(r) && !svc.ValidCSRFToken(cookie.Value, r.Header.Get(csrfHeader)) {
+			writeJSON(w, http.StatusForbidden, ErrorBody{Error: ErrorDetail{
+				Code:    string(service.CodeForbidden),
+				Message: "missing or invalid CSRF token: reload the page and try again",
+			}})
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), sessionTokenKey{}, cookie.Value))
 		serveAuthenticated(svc, log, w, r, p, next)
 	})
+}
+
+// csrfHeader carries a browser session's CSRF token on every write. A bearer
+// token needs none: browsers never attach it on their own.
+const csrfHeader = "X-CSRF-Token"
+
+// sessionTokenKey holds the raw session cookie of a cookie-authenticated
+// request, so handlers can hand back its CSRF token.
+type sessionTokenKey struct{}
+
+// sessionTokenFrom returns the session cookie the request authenticated
+// with, or "" for bearer and anonymous requests.
+func sessionTokenFrom(r *http.Request) string {
+	token, _ := r.Context().Value(sessionTokenKey{}).(string)
+	return token
+}
+
+// needsCSRFToken reports whether a cookie-authenticated request changes
+// state. Signing in and signing up are exempt: they start a new session
+// instead of acting on the one the cookie names, and they answer with the new
+// session's token.
+func needsCSRFToken(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	switch r.URL.Path {
+	case Prefix + "/auth/session", Prefix + "/auth/signup":
+		return false
+	}
+	return true
 }
 
 // serveAuthenticated stores the caller on the request and charges one request

@@ -32,7 +32,7 @@ POST /v0/auth/session
 
 200 OK
 Set-Cookie: __Host-lewbox_session=lbs_…; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800
-{"expires_at":"2026-11-18T15:23:01.2Z","user":{…}}
+{"expires_at":"2026-11-18T15:23:01.2Z","user":{…},"csrf_token":"…"}
 ```
 
 Over TLS the cookie is named `__Host-lewbox_session` and is `Secure`; on plain HTTP it is `lewbox_session`. A browser session lasts at most 7 days and ends after 12 hours without a request. Send the cookie back and omit `Authorization`; if both are present, `Authorization` wins.
@@ -49,7 +49,9 @@ Browser cookie requests are protected against cross-site request forgery. A stat
 {"error":{"code":"forbidden","message":"cross-origin request rejected"}}
 ```
 
-A cookie-authenticated `POST`, `PUT`, `PATCH` or `DELETE` with a body must also send `Content-Type: application/json` (parameters such as `charset` are allowed); anything else gets `415` with code `bad_request`. Bearer requests are not affected: the CLI sends no `Sec-Fetch-Site` or `Origin` header and needs no special content type.
+A cookie-authenticated `POST`, `PUT`, `PATCH` or `DELETE` must also send the session's CSRF token in an `X-CSRF-Token` header; without it, or with another session's, the answer is `403` (`missing or invalid CSRF token`) and nothing changes. The token comes in the `csrf_token` field of the sign-in (`POST /v0/auth/session`) and sign-up answers, and `GET /v0/profile` returns it again for a cookie session, so a reloaded page can pick it up. It is derived from the session (nothing extra is stored) and changes when the session does. Signing in and signing up need no token.
+
+A cookie-authenticated `POST`, `PUT`, `PATCH` or `DELETE` with a body must also send `Content-Type: application/json` (parameters such as `charset` are allowed); anything else gets `415` with code `bad_request`. Bearer requests are not affected: the CLI sends no `Sec-Fetch-Site` or `Origin` header and needs no CSRF token or special content type; `GET /v0/profile` never returns a token to a bearer caller.
 
 API responses carry `Cache-Control: no-store`.
 

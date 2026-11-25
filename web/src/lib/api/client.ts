@@ -36,6 +36,15 @@ const AUTH_PATHS = new Set([
   '/v0/profile',
 ])
 
+// The browser session's CSRF token, sent as X-CSRF-Token on every write. It
+// lives only in memory (never in storage or a URL); sign-in, sign-up and the
+// profile hand it over, so a reloaded page gets it back from /v0/profile.
+let csrfToken = ''
+
+export function setCsrfToken(token: string | undefined): void {
+  csrfToken = token ?? ''
+}
+
 export function onUnauthorized(handler: () => void): () => void {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener(UNAUTHORIZED_EVENT, handler)
@@ -74,6 +83,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers,
   }
   if (options.org) headers['Lewbox-Organization'] = options.org
+  if (init.method !== 'GET' && csrfToken) headers['X-CSRF-Token'] = csrfToken
   if (options.body !== undefined) {
     init.body = JSON.stringify(options.body)
     headers['Content-Type'] = 'application/json'
@@ -89,6 +99,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const text = await response.text()
   if (!response.ok) {
     const error = parseError(response.status, text)
+    if (response.status === 401) setCsrfToken('')
     if (response.status === 401 && options.authRedirect !== false && !AUTH_PATHS.has(path)) {
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
     }

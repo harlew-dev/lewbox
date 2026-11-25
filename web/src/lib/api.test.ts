@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, me } from './api'
+import { ApiError, createPlan, listPlans, me, signOut } from './api'
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -61,5 +61,35 @@ describe('api error parsing', () => {
       '/v0/profile',
       expect.objectContaining({ credentials: 'same-origin' }),
     )
+  })
+})
+
+describe('CSRF token', () => {
+  it('sends the session token on writes only, and drops it at sign-out', async () => {
+    const calls: { method: string; token: string | null }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (path: string, init: RequestInit) => {
+        const headers = new Headers(init.headers)
+        calls.push({ method: init.method ?? 'GET', token: headers.get('X-CSRF-Token') })
+        if (path === '/v0/profile') return json(200, { via: 'session', csrf_token: 'tok-1' })
+        if (path === '/v0/auth/logout') return json(200, { ok: true })
+        return json(200, { data: [] })
+      }),
+    )
+
+    await me()
+    await listPlans()
+    await createPlan({ slug: 'dev', name: 'Dev' } as Parameters<typeof createPlan>[0]).catch(() => {})
+    await signOut()
+    await createPlan({ slug: 'dev', name: 'Dev' } as Parameters<typeof createPlan>[0]).catch(() => {})
+
+    expect(calls.map((call) => [call.method, call.token])).toEqual([
+      ['GET', null],
+      ['GET', null],
+      ['POST', 'tok-1'],
+      ['POST', 'tok-1'],
+      ['POST', null],
+    ])
   })
 })

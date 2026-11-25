@@ -42,7 +42,7 @@ Open `http://localhost:5173/`. The Vite server proxies `/v0` to the Go server, s
 
 ## Authentication
 
-The console never holds a token. `POST /v0/auth/session` sets an `HttpOnly` cookie and returns the user and the expiry, never a token; every later request sends the cookie. `src/lib/api/client.ts` is the only place that calls `fetch`, and it always uses `credentials: 'same-origin'`.
+The console never holds a token. `POST /v0/auth/session` sets an `HttpOnly` cookie and returns the user and the expiry, never a token; every later request sends the cookie. `src/lib/api/client.ts` is the only place that calls `fetch`, and it always uses `credentials: 'same-origin'`. Sign-in, sign-up and `/v0/profile` return the session's CSRF token; `client.ts` keeps it in memory only (never in storage or a URL) and sends it as `X-CSRF-Token` on every non-GET request, and drops it at sign-out or on a `401`.
 
 A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-up, sign-out and `/v0/profile` calls opt out of that redirect. `AuthProvider` also keeps the account's organizations from `/v0/profile`; `reloadOrganizations()` refreshes them after joining, leaving or renaming one.
 

@@ -58,6 +58,9 @@ type LoginResponse struct {
 type SessionResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	User      User      `json:"user"`
+	// CSRFToken is set by the HTTP layer for browser sessions: the console
+	// sends it back as X-CSRF-Token on every write.
+	CSRFToken string `json:"csrf_token,omitempty"`
 }
 
 // LogoutResponse is returned by Logout.
@@ -77,6 +80,9 @@ type Me struct {
 	AccessToken   *AccessToken     `json:"access_token,omitempty"`
 	Organizations []MeOrganization `json:"organizations,omitzero"`
 	Via           string           `json:"via"` // "session", "access_token", "local" or "admin_key"
+	// CSRFToken is set by the HTTP layer only for a browser session cookie,
+	// so a reloaded console gets its token back. Never set for bearer tokens.
+	CSRFToken string `json:"csrf_token,omitempty"`
 }
 
 // MeOrganization is one of a user's organizations, as Me lists them.

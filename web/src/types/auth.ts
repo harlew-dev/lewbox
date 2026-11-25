@@ -13,6 +13,8 @@ export interface Me {
   user?: User
   organizations?: MeOrganization[]
   via: string
+  // Only for a browser session: sent back as X-CSRF-Token on writes.
+  csrf_token?: string
 }
 
 export type SignupMode = 'open' | 'approval' | 'closed'
@@ -26,4 +28,5 @@ export interface Instance {
 export interface SessionResponse {
   expires_at: string
   user: User
+  csrf_token?: string
 }

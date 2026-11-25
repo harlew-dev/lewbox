@@ -34,7 +34,7 @@ Only instance admins can read the trail, through `GET /v0/events`, `lewbox event
 
 The web console signs in with `POST /v0/auth/session`, which puts the session token in an `HttpOnly` cookie instead of returning it in JSON. The cookie is `SameSite=Strict`, `Path=/`, has no `Domain`, and is `Secure` when the request arrived over TLS (or when `--cookie-secure=always` is set). TLS uses the `__Host-lewbox_session` name; plain HTTP uses `lewbox_session`. Web sessions last 7 days at most and expire after 12 hours without a request.
 
-Cookie-authenticated requests are protected against CSRF: the orchestrator rejects state-changing cross-origin requests (`Sec-Fetch-Site` or `Origin`) with `403`, and requires `Content-Type: application/json` on cookie-authenticated requests with a body. CLI requests use a bearer token and are unaffected.
+Cookie-authenticated requests are protected against CSRF: the orchestrator rejects state-changing cross-origin requests (`Sec-Fetch-Site` or `Origin`) with `403`, requires a per-session CSRF token (`X-CSRF-Token`, an HMAC of the session token under a key derived from the keyring) on every cookie-authenticated write, and requires `Content-Type: application/json` on cookie-authenticated requests with a body. CLI requests use a bearer token and are unaffected.
 
 Sign-in is rate limited in memory: 20 attempts per client IP per minute, and 5 failed attempts per normalized email per minute. The limits are checked before the password hash, so a flood costs little CPU. Exhausting either returns `429` with `Retry-After`.
 

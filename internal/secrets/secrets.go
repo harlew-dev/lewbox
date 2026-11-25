@@ -4,7 +4,9 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -141,4 +143,15 @@ func (k *Keyring) Open(sealed []byte) ([]byte, error) {
 		return nil, fmt.Errorf("open: %w", err)
 	}
 	return plaintext, nil
+}
+
+// DeriveKey returns a 32-byte key for one purpose, derived from the keyring's
+// key with HKDF-SHA256. Different purposes get unrelated keys, and none of
+// them reveals the sealing key.
+func (k *Keyring) DeriveKey(purpose string) ([]byte, error) {
+	key, err := hkdf.Key(sha256.New, k.key[:], nil, "lewbox "+purpose, keySize)
+	if err != nil {
+		return nil, fmt.Errorf("derive key: %w", err)
+	}
+	return key, nil
 }

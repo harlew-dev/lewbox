@@ -47,6 +47,7 @@ type Service struct {
 	auditRetention time.Duration
 
 	keyring        *secrets.Keyring
+	csrfKey        []byte
 	aerolvmOptions []aerolvm.Option
 	cloudflareURL  string
 
@@ -159,6 +160,7 @@ func New(conn *sql.DB, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.csrfKey = newCSRFKey(s.keyring)
 	return s
 }
 

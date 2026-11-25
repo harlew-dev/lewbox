@@ -22,5 +22,6 @@ func (h Signups) Store(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSessionCookie(w, r, h.opts, token, resp.ExpiresAt)
+	resp.CSRFToken = h.svc.CSRFToken(token)
 	h.respond(w, http.StatusOK, resp, nil)
 }
