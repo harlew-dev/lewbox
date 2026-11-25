@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import type { Plugin } from 'vite'
 
 // emptyOutDir removes web/dist entirely, including the .gitkeep that keeps the
@@ -51,6 +51,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // The Playwright suite under e2e/ is not a jsdom test.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
     // Above the 5 s findBy timeout in src/test/setup.ts.
     testTimeout: 15_000,
   },

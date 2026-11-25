@@ -1,5 +1,7 @@
 /bin/
 web/node_modules/
+web/playwright-report/
+web/test-results/
 web/dist/*
 !web/dist/.gitkeep
 release/

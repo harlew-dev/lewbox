@@ -76,6 +76,7 @@ make fmt                    # gofmt -w .
 make docker                 # the runtime image, lewbox:local, via Compose
 make docker-test            # the Go checks and web tests inside the image
 make e2e                    # build and smoke-test the container
+make e2e-web                # build bin/lewbox and run the Playwright smoke tests (needs `npx playwright install chromium` once)
 
 # The same checks raw. `make test` runs all four plus the web checks.
 gofmt -l .                  # must print nothing
@@ -90,7 +91,7 @@ cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh
 cd deploy/dev-cluster && LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" ./e2e.sh --runtime firecracker
 ```
 
-The four Go checks (or `make test`, which runs the tests under `-race` and adds the web checks; CI in `.github/workflows/ci.yml` runs `make test` and `make docker-test`) must pass before you call a change done. Run `e2e.sh` for anything touching `internal/machine`, `cmd/lewbox/{install,nodeadd,update,machine}.go`, cluster checks or node sync. The unit tests use fakes and **have missed real bugs**: a wrong `sudo` argv, and running an unverified file.
+The four Go checks (or `make test`, which runs the tests under `-race` and adds the web checks; CI in `.github/workflows/ci.yml` runs `make test`, `make e2e-web` and `make docker-test`) must pass before you call a change done. Run `e2e.sh` for anything touching `internal/machine`, `cmd/lewbox/{install,nodeadd,update,machine}.go`, cluster checks or node sync. The unit tests use fakes and **have missed real bugs**: a wrong `sudo` argv, and running an unverified file.
 
 ## Rules of the code
 

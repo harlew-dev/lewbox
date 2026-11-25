@@ -3,6 +3,9 @@
 **/node_modules
 # Vite writes the console here; the Dockerfile copies it from the web stage.
 web/dist
+# Playwright writes its report and traces here when the browser tests run.
+web/playwright-report
+web/test-results
 # The dev cluster downloads about 200 MB of AerolVM release files here.
 deploy/dev-cluster/.cache
 *.db

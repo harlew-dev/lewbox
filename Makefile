@@ -12,7 +12,7 @@ UI_DIR ?= ../ui
 
 .DEFAULT_GOAL := build
 
-.PHONY: help deps web build build-go run dev check test fmt docker docker-test up down e2e update-ui release clean distclean
+.PHONY: help deps web build build-go run dev check test fmt docker docker-test up down e2e e2e-web update-ui release clean distclean
 
 help: ## List the targets and what they do.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_.\/-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -68,6 +68,9 @@ down: ## Stop the orchestrator, keeping its data volume.
 
 e2e: ## Build lewbox:local and smoke-test the container.
 	deploy/docker/e2e.sh
+
+e2e-web: build ## Run the browser smoke tests against the built server. Installs nothing; run `npx playwright install chromium` in web/ once.
+	npm --prefix web run test:e2e
 
 update-ui: ## Re-vendor @harlew-dev/ui from the UI_DIR checkout and update the lockfile.
 	@test -d "$(UI_DIR)" || { echo "update-ui: no UI checkout at $(UI_DIR) (set UI_DIR=...)"; exit 1; }

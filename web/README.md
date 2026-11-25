@@ -109,6 +109,17 @@ make test
 
 This runs `gofmt`, `go vet`, the Go tests under the race detector, the web typecheck (`tsc --noEmit`), ESLint and the Vitest suite. `make check` runs only the static checks (`gofmt`, `go vet`, the typecheck, ESLint). ESLint enforces the boundaries this page describes: `fetch` only in `src/lib/api/client.ts`, page paths only from `src/lib/routes.ts`, and the React hooks rules. The web tests run in jsdom with Testing Library; test files sit next to the code as `*.test.ts` or `*.test.tsx`. `make test` installs dependencies first and does not need a production console build.
 
+## Browser smoke tests
+
+`web/e2e/` holds a small Playwright suite that runs against the real production build. It signs in as a bootstrap admin, visits the console pages, creates a workspace through the UI and opens its portal home, then signs out; any page error, console error or CSP violation fails the test.
+
+```bash
+cd web && npx playwright install chromium   # once, into Playwright's own cache
+make e2e-web
+```
+
+`make e2e-web` builds `bin/lewbox` (with the embedded console) and runs `npm --prefix web run test:e2e`, which starts its own server on a free loopback port with a fresh temporary database and stops it afterwards. Every run gets a new temporary directory and port, so two runs can happen side by side; it never reuses a server already listening. Nothing is installed by the target: run the `playwright install` line once per machine. Chromium is the only browser; there is no screenshot or trace unless a test fails (they land in `web/test-results/` and `web/playwright-report/`, both ignored). The suite is not part of `make test`, because it needs a browser.
+
 ## Update the component library
 
 When you change the sibling UI checkout, re-vendor it:
