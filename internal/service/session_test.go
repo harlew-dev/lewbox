@@ -216,17 +216,17 @@ func TestLoginLimiterMemoryCap(t *testing.T) {
 	l := newLoginLimiter(0, 5)
 	for i := 0; i < loginLimiterMaxKeys; i++ {
 		email := fmt.Sprintf("user%d@example.com", i)
-		if _, ok := l.allowEmail(now, email); !ok {
+		if _, ok, _ := l.allowEmail(now, email); !ok {
 			t.Fatalf("allowEmail(%q) rejected before the cap", email)
 		}
 	}
-	if _, ok := l.allowEmail(now, "one-more@example.com"); ok {
+	if _, ok, _ := l.allowEmail(now, "one-more@example.com"); ok {
 		t.Error("a new key was accepted when the map was full")
 	}
 
 	// Once old windows expire, the map is pruned and new keys fit again.
 	now = now.Add(loginWindow)
-	if _, ok := l.allowEmail(now, "one-more@example.com"); !ok {
+	if _, ok, _ := l.allowEmail(now, "one-more@example.com"); !ok {
 		t.Error("a new key was rejected after pruning")
 	}
 }
@@ -250,15 +250,15 @@ func TestLoginLimiterEmailReservesSlots(t *testing.T) {
 	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	l := newLoginLimiter(0, 2)
 	for i := range 2 {
-		if _, ok := l.allowEmail(now, "a@example.com"); !ok {
+		if _, ok, _ := l.allowEmail(now, "a@example.com"); !ok {
 			t.Fatalf("attempt %d rejected", i+1)
 		}
 	}
-	if _, ok := l.allowEmail(now, "a@example.com"); ok {
+	if _, ok, _ := l.allowEmail(now, "a@example.com"); ok {
 		t.Fatal("third concurrent attempt was allowed")
 	}
 	l.clearEmail("a@example.com") // a success frees the budget
-	if _, ok := l.allowEmail(now, "a@example.com"); !ok {
+	if _, ok, _ := l.allowEmail(now, "a@example.com"); !ok {
 		t.Fatal("attempt after a success was rejected")
 	}
 }

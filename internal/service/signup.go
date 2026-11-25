@@ -42,7 +42,10 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 	}
 
 	now := s.now()
-	if retry, ok := s.signupLimiter.allowIP(now, clientIPFrom(ctx)); !ok {
+	if retry, ok, first := s.signupLimiter.allowIP(now, clientIPFrom(ctx)); !ok {
+		if first {
+			s.auditRateLimit(ctx, "auth:signup:per-ip")
+		}
 		return "", SessionResponse{}, signupRateLimited(retry)
 	}
 

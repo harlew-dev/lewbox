@@ -149,7 +149,7 @@ func renderEvents(w io.Writer, list service.EventList, now time.Time) error {
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			relativeTime(e.CreatedAt, now), dash(e.ActorLabel), e.Name, target,
-			dash(e.OrganizationID), dash(e.IP))
+			dash(firstNonEmpty(e.OrganizationSlug, e.OrganizationID)), dash(e.IP))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -158,6 +158,15 @@ func renderEvents(w io.Writer, list service.EventList, now time.Time) error {
 		fmt.Fprintf(w, "\nnext: %s\n", *list.Next)
 	}
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // renderClusterDetail prints the cluster fields, its checks and its nodes.

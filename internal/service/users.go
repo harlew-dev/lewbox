@@ -416,10 +416,16 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 	// Both budgets are checked before the password hash, so a flood costs
 	// little CPU. The IP budget counts every attempt; the email budget counts
 	// only failures (a success clears it).
-	if retry, ok := s.limiter.allowIP(now, clientIPFrom(ctx)); !ok {
+	if retry, ok, first := s.limiter.allowIP(now, clientIPFrom(ctx)); !ok {
+		if first {
+			s.auditRateLimit(ctx, "auth:per-ip")
+		}
 		return "", time.Time{}, db.User{}, loginRateLimited(retry)
 	}
-	if retry, ok := s.limiter.allowEmail(now, email); !ok {
+	if retry, ok, first := s.limiter.allowEmail(now, email); !ok {
+		if first {
+			s.auditRateLimit(ctx, "auth:per-email")
+		}
 		return "", time.Time{}, db.User{}, loginRateLimited(retry)
 	}
 
@@ -502,7 +508,10 @@ func (s *Service) requireFreshProof(ctx context.Context, p Principal, password s
 	if err != nil {
 		return fmt.Errorf("get user: %w", err)
 	}
-	if retry, ok := s.limiter.allowEmail(s.now(), row.Email); !ok {
+	if retry, ok, first := s.limiter.allowEmail(s.now(), row.Email); !ok {
+		if first {
+			s.auditRateLimit(ctx, "auth:fresh-proof:per-email")
+		}
 		return loginRateLimited(retry)
 	}
 	ok, err := verifyPassword(row.PasswordHash, password)

@@ -39,19 +39,20 @@ type Change struct {
 // Event is one row of the audit trail: who changed what, when and from where.
 // Passwords, hashes, tokens and other secrets are never recorded.
 type Event struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	ActorKind      string            `json:"actor_kind"`
-	ActorID        string            `json:"actor_id,omitempty"`
-	ActorLabel     string            `json:"actor_label"`
-	TargetType     string            `json:"target_type"`
-	TargetID       string            `json:"target_id"`
-	TargetName     string            `json:"target_name,omitempty"`
-	OrganizationID string            `json:"organization_id,omitempty"`
-	Changes        map[string]Change `json:"changes,omitempty"`
-	IP             string            `json:"ip,omitempty"`
-	RequestID      string            `json:"request_id,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	ActorKind        string            `json:"actor_kind"`
+	ActorID          string            `json:"actor_id,omitempty"`
+	ActorLabel       string            `json:"actor_label"`
+	TargetType       string            `json:"target_type"`
+	TargetID         string            `json:"target_id"`
+	TargetName       string            `json:"target_name,omitempty"`
+	OrganizationID   string            `json:"organization_id,omitempty"`
+	OrganizationSlug string            `json:"organization_slug,omitempty"`
+	Changes          map[string]Change `json:"changes,omitempty"`
+	IP               string            `json:"ip,omitempty"`
+	RequestID        string            `json:"request_id,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
 }
 
 // EventList is one cursor page of the audit log, newest first. Next is the
@@ -417,31 +418,34 @@ func optString(s *string) any {
 	return *s
 }
 
-func toEvent(row db.Event) Event {
+func toEvent(row db.ListEventsRow) Event {
 	e := Event{
-		ID:         row.ID,
-		Name:       row.Name,
-		ActorKind:  row.ActorKind,
-		ActorLabel: row.ActorLabel,
-		TargetType: row.TargetType,
-		TargetID:   row.TargetID,
-		TargetName: row.TargetName,
-		CreatedAt:  row.CreatedAt,
+		ID:         row.Event.ID,
+		Name:       row.Event.Name,
+		ActorKind:  row.Event.ActorKind,
+		ActorLabel: row.Event.ActorLabel,
+		TargetType: row.Event.TargetType,
+		TargetID:   row.Event.TargetID,
+		TargetName: row.Event.TargetName,
+		CreatedAt:  row.Event.CreatedAt,
 	}
-	if row.ActorID.Valid {
-		e.ActorID = row.ActorID.String
+	if row.Event.ActorID.Valid {
+		e.ActorID = row.Event.ActorID.String
 	}
-	if row.OrganizationID.Valid {
-		e.OrganizationID = row.OrganizationID.String
+	if row.Event.OrganizationID.Valid {
+		e.OrganizationID = row.Event.OrganizationID.String
 	}
-	if row.Ip.Valid {
-		e.IP = row.Ip.String
+	if row.OrganizationSlug.Valid {
+		e.OrganizationSlug = row.OrganizationSlug.String
 	}
-	if row.RequestID.Valid {
-		e.RequestID = row.RequestID.String
+	if row.Event.Ip.Valid {
+		e.IP = row.Event.Ip.String
 	}
-	if row.Changes.Valid && row.Changes.String != "" {
-		_ = json.Unmarshal([]byte(row.Changes.String), &e.Changes)
+	if row.Event.RequestID.Valid {
+		e.RequestID = row.Event.RequestID.String
+	}
+	if row.Event.Changes.Valid && row.Event.Changes.String != "" {
+		_ = json.Unmarshal([]byte(row.Event.Changes.String), &e.Changes)
 	}
 	return e
 }

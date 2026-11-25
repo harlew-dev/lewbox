@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/harlew-dev/lewbox/internal/db"
 	"github.com/harlew-dev/lewbox/internal/httpapi"
@@ -402,7 +403,11 @@ func TestSetupLinkPublicPage(t *testing.T) {
 }
 
 func TestRateLimitedResponse(t *testing.T) {
-	ts := newTestServer(t, service.WithLoginLimits(0, 2))
+	// Pin the clock inside an aligned minute: with the real clock, two slow
+	// attempts can straddle a boundary and reset the budget, making the test
+	// flaky under load.
+	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	ts := newTestServer(t, service.WithLoginLimits(0, 2), service.WithClock(func() time.Time { return now }))
 	wrong := `{"email":"` + adminEmail + `","password":"wrong-password-1"}`
 	for i := 0; i < 2; i++ {
 		res, body := ts.do("POST", "/v0/auth/login", wrong, nil)

@@ -39,6 +39,9 @@ const (
 type windowState struct {
 	count int
 	reset time.Time
+	// refused is set on the first refusal in this window, so the audit trail
+	// records one event per key per window rather than one per flooded request.
+	refused bool
 }
 
 // limiter is an in-memory, fixed-window rate limiter. Every window is aligned
@@ -76,9 +79,11 @@ func (l *limiter) setLimit(limit int) {
 
 // allow counts one hit for key and reports whether it fits the budget. The
 // returned duration is how long the caller should wait when it does not.
-func (l *limiter) allow(now time.Time, key string) (time.Duration, bool) {
+// firstRefusal is true only for the first refusal of this key in the current
+// aligned window, so a flood writes one audit event, not thousands.
+func (l *limiter) allow(now time.Time, key string) (retry time.Duration, allowed, firstRefusal bool) {
 	if l == nil || l.limit <= 0 || key == "" {
-		return 0, true
+		return 0, true, false
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -87,20 +92,23 @@ func (l *limiter) allow(now time.Time, key string) (time.Duration, bool) {
 	w, ok := l.keys[key]
 	if !ok {
 		if len(l.keys) >= l.maxKeys {
-			return l.fullRetryLocked(now), false
+			return l.fullRetryLocked(now), false, false
 		}
 		w = &windowState{reset: reset}
 		l.keys[key] = w
 	} else if !w.reset.Equal(reset) {
 		// The aligned window moved on: the old count does not carry over.
 		w.count = 0
+		w.refused = false
 		w.reset = reset
 	}
 	if w.count >= l.limit {
-		return retryAfter(w.reset, now), false
+		first := !w.refused
+		w.refused = true
+		return retryAfter(w.reset, now), false, first
 	}
 	w.count++
-	return 0, true
+	return 0, true, false
 }
 
 // clear forgets key's count, so a success can free a budget before its window
@@ -202,10 +210,11 @@ func (l *loginLimiter) setLimits(perIP, perEmail int) {
 }
 
 // allowIP counts one attempt from ip and reports whether it fits the budget.
-// The returned duration is how long the caller should wait when it does not.
-func (l *loginLimiter) allowIP(now time.Time, ip string) (time.Duration, bool) {
+// The returned duration is how long the caller should wait when it does not;
+// firstRefusal marks the first refusal for this key in this window.
+func (l *loginLimiter) allowIP(now time.Time, ip string) (time.Duration, bool, bool) {
 	if l == nil || ip == "" {
-		return 0, true
+		return 0, true, false
 	}
 	return l.ips.allow(now, rateIPKey(ip))
 }
@@ -215,9 +224,9 @@ func (l *loginLimiter) allowIP(now time.Time, ip string) (time.Duration, bool) {
 // guesses against one account can't all slip past the check while the hash
 // runs. A successful sign-in calls clearEmail, so in effect only failures
 // count.
-func (l *loginLimiter) allowEmail(now time.Time, email string) (time.Duration, bool) {
+func (l *loginLimiter) allowEmail(now time.Time, email string) (time.Duration, bool, bool) {
 	if l == nil || email == "" {
-		return 0, true
+		return 0, true, false
 	}
 	return l.emails.allow(now, emailKey(email))
 }
@@ -291,9 +300,26 @@ func (s *Service) AllowRequest(ctx context.Context) error {
 	default:
 		return nil
 	}
-	retry, allowed := s.budget.allow(s.now(), key)
+	retry, allowed, first := s.budget.allow(s.now(), key)
 	if !allowed {
+		if first {
+			s.auditRateLimit(ctx, "api:per-user")
+		}
 		return requestRateLimited(retry)
 	}
 	return nil
+}
+
+// auditRateLimit records the first refusal for a budget in a window. Only the
+// budget's fixed name and the context's client IP are recorded; never the
+// typed email, route or any other caller-supplied value. A failure to write
+// the event is logged, not shown: the caller is refused either way.
+func (s *Service) auditRateLimit(ctx context.Context, budget string) {
+	if err := s.record(ctx, Event{
+		Name:       "rate_limit.refused",
+		TargetType: "rate_limit",
+		TargetID:   budget,
+	}); err != nil {
+		s.log.Warn("audit rate-limit refusal failed", "budget", budget, "err", err)
+	}
 }

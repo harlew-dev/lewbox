@@ -771,6 +771,7 @@ export interface AuditEvent {
   target_id: string
   target_name?: string
   organization_id?: string
+  organization_slug?: string
   changes?: Record<string, EventChange>
   ip?: string
   request_id?: string

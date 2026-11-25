@@ -3,9 +3,7 @@ title: Audit trail
 description: Every change Lewbox makes, who made it, what changed and from where, and how long it is kept.
 ---
 
-Lewbox records every state change made through the service in an audit trail: accounts, passwords, access tokens, organization API keys and sandbox keys, setup links, workspaces, members, plans, instance settings, clusters, nodes, DNS and storage profiles, and subscriptions. A refused change records nothing. The trail is written in the same database transaction as the change, so a change that fails leaves no event, and an event that cannot be written rolls the change back.
-
-Sandbox, snapshot and archive actions are not in the trail yet; they are the next step.
+Lewbox records every state change made through the service in an audit trail: accounts, passwords, access tokens, organization API keys and sandbox keys, setup links, workspaces, members, plans, instance settings, clusters, nodes, DNS and storage profiles, subscriptions, and customer sandbox, snapshot and archive actions. A refused change records nothing. The trail is written in the same database transaction as the change, so a change that fails leaves no event, and an event that cannot be written rolls the change back.
 
 Each event carries:
 
@@ -17,6 +15,7 @@ Each event carries:
 | `name` | What happened, `<resource>.<past-tense fact>`, such as `plan.updated` or `user.suspended` |
 | `target_type`, `target_id`, `target_name` | What it happened to, by public ID or name |
 | `organization_id` | The workspace, when the change belongs to one |
+| `organization_slug` | The workspace's slug, joined when it still exists, so the console can link to it |
 | `changes` | For updates, `{field: {from, to}}` for the fields that actually changed |
 | `ip` | The client address, for events made through the API |
 | `request_id` | The server's request ID, matching the `X-Request-ID` header and the logs |
@@ -37,6 +36,8 @@ Passwords, password hashes, session tokens, access tokens, API keys, setup-link 
 | Clusters and nodes | `cluster.created`, `cluster.updated`, `cluster.deleted`, `join_token.created`, `node.created`, `node.deleted` |
 | Profiles | `dns_profile.created`, `dns_profile.updated`, `dns_profile.deleted`, `dns_profile.credentials_read`, `storage_profile.created`, `storage_profile.updated`, `storage_profile.deleted`, `storage_profile.credentials_read` |
 | Subscriptions | `subscription.created`, `subscription.updated`, `subscription.deleted`, `subscription.restored` |
+| Sandboxes, snapshots, archives | `sandbox.stopped`, `sandbox.deleted`, `snapshot.deleted`, `archive.restored`, `archive.deleted` |
+| Limits | `rate_limit.refused` (the first refusal for one budget key in one aligned window; the IP is on the event, no typed email or route) |
 
 A removal whose key revocation fails is recorded in full rather than erased: `subscription.deleted`, then `subscription.restored` with `{"reason": "key revocation failed"}` in `changes`. The trail is append-only.
 
@@ -61,8 +62,8 @@ The list is newest first and cursor-paged: pass `before` (the `next` value of th
 
 - **Reads.** Listing or viewing records is not recorded. The exception is reading a DNS or storage profile's credentials, which records `dns_profile.credentials_read` / `storage_profile.credentials_read`.
 - **Failed sign-ins** are recorded (`session.login_failed`), for every attempt, known account or not, with the account when it exists. A wrong or missing current password on a sensitive action records `user.fresh_proof_failed`.
-- **Rate-limit refusals** are not recorded yet.
-- **Background checks and samples** are not events; their results are already on the cluster and node pages. A workspace suspended or restored by the background sync will be a `system` event when the next step lands.
+- **Rate-limit refusals** are recorded once per budget key per aligned window (`rate_limit.refused`, with the budget's name, the client IP and nothing the caller typed), not once per flooded request.
+- **Background checks and samples** are not events; their results are already on the cluster and node pages. A suspension is the admin action's `workspace.suspended` event; the background sync only enforces it by pushing a blocking quota and stopping sandboxes, and each stop it makes is a `sandbox.stopped` event with the `system` actor.
 
 ## Retention
 

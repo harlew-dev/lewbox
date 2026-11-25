@@ -433,12 +433,32 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 			s.log.Warn("stop sandbox failed", "sandbox", row.Sandbox.ID, "err", err)
 			continue
 		}
-		if err := s.queries(ctx).UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
-			Status:    "stopped",
-			ClusterID: row.Sandbox.ClusterID,
-			ID:        row.Sandbox.ID,
-		}); err != nil {
-			s.log.Warn("update sandbox status failed", "sandbox", row.Sandbox.ID, "err", err)
+		orgID := ""
+		if row.Sandbox.OrgID.Valid {
+			orgID = row.Sandbox.OrgID.String
+		}
+		err = s.withTx(ctx, func(ctx context.Context) error {
+			if err := s.queries(ctx).UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+				Status:    "stopped",
+				ClusterID: row.Sandbox.ClusterID,
+				ID:        row.Sandbox.ID,
+			}); err != nil {
+				return err
+			}
+			// The background pass enforces a suspension or unsubscription;
+			// the workspace's own status change is the admin's event.
+			return s.record(ctx, Event{
+				Name:           "sandbox.stopped",
+				ActorKind:      "system",
+				ActorLabel:     "system",
+				TargetType:     "sandbox",
+				TargetID:       row.Sandbox.ID,
+				TargetName:     row.Sandbox.Name,
+				OrganizationID: orgID,
+			})
+		})
+		if err != nil {
+			s.log.Warn("record stopped sandbox failed", "sandbox", row.Sandbox.ID, "err", err)
 		}
 	}
 }

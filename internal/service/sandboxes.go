@@ -226,24 +226,56 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 		if err := client.DeleteSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.queries(ctx).MarkSandboxGone(callCtx, db.MarkSandboxGoneParams{
-			GoneAt:    sql.NullTime{Time: s.now(), Valid: true},
-			ClusterID: home.ID,
-			ID:        id,
-		}); err != nil {
-			return Sandbox{}, fmt.Errorf("mark sandbox gone: %w", err)
+		orgID := ""
+		if row.Sandbox.OrgID.Valid {
+			orgID = row.Sandbox.OrgID.String
+		}
+		err = s.withTx(context.WithoutCancel(ctx), func(ctx context.Context) error {
+			if err := s.queries(ctx).MarkSandboxGone(ctx, db.MarkSandboxGoneParams{
+				GoneAt:    sql.NullTime{Time: s.now(), Valid: true},
+				ClusterID: home.ID,
+				ID:        id,
+			}); err != nil {
+				return fmt.Errorf("mark sandbox gone: %w", err)
+			}
+			return s.record(ctx, Event{
+				Name:           "sandbox.deleted",
+				TargetType:     "sandbox",
+				TargetID:       id,
+				TargetName:     row.Sandbox.Name,
+				OrganizationID: orgID,
+			})
+		})
+		if err != nil {
+			return Sandbox{}, err
 		}
 		row.Sandbox.Status = "destroyed"
 	} else {
 		if err := client.StopSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.queries(ctx).UpdateSandboxStatus(callCtx, db.UpdateSandboxStatusParams{
-			Status:    "stopped",
-			ClusterID: home.ID,
-			ID:        id,
-		}); err != nil {
-			return Sandbox{}, fmt.Errorf("update sandbox: %w", err)
+		orgID := ""
+		if row.Sandbox.OrgID.Valid {
+			orgID = row.Sandbox.OrgID.String
+		}
+		err = s.withTx(context.WithoutCancel(ctx), func(ctx context.Context) error {
+			if err := s.queries(ctx).UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+				Status:    "stopped",
+				ClusterID: home.ID,
+				ID:        id,
+			}); err != nil {
+				return fmt.Errorf("update sandbox: %w", err)
+			}
+			return s.record(ctx, Event{
+				Name:           "sandbox.stopped",
+				TargetType:     "sandbox",
+				TargetID:       id,
+				TargetName:     row.Sandbox.Name,
+				OrganizationID: orgID,
+			})
+		})
+		if err != nil {
+			return Sandbox{}, err
 		}
 		row.Sandbox.Status = "stopped"
 		row.Sandbox.StatusReason = ""

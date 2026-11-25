@@ -99,17 +99,19 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) error 
 }
 
 const listEvents = `-- name: ListEvents :many
-SELECT id, name, actor_kind, actor_id, actor_label, target_type, target_id, target_name, organization_id, changes, ip, request_id, created_at FROM events
-WHERE (?1 = '' OR actor_id = ?1)
-  AND (?2 = '' OR organization_id = ?2)
-  AND (?3 = '' OR name = ?3)
-  AND (?4 IS NULL OR created_at >= ?4)
-  AND (?5 IS NULL OR created_at < ?5)
+SELECT events.id, events.name, events.actor_kind, events.actor_id, events.actor_label, events.target_type, events.target_id, events.target_name, events.organization_id, events.changes, events.ip, events.request_id, events.created_at, o.slug AS organization_slug
+FROM events
+LEFT JOIN organizations AS o ON o.id = events.organization_id
+WHERE (?1 = '' OR events.actor_id = ?1)
+  AND (?2 = '' OR events.organization_id = ?2)
+  AND (?3 = '' OR events.name = ?3)
+  AND (?4 IS NULL OR events.created_at >= ?4)
+  AND (?5 IS NULL OR events.created_at < ?5)
   AND (
       ?6 = ''
-      OR (created_at, id) < (?7, ?6)
+      OR (events.created_at, events.id) < (?7, ?6)
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY events.created_at DESC, events.id DESC
 LIMIT ?8
 `
 
@@ -124,10 +126,16 @@ type ListEventsParams struct {
 	RowLimit       int64
 }
 
+type ListEventsRow struct {
+	Event            Event
+	OrganizationSlug sql.NullString
+}
+
 // Newest first, with the cursor compared as a (created_at, id) row so rows
 // sharing a timestamp never repeat or go missing. Empty strings and NULL
-// times mean "no filter".
-func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]Event, error) {
+// times mean "no filter". The workspace slug is joined for display; a
+// deleted workspace leaves it empty rather than losing the event.
+func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListEventsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEvents,
 		arg.ActorID,
 		arg.OrganizationID,
@@ -142,23 +150,24 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]Event
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Event
+	var items []ListEventsRow
 	for rows.Next() {
-		var i Event
+		var i ListEventsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.ActorKind,
-			&i.ActorID,
-			&i.ActorLabel,
-			&i.TargetType,
-			&i.TargetID,
-			&i.TargetName,
-			&i.OrganizationID,
-			&i.Changes,
-			&i.Ip,
-			&i.RequestID,
-			&i.CreatedAt,
+			&i.Event.ID,
+			&i.Event.Name,
+			&i.Event.ActorKind,
+			&i.Event.ActorID,
+			&i.Event.ActorLabel,
+			&i.Event.TargetType,
+			&i.Event.TargetID,
+			&i.Event.TargetName,
+			&i.Event.OrganizationID,
+			&i.Event.Changes,
+			&i.Event.Ip,
+			&i.Event.RequestID,
+			&i.Event.CreatedAt,
+			&i.OrganizationSlug,
 		); err != nil {
 			return nil, err
 		}

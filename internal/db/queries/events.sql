@@ -10,18 +10,21 @@ SELECT * FROM events WHERE id = ?;
 -- name: ListEvents :many
 -- Newest first, with the cursor compared as a (created_at, id) row so rows
 -- sharing a timestamp never repeat or go missing. Empty strings and NULL
--- times mean "no filter".
-SELECT * FROM events
-WHERE (sqlc.arg(actor_id) = '' OR actor_id = sqlc.arg(actor_id))
-  AND (sqlc.arg(organization_id) = '' OR organization_id = sqlc.arg(organization_id))
-  AND (sqlc.arg(name) = '' OR name = sqlc.arg(name))
-  AND (sqlc.narg(from_time) IS NULL OR created_at >= sqlc.narg(from_time))
-  AND (sqlc.narg(to_time) IS NULL OR created_at < sqlc.narg(to_time))
+-- times mean "no filter". The workspace slug is joined for display; a
+-- deleted workspace leaves it empty rather than losing the event.
+SELECT sqlc.embed(events), o.slug AS organization_slug
+FROM events
+LEFT JOIN organizations AS o ON o.id = events.organization_id
+WHERE (sqlc.arg(actor_id) = '' OR events.actor_id = sqlc.arg(actor_id))
+  AND (sqlc.arg(organization_id) = '' OR events.organization_id = sqlc.arg(organization_id))
+  AND (sqlc.arg(name) = '' OR events.name = sqlc.arg(name))
+  AND (sqlc.narg(from_time) IS NULL OR events.created_at >= sqlc.narg(from_time))
+  AND (sqlc.narg(to_time) IS NULL OR events.created_at < sqlc.narg(to_time))
   AND (
       sqlc.arg(before_id) = ''
-      OR (created_at, id) < (sqlc.arg(before_time), sqlc.arg(before_id))
+      OR (events.created_at, events.id) < (sqlc.arg(before_time), sqlc.arg(before_id))
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY events.created_at DESC, events.id DESC
 LIMIT sqlc.arg(row_limit);
 
 -- name: DeleteEventsBefore :execrows

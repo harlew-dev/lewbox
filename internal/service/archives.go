@@ -562,12 +562,25 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 
 	now := s.now()
 	// The sandbox exists now: record it even if the caller went away.
-	if err := s.queries(ctx).RecordArchiveRestore(context.WithoutCancel(ctx), db.RecordArchiveRestoreParams{
-		LastRestoredSandboxID: sandbox.ID,
-		LastRestoredAt:        sql.NullTime{Time: now, Valid: true},
-		ID:                    row.ID,
-	}); err != nil {
-		return aerolvm.Sandbox{}, fmt.Errorf("record archive restore: %w", err)
+	err = s.withTx(context.WithoutCancel(ctx), func(ctx context.Context) error {
+		if err := s.queries(ctx).RecordArchiveRestore(ctx, db.RecordArchiveRestoreParams{
+			LastRestoredSandboxID: sandbox.ID,
+			LastRestoredAt:        sql.NullTime{Time: now, Valid: true},
+			ID:                    row.ID,
+		}); err != nil {
+			return fmt.Errorf("record archive restore: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "archive.restored",
+			TargetType:     "archive",
+			TargetID:       row.ID,
+			TargetName:     row.SandboxName,
+			OrganizationID: row.OrgID,
+			Changes:        map[string]Change{"sandbox": {From: "", To: sandbox.ID}},
+		})
+	})
+	if err != nil {
+		return aerolvm.Sandbox{}, err
 	}
 	return sandbox, nil
 }
@@ -604,11 +617,23 @@ func (s *Service) deleteArchive(ctx context.Context, row db.Archive) error {
 		}
 	}
 	now := s.now()
-	if err := s.queries(ctx).MarkArchiveDeleted(ctx, db.MarkArchiveDeletedParams{
-		DeletedAt: sql.NullTime{Time: now, Valid: true},
-		ID:        row.ID,
-	}); err != nil {
-		return fmt.Errorf("mark archive deleted: %w", err)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		if err := s.queries(ctx).MarkArchiveDeleted(ctx, db.MarkArchiveDeletedParams{
+			DeletedAt: sql.NullTime{Time: now, Valid: true},
+			ID:        row.ID,
+		}); err != nil {
+			return fmt.Errorf("mark archive deleted: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "archive.deleted",
+			TargetType:     "archive",
+			TargetID:       row.ID,
+			TargetName:     row.SandboxName,
+			OrganizationID: row.OrgID,
+		})
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }

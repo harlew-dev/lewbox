@@ -10,10 +10,10 @@ func TestLimiterWindowsAreAligned(t *testing.T) {
 	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 
 	minute := newLoginLimiter(1, 0)
-	if _, ok := minute.allowIP(now, "192.0.2.1"); !ok {
+	if _, ok, _ := minute.allowIP(now, "192.0.2.1"); !ok {
 		t.Fatal("the first attempt was rejected")
 	}
-	retry, ok := minute.allowIP(now, "192.0.2.1")
+	retry, ok, _ := minute.allowIP(now, "192.0.2.1")
 	if ok {
 		t.Fatal("the second attempt was allowed")
 	}
@@ -22,10 +22,10 @@ func TestLimiterWindowsAreAligned(t *testing.T) {
 	}
 
 	hour := newLimiter(1, 0, time.Hour)
-	if _, ok := hour.allowIP(now, "192.0.2.1"); !ok {
+	if _, ok, _ := hour.allowIP(now, "192.0.2.1"); !ok {
 		t.Fatal("the first hourly attempt was rejected")
 	}
-	retry, ok = hour.allowIP(now, "192.0.2.1")
+	retry, ok, _ = hour.allowIP(now, "192.0.2.1")
 	if ok {
 		t.Fatal("the second hourly attempt was allowed")
 	}
@@ -38,10 +38,10 @@ func TestLimiterWindowsAreAligned(t *testing.T) {
 	// about when the first hit happened.
 	late := time.Date(2026, 3, 4, 5, 6, 59, 0, time.UTC)
 	lateLimiter := newLoginLimiter(1, 0)
-	if _, ok := lateLimiter.allowIP(late, "192.0.2.1"); !ok {
+	if _, ok, _ := lateLimiter.allowIP(late, "192.0.2.1"); !ok {
 		t.Fatal("the late first attempt was rejected")
 	}
-	if retry, ok := lateLimiter.allowIP(late, "192.0.2.1"); ok || retry != time.Second {
+	if retry, ok, _ := lateLimiter.allowIP(late, "192.0.2.1"); ok || retry != time.Second {
 		t.Errorf("late retry = %v, allowed = %v, want 1s", retry, ok)
 	}
 }
@@ -52,19 +52,19 @@ func TestIPBudgetCountsWholeIPv6Slash64(t *testing.T) {
 
 	// Two addresses in one /64 share a budget.
 	for _, ip := range []string{"2001:db8:1:2::1", "2001:db8:1:2:ffff::9"} {
-		if _, ok := l.allowIP(now, ip); !ok {
+		if _, ok, _ := l.allowIP(now, ip); !ok {
 			t.Fatalf("allowIP(%q) was rejected before the limit", ip)
 		}
 	}
-	if _, ok := l.allowIP(now, "2001:db8:1:2::3"); ok {
+	if _, ok, _ := l.allowIP(now, "2001:db8:1:2::3"); ok {
 		t.Error("a third address in the same /64 was allowed")
 	}
 
 	// A different /64 and an IPv4 address each have their own budget.
-	if _, ok := l.allowIP(now, "2001:db8:1:3::1"); !ok {
+	if _, ok, _ := l.allowIP(now, "2001:db8:1:3::1"); !ok {
 		t.Error("another /64 was refused")
 	}
-	if _, ok := l.allowIP(now, "192.0.2.1"); !ok {
+	if _, ok, _ := l.allowIP(now, "192.0.2.1"); !ok {
 		t.Error("an IPv4 address was refused")
 	}
 

@@ -235,6 +235,9 @@ func TestListEventsWorkspaceFilterAndPermissions(t *testing.T) {
 	if len(byOrg.Data) != 1 || byOrg.Data[0].Name != "workspace.created" || byOrg.Data[0].OrganizationID != org.ID {
 		t.Fatalf("events = %+v", byOrg.Data)
 	}
+	if byOrg.Data[0].OrganizationSlug != org.Slug {
+		t.Errorf("workspace slug = %q, want %q", byOrg.Data[0].OrganizationSlug, org.Slug)
+	}
 
 	user := createUser(t, s, "member@example.test", false)
 	ctx := WithPrincipal(context.Background(), Principal{Kind: "user", UserID: user.ID, Email: user.Email})

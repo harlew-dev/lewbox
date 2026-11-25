@@ -16,11 +16,14 @@ import {
   TableHeader,
   TableRow,
   Text,
+  TextLink,
 } from "@harlew-dev/ui";
+import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/16/solid";
 import { useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
 import * as api from "../../lib/api";
 import { relativeTime } from "../../lib/format";
+import { routes } from "../../lib/routes";
 import { useDocumentTitle } from "../../lib/use-document-title";
 import { useLoad } from "../../lib/use-load";
 import { one, withParam } from "../../lib/query-params";
@@ -195,72 +198,14 @@ export function EventsPage() {
                 <TableHeader>Actor</TableHeader>
                 <TableHeader>Action</TableHeader>
                 <TableHeader>Target</TableHeader>
-                <TableHeader>Workspace</TableHeader>
-                <TableHeader>IP</TableHeader>
+                <TableHeader className="w-0">
+                  <span className="sr-only">Details</span>
+                </TableHeader>
               </TableRow>
             </TableHead>
             <TableBody>
               {rows.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell
-                    className="whitespace-nowrap text-zinc-500 dark:text-zinc-400"
-                    title={new Date(event.created_at).toLocaleString()}
-                  >
-                    {relativeTime(event.created_at)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">
-                        {event.actor_label || "—"}
-                      </span>
-                      <Badge
-                        color={
-                          event.actor_kind === "system" ||
-                          event.actor_kind === "anonymous"
-                            ? "zinc"
-                            : "purple"
-                        }
-                      >
-                        {event.actor_kind.replace("_", " ")}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Text size="sm" className="font-mono">
-                      {event.name}
-                    </Text>
-                    {event.changes && Object.keys(event.changes).length > 0 && (
-                      <Text
-                        size="sm"
-                        className="mt-1 text-zinc-500 dark:text-zinc-400"
-                      >
-                        {Object.entries(event.changes)
-                          .map(
-                            ([field, change]) =>
-                              `${field}: ${valueText(change.from)} → ${valueText(change.to)}`,
-                          )
-                          .join(", ")}
-                      </Text>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Text size="sm">{targetText(event)}</Text>
-                    {event.target_id && (
-                      <Text
-                        size="sm"
-                        className="font-mono text-zinc-500 dark:text-zinc-400"
-                      >
-                        {event.target_id}
-                      </Text>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-zinc-500 dark:text-zinc-400">
-                    {event.organization_id || "—"}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-zinc-500 dark:text-zinc-400">
-                    {event.ip || "—"}
-                  </TableCell>
-                </TableRow>
+                <EventRow key={event.id} event={event} />
               ))}
             </TableBody>
           </Table>
@@ -283,7 +228,125 @@ export function EventsPage() {
   );
 }
 
-// rfc3339 turns a datetime-local input value into the API's RFC 3339 time.
+function EventRow({ event }: { event: api.AuditEvent }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <TableRow>
+        <TableCell
+          className="whitespace-nowrap text-zinc-500 dark:text-zinc-400"
+          title={new Date(event.created_at).toLocaleString()}
+        >
+          {relativeTime(event.created_at)}
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{event.actor_label || "—"}</span>
+            <Badge
+              color={
+                event.actor_kind === "system" ||
+                event.actor_kind === "anonymous"
+                  ? "zinc"
+                  : "purple"
+              }
+            >
+              {event.actor_kind.replace("_", " ")}
+            </Badge>
+          </div>
+        </TableCell>
+        <TableCell>
+          <Text size="sm" className="font-mono">
+            {event.name}
+          </Text>
+          {changesText(event.changes) && (
+            <Text size="sm" className="mt-1 text-zinc-500 dark:text-zinc-400">
+              {changesText(event.changes)}
+            </Text>
+          )}
+        </TableCell>
+        <TableCell>
+          <Text size="sm">{targetText(event)}</Text>
+          {event.organization_slug && (
+            <Text size="sm" className="mt-1">
+              <TextLink
+                href={routes.admin.workspace(event.organization_slug)}
+              >
+                {event.organization_slug}
+              </TextLink>
+            </Text>
+          )}
+        </TableCell>
+        <TableCell className="w-0 text-right">
+          <Button
+            plain
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+            aria-label={`Details for ${event.name}`}
+          >
+            {open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+          </Button>
+        </TableCell>
+      </TableRow>
+      {open && (
+        <TableRow>
+          <TableCell colSpan={5} className="bg-zinc-50 dark:bg-white/5">
+            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              <Detail
+                label="Full time"
+                value={new Date(event.created_at).toISOString()}
+              />
+              <Detail label="IP" value={event.ip || "—"} />
+              <Detail
+                label="Request ID"
+                value={event.request_id || "—"}
+                mono
+              />
+              <Detail label="Target ID" value={event.target_id || "—"} mono />
+              <Detail
+                label="Workspace ID"
+                value={event.organization_id || "—"}
+                mono
+              />
+              <Detail label="Event ID" value={event.id} mono />
+            </dl>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+function Detail({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-zinc-500 uppercase dark:text-zinc-400">
+        {label}
+      </dt>
+      <dd className={mono ? "font-mono break-all" : "break-words"}>{value}</dd>
+    </div>
+  );
+}
+
+function changesText(
+  changes: Record<string, api.EventChange> | undefined,
+): string {
+  if (!changes) return "";
+  return Object.entries(changes)
+    .map(
+      ([field, change]) =>
+        `${field}: ${valueText(change.from)} → ${valueText(change.to)}`,
+    )
+    .join(", ");
+}
+
 // localInput turns an RFC 3339 time from the URL back into the value a
 // datetime-local input shows, in the browser's time zone.
 function localInput(value: string | undefined): string | undefined {
@@ -294,6 +357,7 @@ function localInput(value: string | undefined): string | undefined {
   return local.toISOString().slice(0, 16);
 }
 
+// rfc3339 turns a datetime-local input value into the API's RFC 3339 time.
 function rfc3339(local: string | undefined): string | undefined {
   if (!local) return undefined;
   const date = new Date(local);

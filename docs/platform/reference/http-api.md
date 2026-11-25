@@ -110,7 +110,7 @@ Instance admins only. One row per state change, newest first, cursor-paged.
 |---|---|---|
 | `GET /v0/events` | admin | `{data: [Event], next}`. Filters: `actor` (account ID or email), `organization` (workspace ID or slug), `action` (an event name such as `plan.updated`), `from` and `to` (RFC 3339; `to` is exclusive), `limit` (default 50, max 200), `before` (the `next` value of the previous page). An unknown filter value matches nothing; a cursor from another scope, or a pruned one, is `400` |
 
-An Event has `id`, `name`, `actor_kind` (`user`, `access_token`, `admin_key`, `local`, `system` or `anonymous`), `actor_id`, `actor_label`, `target_type`, `target_id`, `target_name`, `organization_id`, `changes` (`{field: {from, to}}` for an update), `ip`, `request_id` and `created_at`.
+An Event has `id`, `name`, `actor_kind` (`user`, `access_token`, `admin_key`, `local`, `system` or `anonymous`), `actor_id`, `actor_label`, `target_type`, `target_id`, `target_name`, `organization_id`, `organization_slug` (the workspace's slug, when it still exists), `changes` (`{field: {from, to}}` for an update), `ip`, `request_id` and `created_at`.
 
 ### Setup links
 

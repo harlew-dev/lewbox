@@ -310,6 +310,15 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	s.snapshotMu.Lock()
 	delete(s.snapshotCache, snapshotKey{found.target.cluster.ID, team})
 	s.snapshotMu.Unlock()
+	if err := s.record(ctx, Event{
+		Name:           "snapshot.deleted",
+		TargetType:     "snapshot",
+		TargetID:       name,
+		TargetName:     name,
+		OrganizationID: found.target.org.ID,
+	}); err != nil {
+		return Snapshot{}, err
+	}
 	return forPrincipal(found.snapshot, found.target.org, p.InstanceAdmin), nil
 }
 

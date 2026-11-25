@@ -332,6 +332,22 @@ func TestSuspendedOrganizationIsBlockedAndStopped(t *testing.T) {
 	if len(list.Data) != 1 || list.Data[0].Status != "stopped" {
 		t.Errorf("suspended sandbox = %+v", list.Data)
 	}
+
+	// The admin's suspension is one event; the sync loop's enforcement of it
+	// is a system event on the sandbox.
+	if event, ok := findEvent(t, f.s, "workspace.suspended"); !ok || event.ActorKind != "local" {
+		t.Errorf("workspace.suspended = %+v", event)
+	}
+	event, ok := findEvent(t, f.s, "sandbox.stopped")
+	if !ok || event.ActorKind != "system" || event.TargetID != "sb-1" {
+		t.Errorf("system sandbox.stopped = %+v", event)
+	}
+
+	// A later pass finds nothing left to stop, so it writes no second event.
+	f.sync(t)
+	if n := countEvents(t, f.s, "sandbox.stopped"); n != 1 {
+		t.Errorf("sandbox.stopped events after a second pass = %d", n)
+	}
 }
 
 func TestSandboxActionsAreScoped(t *testing.T) {
