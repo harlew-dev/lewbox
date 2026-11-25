@@ -45,7 +45,12 @@ function Home() {
   const usage = useLoad(`usage:${org.slug}:${historyDays}`, () =>
     api.getUsage({ org: org.slug, from: daysAgo(historyDays), granularity: 'day' }),
   )
-  const sandboxes = useLoad(`sandboxes:${org.slug}:all`, () => api.listSandboxes({ org: org.slug }))
+  const sandboxes = useLoad(`sandboxes:${org.slug}:count`, () =>
+    api.listSandboxes({ org: org.slug, per_page: 1 }),
+  )
+  const running = useLoad(`sandboxes:${org.slug}:running`, () =>
+    api.listSandboxes({ org: org.slug, status: ['started'], per_page: 1 }),
+  )
   // Once the dashboard is opened it stays: a new sandbox while getting
   // started turns the last step green rather than swapping the page.
   const [opened, setOpened] = useState(false)
@@ -67,7 +72,7 @@ function Home() {
         </>
       )
     }
-    if ((sandboxes.data?.data.length ?? 0) === 0) {
+    if ((sandboxes.data?.pages.items ?? 0) === 0) {
       if (usage.error.message) {
         return (
           <>
@@ -90,27 +95,28 @@ function Home() {
     }
   }
 
-  return <Dashboard usage={usage} running={sandboxes.data?.data ?? []} />
+  return <Dashboard usage={usage} running={running.data?.pages.items} />
 }
 
 function GetStarted({ onDone }: { onDone: () => void }) {
   const { org, can } = usePortalOrg()
-  const keys = useLoad(`sandbox-keys:${org.slug}`, () => api.listSandboxKeys(org.slug))
+  const keys = useLoad(`sandbox-keys:${org.slug}:active`, () =>
+    api.listSandboxKeys(org.slug, { status: ['active'], per_page: 1 }),
+  )
   const regions = useLoad(`regions:${org.slug}`, () => api.listRegions(org.slug))
   const sandboxes = useLoad(
-    `sandboxes:${org.slug}:all`,
-    () => api.listSandboxes({ org: org.slug }),
+    `sandboxes:${org.slug}:first`,
+    () => api.listSandboxes({ org: org.slug, per_page: 1 }),
     { every: (data) => (data?.data.some((sandbox) => sandbox.status === 'creating') ? 5_000 : 0) },
   )
   const [createOpen, setCreateOpen] = useState(false)
   const [created, setCreated] = useState<api.NewSandboxKey | null>(null)
 
-  const live = (keys.data?.data ?? []).filter((key) => !key.revoked_at && !key.expired)
-  const key = created ?? live[0] ?? null
+  const key = created ?? keys.data?.data[0] ?? null
   const region =
     key?.region ?? regions.data?.data.find((option) => option.slug === org.region?.slug) ?? null
   const snippets = region ? sandboxSnippets(region, created ?? undefined) : null
-  const first = (sandboxes.data?.data.length ?? 0) > 0
+  const first = (sandboxes.data?.pages.items ?? 0) > 0
 
   return (
     <>
@@ -171,10 +177,10 @@ function recentTotals(usage: api.Usage): api.UsageAmounts {
   return totals
 }
 
-function Dashboard({ usage, running }: { usage: LoadState<api.Usage>; running: api.Sandbox[] }) {
+function Dashboard({ usage, running }: { usage: LoadState<api.Usage>; running?: number }) {
   const { org } = usePortalOrg()
   const limits = useLoad(`limits:${org.slug}`, () => api.getLimits(org.slug))
-  const count = running.filter((sandbox) => sandbox.status === 'started').length
+  const count = running ?? 0
   const totals = usage.data ? recentTotals(usage.data) : null
   const days = `(${defaultUsageDays} days)`
 

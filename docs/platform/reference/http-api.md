@@ -10,6 +10,40 @@ Everything the CLI does goes through this API. The CLI's `--json` output is exac
 - Errors: `{"error":{"code","message","details"}}`, with the codes in [Output and errors](output-and-errors.md#errors). A bad field value is `422` with `details.field`; `400` means the request couldn't be read at all; a dependency that is down is `503` with `Retry-After`.
 - Every response carries `X-Request-ID`; a `500` repeats it in `details.request_id`. An unknown path is JSON `404`, and a known path with the wrong method is `405` with `Allow`.
 
+## Lists
+
+Every list that grows is paged, searched, sorted and filtered by the API. The answer carries the page beside the data:
+
+```json
+{"data":[…],"pages":{"current":2,"total":7,"per_page":20,"items":131}}
+```
+
+`pages.total` is at least 1, so an empty list is "page 1 of 1". A page past the end is `200` with `data: []` and the real totals.
+
+| Parameter | Rule | Default |
+|---|---|---|
+| `page` | Plain digits, 1–10 000 | 1 |
+| `per_page` | Plain digits, 1–100 | 20 |
+| `q` | Trimmed, at most 100 characters, matched case-insensitively against the list's search columns. `%`, `_` and `\` match literally | none |
+| `sort` | One of the list's sort keys; a `-` prefix reverses it | the list's first key |
+| filters | One comma-separated value per parameter, such as `status=started,stopped`. Duplicates are ignored; at most 50 values | none (all) |
+
+An empty item, an unknown value, an unknown sort key, a malformed page or a repeated parameter is `400` with `details.field` naming the parameter. A route that doesn't list `q` or a filter below rejects it.
+
+| List | Sort keys (default first) | `q` matches | Filters |
+|---|---|---|---|
+| `GET /v0/organizations` | `name`, `-created`, `status` | name, slug | `status` (pending, active, suspended), `region`, `plan`, `user` (single: an ID or email) |
+| `GET /v0/users` | `email`, `-created`, `status` | email | `status` (active, disabled), `role` (admin, user) |
+| `GET /v0/sandboxes` | `-created`, `status`, `region`, `workspace` | sandbox ID | `status` (creating, started, stopped, destroyed, error), `region`, `organization` (admins) |
+| `GET /v0/snapshots` | `-created`, `name`, `size` | name | `kind` (snapshot, archive), `region`, `organization` (admins), `status` (pending, pushing, active, error) |
+| `GET /v0/nodes` | `cluster`, `name` | name, URL | `cluster`, `role` (server, worker, ingress, mixed), `alive` (true or false) |
+| `GET /v0/members` | `email`, `role`, `-joined` | email | `role` (owner, admin, member, viewer) |
+| `GET /v0/sandbox-keys`, `GET /v0/admin-keys`, `GET /v0/access-tokens` | `-created`, `name`, `expires` | name (and prefix for admin keys and access tokens) | `status` (active, expired, revoked) |
+| `GET /v0/setup-links` | `-created`, `expires` | note | `status` (unused, claimed, used, expired), `plan`, `region` |
+| `GET /v0/events` | fixed: newest first | none | `actor`, `organization` and `action` are comma lists; `from`, `to`, `limit` and the `before` cursor are unchanged |
+
+`region`, `plan`, `organization`, `cluster` and `user` accept an ID or slug where the object has one. A customer's `region` is checked against their workspace's subscriptions; `organization` is for instance admins only (`403` otherwise).
+
 ## Authentication
 
 Sign in to get a session token, then send it as a bearer token:
@@ -118,7 +152,7 @@ Instance admins only. One row per state change, newest first, cursor-paged.
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/events` | admin | `{data: [Event], next}`. Filters: `actor` (account ID or email), `organization` (workspace ID or slug), `action` (an event name such as `plan.updated`), `from` and `to` (RFC 3339; `to` is exclusive), `limit` (default 50, max 200), `before` (the `next` value of the previous page). An unknown filter value matches nothing; a cursor from another scope, or a pruned one, is `400` |
+| `GET /v0/events` | admin | `{data: [Event], next}`. Cursor-paged and always newest first. `actor` (comma-separated account IDs or emails), `organization` (workspace IDs or slugs) and `action` (event names) each take a comma list; `from` and `to` are RFC 3339 (`to` exclusive); `limit` is 50 by default and at most 200; `before` is the `next` value of the previous page. An unknown filter value matches nothing; a cursor from another scope, or a pruned one, is `400` |
 
 An Event has `id`, `name`, `actor_kind` (`user`, `access_token`, `admin_key`, `local`, `system` or `anonymous`), `actor_id`, `actor_label`, `target_type`, `target_id`, `target_name`, `organization_id`, `organization_slug` (the workspace's slug, when it still exists), `changes` (`{field: {from, to}}` for an update), `ip`, `request_id` and `created_at`.
 
@@ -129,7 +163,7 @@ Instance admins create and revoke them; only the token's hash is stored, so `tok
 | Route | Who | |
 |---|---|---|
 | `POST /v0/setup-links/check` | anyone | `{token}` → what the public setup page shows for an unused, unexpired link: `{instance_name, plan: {name}, region: {name}, expires_at}`. Never a slug or who claimed it. `404` (`this setup link is invalid or has expired`) for an unknown, used or expired link |
-| `GET /v0/setup-links` | admin | `{data: [SetupLink]}`, newest first, never a token |
+| `GET /v0/setup-links` | admin | `{data, pages}`, newest first, never a token. Filters: `status` (unused, claimed, used, expired), `plan`, `region` |
 | `POST /v0/setup-links` | admin | `{plan, region, expires_in_hours, note}` → `201` SetupLink plus `token`. `plan` and `region` are a slug or ID; `expires_in_hours` defaults to 168 and is 1–720. Unknown plan or region is `404` |
 | `DELETE /v0/setup-links/{setup_link}` | admin | Revoke an unused link → the SetupLink. `409` when it has been used |
 
@@ -194,7 +228,7 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/nodes?cluster={slug or ID}` | admin | `{data: [Node]}`, optionally for one cluster |
+| `GET /v0/nodes` | admin | `{data, pages}`. `cluster` and `role` (server, worker, ingress, mixed) take comma lists; `alive=true|false` keeps nodes with that liveness |
 | `GET /v0/nodes/{node}` | admin | Node |
 | `DELETE /v0/nodes/{node}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
@@ -206,7 +240,7 @@ An account's tokens for the API. `?user=` (an ID or email) names another account
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/access-tokens` | signed in (not an API key) | `{data: [AccessToken]}`, newest first, revoked ones included |
+| `GET /v0/access-tokens` | signed in (not an API key) | `{data, pages}`, newest first, revoked ones included. Filter `status` (active, expired, revoked) |
 | `POST /v0/access-tokens` | signed in, not with a token | `{name, expires_in, user, current_password}` → `201` AccessToken plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `user` is optional, as `?user=`. `current_password` is the caller's own. A token can't create another (`403`); a disabled account gets `409` |
 | `DELETE /v0/access-tokens/{access_token}` | signed in (not an API key) | Revoke by ID or live name → the AccessToken. A token may revoke itself |
 
@@ -214,7 +248,7 @@ An account's tokens for the API. `?user=` (an ID or email) names another account
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/users` | admin | `{data: [User]}` |
+| `GET /v0/users` | admin | `{data, pages}`. Filters: `status` (active, disabled), `role` (admin, user) |
 | `POST /v0/users` | admin | `{email, password, instance_admin}` → `201` User |
 | `GET /v0/users/{user}` | admin, or themselves | User |
 | `DELETE /v0/users/{user}` | admin | → the User |
@@ -228,19 +262,19 @@ The member and API key routes act on the organization in the `Lewbox-Organizatio
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/organizations?user={user}&status={status}` | signed in, or a key | `{data: [Organization]}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each; `status` keeps `pending`, `active` or `suspended` ones |
+| `GET /v0/organizations` | signed in, or a key | `{data, pages}`: every one for admins, your own otherwise, its own for a key. `user` (admins, or yourself) lists that account's, with its `role` in each. Filters: `status` (pending, active, suspended), `region`, `plan` |
 | `POST /v0/organizations` | signed in | `{slug, name, owner, setup_token}` → `201` Organization. `slug` is generated from `name` when it is empty. An instance admin may set `owner` (an email or ID, default you) and gets no default subscription unless it uses a setup token. Anyone else becomes the owner (`owner` is `403`), gets the default plan in the default region when both exist, and must have sign-up `open` (active workspace) or `approval` (pending); `closed` is `403`. With `setup_token`, the workspace is active in any mode, subscribed to the link's plan in its region, and the link is consumed. At most 10 workspaces may be owned by one account (`422`, a quota) |
 | `GET /v0/organizations/{organization}` | its members, admins, its keys | Organization |
 | `PATCH /v0/organizations/{organization}` | owner or admin; status: admin | `{name}` renames. Instance admins can also set `{status}`; `status` is `active` or `suspended` → Organization |
 | `GET /v0/organization` | as for the header's, or the key's own | Organization |
-| `GET /v0/members` | its members, admins, its keys | `{data: [Member]}` |
+| `GET /v0/members` | its members, admins, its keys | `{data, pages}`. Filter `role` (owner, admin, member, viewer) |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
 | `PATCH /v0/members/{member}` | owner or admin | `{role}` → Member. `{member}` is an email, account ID or member ID. The last owner stays (`409`) |
 | `DELETE /v0/members/{member}` | owner or admin, or themselves | → the Member |
-| `GET /v0/admin-keys` | owner, admin, admins, its keys | `{data: [AdminKey]}`, newest first, revoked ones included |
+| `GET /v0/admin-keys` | owner, admin, admins, its keys | `{data, pages}`, newest first, revoked ones included. Filter `status` (active, expired, revoked) |
 | `POST /v0/admin-keys` | owner or admin | `{name, expires_in, current_password}` → `201` AdminKey plus `token`, shown only here. `expires_in` is like `90d` or `720h`; empty means never. `current_password` is the caller's own |
 | `DELETE /v0/admin-keys/{admin_key}` | owner or admin | Revoke by ID or live name → the AdminKey |
-| `GET /v0/sandbox-keys` | its members, admins, its keys | `{data: [SandboxKey]}`, live ones first, revoked ones included, newest first |
+| `GET /v0/sandbox-keys` | its members, admins, its keys | `{data, pages}`, newest first, revoked ones included. Filter `status` (active, expired, revoked) |
 | `POST /v0/sandbox-keys` | owner, admin or member, admins, its keys | `{name, region, expires_in}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the workspace's region; `expires_in` is `90d` (the default), `never` or a duration such as `30d`. `403` if the organization is pending or suspended, `409` if the region is not ready or the new quota has not been pushed successfully yet ("still being set up"); an unsubscribed region is `404`. A cluster failure is `503` and stores nothing |
 | `DELETE /v0/sandbox-keys/{sandbox_key}` | owner, admin or member (members only their own), admins, its keys | Revoke the upstream token, then mark it → SandboxKey. A cluster failure is `503` and the key stays live |
 
@@ -252,10 +286,10 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/sandboxes?region={slug}&status={status}&org={slug}` | its members, admins, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500. Filters by region and status |
+| `GET /v0/sandboxes` | its members, admins, its keys | `{data, pages}`, not-gone only, newest first. `region`, `status` and `organization` (admins) take comma lists; `org` is the workspace scope |
 | `POST /v0/sandboxes/{sandbox}/stop?region={slug}` | owner, admin or member, admins, its keys | Stop on the cluster, then update the mirror → Sandbox. `region` picks the cluster when the ID is not unique |
 | `DELETE /v0/sandboxes/{sandbox}?region={slug}` | same | Delete on the cluster, then mark it gone → Sandbox |
-| `GET /v0/snapshots?region={slug}&org={slug}` | its members, admins, its keys | `{data: [Snapshot], partial_nodes: [node]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`); filter on `kind` in the caller. `status` is `pending`, `pushing`, `active` or `error`. `partial_nodes` names nodes that did not answer and covers only the snapshot half; archives come from the database and are never partial. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
+| `GET /v0/snapshots` | its members, admins, its keys | `{data, pages, summary?, partial_nodes: [node]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`). Filters: `kind`, `region`, `organization` (admins) and `status` (pending, pushing, active, error). `summary=include` adds totals over the whole filtered set, before paging. `partial_nodes` names nodes that did not answer and covers only the snapshot half; archives come from the database and are never partial. Without `org`, an instance admin gets every workspace's. Cached for 30 s |
 | `DELETE /v0/snapshots/{snapshot}?region={slug}` | owner, admin or member, admins, its keys | Delete on the cluster with a short-lived team token, then revoke it → Snapshot. An `archive-…` name is `422`: delete it through the archive routes |
 | `GET /v0/archives/{archive}` | its members, admins, its keys | The archive as a Snapshot of `kind: "archive"`. Another workspace's is `404`, like a missing one; a non-UUID ID is `404` too |
 | `POST /v0/archives/{archive}/restore` | owner, admin or member, admins, its keys | Create a new sandbox from the archive's registry ref, with its name, tags and size, and the tag `lewbox.restored_from=<old sandbox id>` → `{archive, sandbox}` where `archive` is a Snapshot. The archive is kept. `403` if the workspace is suspended; `409` if it has no subscription in that region or the archive is not `active`; `422` if the region's plan limit is reached |
@@ -266,6 +300,30 @@ These routes take the organization as `?org={slug}` when present, otherwise in t
 Suspending an organization pushes a blocking quota where it has used compute and stops its running sandboxes on the next sync pass; the sync also stops sandboxes in a region it is no longer subscribed to. Stopped sandboxes still count against limits, as AerolVM counts them.
 
 Snapshots and archived sandboxes share one list and one status vocabulary. The snapshot half is read with short-lived read-only tokens bound to the workspace's AerolVM team, kept in memory only; archives come from the database. Snapshot names are unique per team, so `region` names the workspace's region; without it Lewbox asks that region. A viewer may list both kinds but not delete either.
+
+### Snapshot summary
+
+`GET /v0/snapshots?summary=include` adds a `summary` object over every snapshot the filters kept, before paging:
+
+```json
+{
+  "count": 131,
+  "disk_gb": 640,
+  "memory_mb": 262144,
+  "failed": 2,
+  "workspaces": 3,
+  "by_node": [
+    {"region": "eu-west", "node": "node-a", "kind": "snapshot", "count": 90, "disk_gb": 400},
+    {"region": "eu-west", "node": null, "kind": "archive", "count": 41, "disk_gb": 240}
+  ],
+  "by_workspace": [
+    {"slug": "acme", "name": "Acme Inc", "count": 100, "disk_gb": 500},
+    {"slug": "globex", "name": "Globex", "count": 31, "disk_gb": 140}
+  ]
+}
+```
+
+`node` is `null` for an archive (and for a caller who may not see nodes). `failed` counts status `error`; `workspaces` counts distinct owners. Both groups are sorted by `disk_gb` descending, then `count` descending, then label (region, node and kind; or slug). Any other `summary` value is `400`.
 
 ### Subscriptions
 
@@ -360,12 +418,13 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "team": "lbx-01a1cb3429a574c396915394d021b0f2",
   "region": {"slug": "eu-west", "name": "EU West", "plan": {"slug": "free", "name": "Free"}},
   "members": 1,
+  "running": 2,
   "role": "owner",
   "created_at": "2026-11-11T15:22:35.8Z"
 }
 ```
 
-`status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is the workspace's single subscribed region, or `null` when it has none. `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is the workspace's single subscribed region, or `null` when it has none. `running` is the number of the workspace's sandboxes with status `started` in the mirror, across its regions. `team` is only present for instance admins. `role` is your role (or the listed account's) when it is a member.
 
 **Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a cluster customers can use. `stop_policy` is `keep` or `archive`. For a subscribed region it also has `plan` (`{slug, name}`) and `limits`.
 

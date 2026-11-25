@@ -1,3 +1,6 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
+
 export type SnapshotKind = 'snapshot' | 'archive'
 
 // AerolVM's push states, the one vocabulary for both snapshots and archives.
@@ -33,10 +36,36 @@ export interface Snapshot {
   last_restored_at: string | null
 }
 
-export interface SnapshotList {
-  data: Snapshot[]
+// Totals for the whole filtered set, from ?summary=include.
+export interface SnapshotSummary {
+  count: number
+  disk_gb: number
+  memory_mb: number
+  failed: number
+  workspaces: number
+  by_node: {
+    region: string
+    node: string | null
+    kind: SnapshotKind
+    count: number
+    disk_gb: number
+  }[]
+  by_workspace: { slug: string; name: string; count: number; disk_gb: number }[]
+}
+
+export type SnapshotList = Page<Snapshot> & {
   // Nodes that didn't answer, so the list may be missing some.
   partial_nodes: string[]
+  summary?: SnapshotSummary
+}
+
+export interface SnapshotListQuery extends ListParams {
+  kind?: SnapshotKind[]
+  region?: string[]
+  // Instance admins only.
+  organization?: string[]
+  status?: SnapshotStatus[]
+  summary?: 'include'
 }
 
 export interface RestoredArchive {

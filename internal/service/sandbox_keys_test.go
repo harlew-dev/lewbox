@@ -222,7 +222,7 @@ func TestSandboxKeyAccess(t *testing.T) {
 	f := newSandboxFixture(t)
 	s := f.s
 
-	if _, err := s.ListSandboxKeys(f.viewer, "acme"); err != nil {
+	if _, err := s.ListSandboxKeys(f.viewer, ListSandboxKeysRequest{Org: "acme"}); err != nil {
 		t.Errorf("viewer list: %v", err)
 	}
 	_, err := s.CreateSandboxKey(f.viewer, "acme", CreateSandboxKeyRequest{Name: "no"})
@@ -256,7 +256,7 @@ func TestSandboxKeyAccess(t *testing.T) {
 	if _, err := s.CreateSandboxKey(keyCtx, "", CreateSandboxKeyRequest{Name: "agent"}); err != nil {
 		t.Fatalf("admin key creates a sandbox key: %v", err)
 	}
-	if list, err := s.ListSandboxKeys(keyCtx, ""); err != nil || len(list.Data) != 3 {
+	if list, err := s.ListSandboxKeys(keyCtx, ListSandboxKeysRequest{Org: ""}); err != nil || len(list.Data) != 3 {
 		t.Fatalf("admin key lists sandbox keys = %+v, %v", list, err)
 	}
 	if _, err := s.RevokeSandboxKey(keyCtx, "", "shared"); err != nil {
@@ -274,7 +274,7 @@ func TestSandboxKeyListOrder(t *testing.T) {
 	if _, err := f.s.RevokeSandboxKey(f.owner, "acme", "first"); err != nil {
 		t.Fatal(err)
 	}
-	list, err := f.s.ListSandboxKeys(f.viewer, "acme")
+	list, err := f.s.ListSandboxKeys(f.viewer, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 2 {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
@@ -292,7 +292,7 @@ func TestSandboxKeyUpstreamFailure(t *testing.T) {
 	if len(f.fake.Tokens()) != before {
 		t.Errorf("failed mint left a token: %+v", f.fake.Tokens())
 	}
-	list, err := f.s.ListSandboxKeys(f.owner, "acme")
+	list, err := f.s.ListSandboxKeys(f.owner, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 0 {
 		t.Errorf("list after failure = %+v, %v", list, err)
 	}
@@ -306,7 +306,7 @@ func TestSandboxKeyRevokeFailureKeepsItLive(t *testing.T) {
 	f.fake.Stop()
 	_, err := f.s.RevokeSandboxKey(f.owner, "acme", "laptop")
 	wantCode(t, err, CodeUnavailable)
-	list, err := f.s.ListSandboxKeys(f.owner, "acme")
+	list, err := f.s.ListSandboxKeys(f.owner, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 1 || list.Data[0].RevokedAt != nil {
 		t.Fatalf("key after failed revoke = %+v, %v", list, err)
 	}
@@ -374,7 +374,7 @@ func TestRemoveClusterRevokesSandboxKeys(t *testing.T) {
 	if !found {
 		t.Errorf("revoked = %v, want %s", f.fake.Revoked(), upstream.ID)
 	}
-	list, err := f.s.ListSandboxKeys(f.owner, "acme")
+	list, err := f.s.ListSandboxKeys(f.owner, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 0 {
 		t.Errorf("keys after cluster removal = %+v, %v", list, err)
 	}
@@ -388,7 +388,7 @@ func TestSandboxKeyAnotherOrganization(t *testing.T) {
 	if _, err := f.s.CreateOrganization(f.root, CreateOrganizationRequest{Slug: "other", Owner: "outsider@example.com"}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.s.ListSandboxKeys(f.outsider, "acme")
+	_, err := f.s.ListSandboxKeys(f.outsider, ListSandboxKeysRequest{Org: "acme"})
 	wantCode(t, err, CodeNotFound)
 	_, err = f.s.RevokeSandboxKey(f.outsider, "acme", "laptop")
 	wantCode(t, err, CodeNotFound)
@@ -477,7 +477,7 @@ func TestSandboxKeyCreatorIsHidden(t *testing.T) {
 	if _, err := f.s.CreateSandboxKey(f.owner, "acme", CreateSandboxKeyRequest{Name: "mine"}); err != nil {
 		t.Fatal(err)
 	}
-	list, err := f.s.ListSandboxKeys(f.owner, "acme")
+	list, err := f.s.ListSandboxKeys(f.owner, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestLeavingMemberKeysAreRevoked(t *testing.T) {
 	if !found {
 		t.Errorf("revoked = %v, want the member's key", f.fake.Revoked())
 	}
-	keys, err := f.s.ListSandboxKeys(f.owner, "acme")
+	keys, err := f.s.ListSandboxKeys(f.owner, ListSandboxKeysRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestMemberChangeFailsClosedWhenKeysCannotBeRevoked(t *testing.T) {
 	} else {
 		wantCode(t, err, CodeUnavailable)
 	}
-	members, err := f.s.ListMembers(f.owner, "acme")
+	members, err := f.s.ListMembers(f.owner, ListMembersRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

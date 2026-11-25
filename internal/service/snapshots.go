@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,10 +72,66 @@ const (
 )
 
 // SnapshotList is returned by ListSnapshots. Data is never null; PartialNodes
-// names nodes that did not answer.
+// names nodes that did not answer. Summary is present only when the caller
+// asks for it.
 type SnapshotList struct {
-	Data         []Snapshot `json:"data"`
-	PartialNodes []string   `json:"partial_nodes"`
+	Data         []Snapshot       `json:"data"`
+	Pages        Pages            `json:"pages"`
+	Summary      *SnapshotSummary `json:"summary,omitempty"`
+	PartialNodes []string         `json:"partial_nodes"`
+}
+
+// SnapshotSummary totals the whole filtered set, before paging.
+type SnapshotSummary struct {
+	Count       int                        `json:"count"`
+	DiskGB      int64                      `json:"disk_gb"`
+	MemoryMB    int64                      `json:"memory_mb"`
+	Failed      int                        `json:"failed"`
+	Workspaces  int                        `json:"workspaces"`
+	ByNode      []SnapshotSummaryNode      `json:"by_node"`
+	ByWorkspace []SnapshotSummaryWorkspace `json:"by_workspace"`
+}
+
+// SnapshotSummaryNode is one region, node and kind in the summary. Node is
+// nil for an archive, and for any caller who may not see nodes.
+type SnapshotSummaryNode struct {
+	Region string  `json:"region"`
+	Node   *string `json:"node"`
+	Kind   string  `json:"kind"`
+	Count  int     `json:"count"`
+	DiskGB int64   `json:"disk_gb"`
+}
+
+// SnapshotSummaryWorkspace is one workspace in the summary.
+type SnapshotSummaryWorkspace struct {
+	Slug   string `json:"slug"`
+	Name   string `json:"name"`
+	Count  int    `json:"count"`
+	DiskGB int64  `json:"disk_gb"`
+}
+
+// ListSnapshotsRequest pages and filters snapshots. Region, Organization,
+// Kind and Status are comma-separated multi-value filters; Organization is
+// for instance admins. Summary is "include" to add the totals.
+type ListSnapshotsRequest struct {
+	ListQuery
+	Region       string `json:"region"`
+	Org          string `json:"org"`
+	Organization string `json:"organization"`
+	Kind         string `json:"kind"`
+	Status       string `json:"status"`
+	Summary      string `json:"summary"`
+}
+
+// snapshotSorts names the sort keys the merged list supports. The values are
+// the keys themselves because sorting and paging happen in Go.
+var snapshotSorts = map[string]string{
+	"created":  "created",
+	"-created": "-created",
+	"name":     "name",
+	"-name":    "-name",
+	"size":     "size",
+	"-size":    "-size",
 }
 
 // snapshotKey identifies one workspace's snapshots on one cluster.
@@ -103,24 +160,64 @@ type snapshotTarget struct {
 
 // ListSnapshots lists the snapshots of every workspace the caller may see, on
 // every node of each region. A node that does not answer is reported in
-// PartialNodes.
-func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotList, error) {
+// PartialNodes. Filtering, sorting and paging happen here, over the cached
+// merged list.
+func (s *Service) ListSnapshots(ctx context.Context, req ListSnapshotsRequest) (SnapshotList, error) {
 	p, err := requirePrincipal(ctx)
 	if err != nil {
 		return SnapshotList{}, err
+	}
+	q, err := parseListQuery(req.ListQuery, snapshotSorts, "-created")
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	kinds, err := parseList("kind", req.Kind, []string{snapshotKindSnapshot, snapshotKindArchive})
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	statuses, err := parseList("status", req.Status, []string{snapshotStatusPending, snapshotStatusPushing, snapshotStatusActive, snapshotStatusError})
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	includeSummary := false
+	switch req.Summary {
+	case "":
+	case "include":
+		includeSummary = true
+	default:
+		return SnapshotList{}, badRequestField("summary", "summary must be include")
 	}
 	org, err := s.scopeOrg(ctx, req.Org)
 	if err != nil {
 		return SnapshotList{}, err
 	}
-	targets, err := s.snapshotTargets(ctx, org, req.Region)
+	regions, err := parseList("region", req.Region, nil)
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	regionIDs, err := s.regionIDsForFilter(ctx, org, regions, "region")
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	regionSet := refSet(regionIDs)
+	orgs, err := parseList("organization", req.Organization, nil)
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	orgIDs, err := s.organizationIDsForFilter(ctx, orgs, "organization")
+	if err != nil {
+		return SnapshotList{}, err
+	}
+	orgSet := refSet(orgIDs)
+
+	targets, err := s.snapshotTargetsFor(ctx, org, regionSet, orgSet)
 	if err != nil {
 		return SnapshotList{}, err
 	}
 	out := SnapshotList{Data: make([]Snapshot, 0), PartialNodes: make([]string, 0)}
 	// Archives come from the database, so they are never partial and are
 	// listed even when a region's nodes do not answer.
-	archives, err := s.listArchiveSnapshots(ctx, org, req.Region, p.InstanceAdmin)
+	archives, err := s.listArchiveSnapshots(ctx, org, regionSet, orgSet, p.InstanceAdmin)
 	if err != nil {
 		return SnapshotList{}, err
 	}
@@ -152,41 +249,220 @@ func (s *Service) ListSnapshots(ctx context.Context, req RegionScope) (SnapshotL
 			addPartial(node)
 		}
 	}
-	sort.Slice(out.Data, func(i, j int) bool {
-		a, b := out.Data[i], out.Data[j]
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
+
+	// Filters apply to the merged list, archives included.
+	kept := out.Data[:0]
+	for _, snapshot := range out.Data {
+		if len(kinds) > 0 && !slices.Contains(kinds, snapshot.Kind) {
+			continue
+		}
+		if len(statuses) > 0 && !slices.Contains(statuses, snapshot.Status) {
+			continue
+		}
+		if q.q != "" && !strings.Contains(strings.ToLower(snapshot.Name), strings.ToLower(q.q)) {
+			continue
+		}
+		kept = append(kept, snapshot)
+	}
+	// The summary covers the whole filtered set, before paging.
+	if includeSummary {
+		out.Summary = snapshotSummary(kept, org, p.InstanceAdmin)
+	}
+	sortSnapshots(kept, q.sortKey)
+	out.Data, out.Pages = pageSlice(q, kept)
+	sort.Strings(out.PartialNodes)
+	return out, nil
+}
+
+// snapshotSummary totals the filtered snapshots. Every list is non-nil, so
+// the JSON carries [] rather than null.
+func snapshotSummary(data []Snapshot, scope *db.Organization, admin bool) *SnapshotSummary {
+	summary := &SnapshotSummary{
+		Count:       len(data),
+		ByNode:      []SnapshotSummaryNode{},
+		ByWorkspace: []SnapshotSummaryWorkspace{},
+	}
+	type nodeKey struct {
+		region string
+		node   string
+		kind   string
+	}
+	nodes := make(map[nodeKey]*SnapshotSummaryNode)
+	workspaces := make(map[string]*SnapshotSummaryWorkspace)
+	for _, snapshot := range data {
+		summary.DiskGB += snapshot.DiskGB
+		summary.MemoryMB += snapshot.MemoryMB
+		if snapshot.Status == snapshotStatusError {
+			summary.Failed++
+		}
+		node := ""
+		if snapshot.Node != nil {
+			node = *snapshot.Node
+		}
+		key := nodeKey{region: snapshot.Region, node: node, kind: snapshot.Kind}
+		entry, ok := nodes[key]
+		if !ok {
+			entry = &SnapshotSummaryNode{Region: snapshot.Region, Kind: snapshot.Kind}
+			if snapshot.Node != nil {
+				value := *snapshot.Node
+				entry.Node = &value
+			}
+			nodes[key] = entry
+		}
+		entry.Count++
+		entry.DiskGB += snapshot.DiskGB
+
+		owner := ownerFor(snapshot, scope, admin)
+		if owner == nil {
+			continue
+		}
+		ws, ok := workspaces[owner.Slug]
+		if !ok {
+			ws = &SnapshotSummaryWorkspace{Slug: owner.Slug, Name: owner.Name}
+			workspaces[owner.Slug] = ws
+		}
+		ws.Count++
+		ws.DiskGB += snapshot.DiskGB
+	}
+	for _, entry := range nodes {
+		summary.ByNode = append(summary.ByNode, *entry)
+	}
+	sort.Slice(summary.ByNode, func(i, j int) bool {
+		a, b := summary.ByNode[i], summary.ByNode[j]
+		if a.DiskGB != b.DiskGB {
+			return a.DiskGB > b.DiskGB
+		}
+		if a.Count != b.Count {
+			return a.Count > b.Count
 		}
 		if a.Region != b.Region {
 			return a.Region < b.Region
 		}
-		return a.Name < b.Name
+		if (a.Node == nil) != (b.Node == nil) {
+			return a.Node != nil
+		}
+		if a.Node != nil && *a.Node != *b.Node {
+			return *a.Node < *b.Node
+		}
+		return a.Kind < b.Kind
 	})
-	sort.Strings(out.PartialNodes)
-	return out, nil
+	for _, entry := range workspaces {
+		summary.ByWorkspace = append(summary.ByWorkspace, *entry)
+	}
+	sort.Slice(summary.ByWorkspace, func(i, j int) bool {
+		a, b := summary.ByWorkspace[i], summary.ByWorkspace[j]
+		if a.DiskGB != b.DiskGB {
+			return a.DiskGB > b.DiskGB
+		}
+		if a.Count != b.Count {
+			return a.Count > b.Count
+		}
+		return a.Slug < b.Slug
+	})
+	summary.Workspaces = len(workspaces)
+	if !admin && len(data) > 0 {
+		summary.Workspaces = 1
+	}
+	return summary
+}
+
+// ownerFor names a snapshot's workspace for the summary. A customer may not
+// see the owner on a row, so their scoped workspace stands in for it.
+func ownerFor(snapshot Snapshot, scope *db.Organization, admin bool) *SandboxOrganization {
+	if admin {
+		return snapshot.Organization
+	}
+	if scope == nil {
+		return nil
+	}
+	return &SandboxOrganization{Slug: scope.Slug, Name: scope.Name}
+}
+
+// refSet turns a resolved filter list into a set, or nil when the filter is
+// not applied.
+func refSet(ids []string) map[string]bool {
+	if len(ids) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
+
+// sortSnapshots orders the merged list by a validated key. The tiebreak is
+// total (name, region, owner, kind, status), so no row repeats or goes
+// missing across pages.
+func sortSnapshots(data []Snapshot, key string) {
+	desc := strings.HasPrefix(key, "-")
+	metric := strings.TrimPrefix(key, "-")
+	sort.SliceStable(data, func(i, j int) bool {
+		a, b := data[i], data[j]
+		cmp := 0
+		switch metric {
+		case "name":
+			cmp = strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		case "size":
+			switch {
+			case a.DiskGB < b.DiskGB:
+				cmp = -1
+			case a.DiskGB > b.DiskGB:
+				cmp = 1
+			}
+		default:
+			cmp = a.CreatedAt.Compare(b.CreatedAt)
+		}
+		if cmp == 0 {
+			if c := strings.Compare(a.Name, b.Name); c != 0 {
+				return c < 0
+			}
+			if c := strings.Compare(a.Region, b.Region); c != 0 {
+				return c < 0
+			}
+			if c := strings.Compare(snapshotOrgSlug(a), snapshotOrgSlug(b)); c != 0 {
+				return c < 0
+			}
+			if c := strings.Compare(a.Kind, b.Kind); c != 0 {
+				return c < 0
+			}
+			return a.Status < b.Status
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+// snapshotOrgSlug is the owner's slug, for the total sort order.
+func snapshotOrgSlug(s Snapshot) string {
+	if s.Organization == nil {
+		return ""
+	}
+	return s.Organization.Slug
 }
 
 // listArchiveSnapshots reads the live archives the caller may see and returns
 // them as snapshot rows of kind archive. Archives come from the database, so
 // they never make a list partial.
-func (s *Service) listArchiveSnapshots(ctx context.Context, org *db.Organization, region string, admin bool) ([]Snapshot, error) {
-	cluster, err := s.regionFilter(ctx, org, region)
-	if err != nil {
-		return nil, err
-	}
-	orgID, clusterID := "", ""
+func (s *Service) listArchiveSnapshots(ctx context.Context, org *db.Organization, regionSet, orgSet map[string]bool, admin bool) ([]Snapshot, error) {
+	orgID := ""
 	if org != nil {
 		orgID = org.ID
 	}
-	if cluster != nil {
-		clusterID = cluster.ID
-	}
-	rows, err := s.queries(ctx).ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: clusterID})
+	rows, err := s.queries(ctx).ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: ""})
 	if err != nil {
 		return nil, fmt.Errorf("list archives: %w", err)
 	}
 	archives := make([]Snapshot, 0, len(rows))
 	for _, row := range rows {
+		if regionSet != nil && !regionSet[row.ClusterID] {
+			continue
+		}
+		if orgSet != nil && !orgSet[row.OrgID] {
+			continue
+		}
 		var owner *SandboxOrganization
 		if admin {
 			owner = &SandboxOrganization{Slug: row.Org, Name: row.OrgName}
@@ -322,16 +598,27 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	return forPrincipal(found.snapshot, found.target.org, p.InstanceAdmin), nil
 }
 
-// snapshotTargets lists the workspaces and regions the caller may read. With
-// no organization chosen, an instance admin sees every workspace.
+// snapshotTargets lists the workspaces and regions a single-region command
+// may read. With no organization chosen, an instance admin sees every
+// workspace.
 func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, region string) ([]snapshotTarget, error) {
-	clusters, err := s.queries(ctx).ListClusters(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list clusters: %w", err)
-	}
 	filter, err := s.regionFilter(ctx, org, region)
 	if err != nil {
 		return nil, err
+	}
+	var regionSet map[string]bool
+	if filter != nil {
+		regionSet = map[string]bool{filter.ID: true}
+	}
+	return s.snapshotTargetsFor(ctx, org, regionSet, nil)
+}
+
+// snapshotTargetsFor lists the workspaces and regions a list may read,
+// narrowed by the resolved region and workspace filters.
+func (s *Service) snapshotTargetsFor(ctx context.Context, org *db.Organization, regionSet, orgSet map[string]bool) ([]snapshotTarget, error) {
+	clusters, err := s.queries(ctx).ListClusters(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list clusters: %w", err)
 	}
 	var orgs []db.Organization
 	if org != nil {
@@ -344,6 +631,9 @@ func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, reg
 	}
 	targets := make([]snapshotTarget, 0)
 	for _, row := range orgs {
+		if orgSet != nil && !orgSet[row.ID] {
+			continue
+		}
 		if !row.Team.Valid || row.Team.String == "" {
 			continue
 		}
@@ -355,7 +645,7 @@ func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, reg
 			if _, ok := subs[cluster.ID]; !ok {
 				continue
 			}
-			if filter != nil && cluster.ID != filter.ID {
+			if regionSet != nil && !regionSet[cluster.ID] {
 				continue
 			}
 			targets = append(targets, snapshotTarget{org: row, cluster: cluster})

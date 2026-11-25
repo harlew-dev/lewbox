@@ -1,9 +1,17 @@
 import type { KeyLifetime } from '../../types/key'
-import type { NewSandboxKey, SandboxKey } from '../../types/sandbox-key'
-import { ref, request } from './client'
+import type {
+  NewSandboxKey,
+  SandboxKey,
+  SandboxKeyList,
+  SandboxKeyListQuery,
+} from '../../types/sandbox-key'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listSandboxKeys(org: string): Promise<{ data: SandboxKey[] }> {
-  return request<{ data: SandboxKey[] }>('/v0/sandbox-keys', { org })
+export async function listSandboxKeys(
+  org: string,
+  filter: SandboxKeyListQuery = {},
+): Promise<SandboxKeyList> {
+  return toPage(await request<PageBody<SandboxKey>>(`/v0/sandbox-keys${query(filter)}`, { org }))
 }
 
 export function createSandboxKey(

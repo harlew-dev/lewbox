@@ -43,8 +43,25 @@ type NewAdminKey struct {
 // AdminKeyList is returned by ListAdminKeys, newest first. Data is never
 // null.
 type AdminKeyList struct {
-	Data []AdminKey `json:"data"`
+	Data  []AdminKey `json:"data"`
+	Pages Pages      `json:"pages"`
 }
+
+// ListAdminKeysRequest pages and filters one organization's admin keys.
+type ListAdminKeysRequest struct {
+	ListQuery
+	Org    string `json:"org"`
+	Status string `json:"status"`
+}
+
+// adminKeySorts maps a public sort key to SQL written here.
+var adminKeySorts = mergeSorts(
+	sortDirections("created", "k.created_at ASC, k.id ASC", "k.created_at DESC, k.id DESC"),
+	sortDirections("name", "lower(k.name) ASC, k.id ASC", "lower(k.name) DESC, k.id DESC"),
+	sortDirections("expires",
+		"(k.expires_at IS NULL) ASC, k.expires_at ASC, k.id ASC",
+		"(k.expires_at IS NULL) ASC, k.expires_at DESC, k.id DESC"),
+)
 
 // CreateAdminKeyRequest is the input to CreateAdminKey. ExpiresIn is a
 // duration such as "90d" or "720h"; empty means the key never expires.
@@ -236,18 +253,37 @@ func (s *Service) CreateAdminKey(ctx context.Context, org string, req CreateAdmi
 }
 
 // ListAdminKeys returns the organization's keys, revoked ones included,
-// newest first.
-func (s *Service) ListAdminKeys(ctx context.Context, org string) (AdminKeyList, error) {
-	c, err := s.orgFor(ctx, org, accessKeys)
+// newest first by default.
+func (s *Service) ListAdminKeys(ctx context.Context, req ListAdminKeysRequest) (AdminKeyList, error) {
+	c, err := s.orgFor(ctx, req.Org, accessKeys)
 	if err != nil {
 		return AdminKeyList{}, err
 	}
-	rows, err := s.queries(ctx).ListAdminKeys(ctx, c.org.ID)
+	q, err := parseListQuery(req.ListQuery, adminKeySorts, "-created")
+	if err != nil {
+		return AdminKeyList{}, err
+	}
+	statuses, err := parseList("status", req.Status, keyStatuses)
+	if err != nil {
+		return AdminKeyList{}, err
+	}
+	now := s.now()
+	rows, total, err := s.queries(ctx).ListAdminKeysPage(ctx, db.AdminKeyListParams{
+		OrgID:    c.org.ID,
+		Statuses: statuses,
+		Pattern:  q.pattern,
+		Order:    q.sort,
+		Now:      now,
+		Limit:    q.perPage,
+		Offset:   (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return AdminKeyList{}, fmt.Errorf("list admin keys: %w", err)
 	}
-	now := s.now()
-	out := AdminKeyList{Data: make([]AdminKey, 0, len(rows))}
+	out := AdminKeyList{
+		Data:  make([]AdminKey, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, r := range rows {
 		out.Data = append(out.Data, toAdminKey(r.AdminKey, r.CreatedByEmail.String, now))
 	}

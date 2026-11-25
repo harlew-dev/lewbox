@@ -39,8 +39,30 @@ type NewSandboxKey struct {
 
 // SandboxKeyList is returned by ListSandboxKeys. Data is never null.
 type SandboxKeyList struct {
-	Data []SandboxKey `json:"data"`
+	Data  []SandboxKey `json:"data"`
+	Pages Pages        `json:"pages"`
 }
+
+// ListSandboxKeysRequest pages and filters one organization's sandbox keys.
+// Status is a comma-separated multi-value filter: active, expired or revoked.
+type ListSandboxKeysRequest struct {
+	ListQuery
+	Org    string `json:"org"`
+	Status string `json:"status"`
+}
+
+// keyStatuses are the three key and token states.
+var keyStatuses = []string{keyStatusActive, keyStatusExpired, keyStatusRevoked}
+
+// sandboxKeySorts maps a public sort key to SQL written here. A key that
+// never expires sorts last either way.
+var sandboxKeySorts = mergeSorts(
+	sortDirections("created", "k.created_at ASC, k.id ASC", "k.created_at DESC, k.id DESC"),
+	sortDirections("name", "lower(k.name) ASC, k.id ASC", "lower(k.name) DESC, k.id DESC"),
+	sortDirections("expires",
+		"(k.expires_at IS NULL) ASC, k.expires_at ASC, k.id ASC",
+		"(k.expires_at IS NULL) ASC, k.expires_at DESC, k.id DESC"),
+)
 
 // CreateSandboxKeyRequest is the input to CreateSandboxKey. Region defaults to
 // the workspace's region. ExpiresIn defaults to 90d; "never" means no expiry.
@@ -194,14 +216,30 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	return out, nil
 }
 
-// ListSandboxKeys returns the organization's keys, live ones first and newest
-// first.
-func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyList, error) {
-	c, err := s.orgFor(ctx, org, accessRead)
+// ListSandboxKeys returns the organization's keys, newest first by default.
+func (s *Service) ListSandboxKeys(ctx context.Context, req ListSandboxKeysRequest) (SandboxKeyList, error) {
+	c, err := s.orgFor(ctx, req.Org, accessRead)
 	if err != nil {
 		return SandboxKeyList{}, err
 	}
-	rows, err := s.queries(ctx).ListSandboxKeys(ctx, c.org.ID)
+	q, err := parseListQuery(req.ListQuery, sandboxKeySorts, "-created")
+	if err != nil {
+		return SandboxKeyList{}, err
+	}
+	statuses, err := parseList("status", req.Status, keyStatuses)
+	if err != nil {
+		return SandboxKeyList{}, err
+	}
+	now := s.now()
+	rows, total, err := s.queries(ctx).ListSandboxKeysPage(ctx, db.SandboxKeyListParams{
+		OrgID:    c.org.ID,
+		Statuses: statuses,
+		Pattern:  q.pattern,
+		Order:    q.sort,
+		Now:      now,
+		Limit:    q.perPage,
+		Offset:   (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return SandboxKeyList{}, fmt.Errorf("list sandbox keys: %w", err)
 	}
@@ -209,8 +247,10 @@ func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyLi
 	if err != nil {
 		return SandboxKeyList{}, err
 	}
-	now := s.now()
-	out := SandboxKeyList{Data: make([]SandboxKey, 0, len(rows))}
+	out := SandboxKeyList{
+		Data:  make([]SandboxKey, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, r := range rows {
 		cluster := regions[r.SandboxKey.ClusterID]
 		out.Data = append(out.Data, toSandboxKey(r.SandboxKey, r.CreatedByEmail.String, r.CreatedByAdmin != 0, cluster, now, c.p.InstanceAdmin))

@@ -37,16 +37,36 @@ type SandboxOrganization struct {
 
 // SandboxList is returned by ListSandboxes. Data is never null.
 type SandboxList struct {
-	Data []Sandbox `json:"data"`
+	Data  []Sandbox `json:"data"`
+	Pages Pages     `json:"pages"`
 }
 
 // ListSandboxesRequest filters the mirror. Org is empty for the whole fleet
-// of an instance admin.
+// of an instance admin. Region, Status and Organization are comma-separated
+// multi-value filters; Organization is for instance admins.
 type ListSandboxesRequest struct {
-	Region string `json:"region"`
-	Status string `json:"status"`
-	Org    string `json:"org"`
+	ListQuery
+	Region       string `json:"region"`
+	Status       string `json:"status"`
+	Org          string `json:"org"`
+	Organization string `json:"organization"`
 }
+
+// Sandbox statuses, AerolVM's vocabulary.
+var sandboxStatuses = []string{"creating", "started", "stopped", "destroyed", "error"}
+
+// sandboxSorts maps a public sort key to SQL written here. Sandbox IDs are
+// only unique within a cluster, so every order ends in both.
+var sandboxSorts = mergeSorts(
+	sortDirections("created", "s.created_at ASC, s.id ASC, s.cluster_id ASC", "s.created_at DESC, s.id DESC, s.cluster_id DESC"),
+	sortDirections("status",
+		"CASE s.status WHEN 'creating' THEN 0 WHEN 'started' THEN 1 WHEN 'stopped' THEN 2 WHEN 'destroyed' THEN 3 WHEN 'error' THEN 4 ELSE 5 END ASC, s.id ASC, s.cluster_id ASC",
+		"CASE s.status WHEN 'creating' THEN 0 WHEN 'started' THEN 1 WHEN 'stopped' THEN 2 WHEN 'destroyed' THEN 3 WHEN 'error' THEN 4 ELSE 5 END DESC, s.id DESC, s.cluster_id DESC"),
+	sortDirections("region", "lower(c.slug) ASC, s.id ASC, s.cluster_id ASC", "lower(c.slug) DESC, s.id DESC, s.cluster_id DESC"),
+	sortDirections("workspace",
+		"(o.slug IS NULL) ASC, lower(o.slug) ASC, s.id ASC, s.cluster_id ASC",
+		"(o.slug IS NULL) ASC, lower(o.slug) DESC, s.id DESC, s.cluster_id DESC"),
+)
 
 // RegionScope picks the region and the workspace a fleet-capable route acts
 // on. An empty Org is the whole fleet of an instance admin.
@@ -116,9 +136,13 @@ func (s *Service) regionFilter(ctx context.Context, org *db.Organization, ref st
 }
 
 // ListSandboxes returns the mirrored sandboxes that have not gone away,
-// newest first, at most 500.
+// newest first by default.
 func (s *Service) ListSandboxes(ctx context.Context, req ListSandboxesRequest) (SandboxList, error) {
 	p, err := requirePrincipal(ctx)
+	if err != nil {
+		return SandboxList{}, err
+	}
+	q, err := parseListQuery(req.ListQuery, sandboxSorts, "-created")
 	if err != nil {
 		return SandboxList{}, err
 	}
@@ -130,24 +154,43 @@ func (s *Service) ListSandboxes(ctx context.Context, req ListSandboxesRequest) (
 	if org != nil {
 		orgID = org.ID
 	}
-	cluster, err := s.regionFilter(ctx, org, req.Region)
+	statuses, err := parseList("status", req.Status, sandboxStatuses)
 	if err != nil {
 		return SandboxList{}, err
 	}
-	clusterID := ""
-	if cluster != nil {
-		clusterID = cluster.ID
+	regions, err := parseList("region", req.Region, nil)
+	if err != nil {
+		return SandboxList{}, err
 	}
-	status := strings.ToLower(strings.TrimSpace(req.Status))
-	rows, err := s.queries(ctx).ListSandboxes(ctx, db.ListSandboxesParams{
-		OrgID:     orgID,
-		ClusterID: clusterID,
-		Status:    status,
+	clusterIDs, err := s.regionIDsForFilter(ctx, org, regions, "region")
+	if err != nil {
+		return SandboxList{}, err
+	}
+	orgs, err := parseList("organization", req.Organization, nil)
+	if err != nil {
+		return SandboxList{}, err
+	}
+	orgIDs, err := s.organizationIDsForFilter(ctx, orgs, "organization")
+	if err != nil {
+		return SandboxList{}, err
+	}
+	rows, total, err := s.queries(ctx).ListSandboxesPage(ctx, db.SandboxListParams{
+		OrgID:      orgID,
+		OrgIDs:     orgIDs,
+		ClusterIDs: clusterIDs,
+		Statuses:   statuses,
+		Pattern:    q.pattern,
+		Order:      q.sort,
+		Limit:      q.perPage,
+		Offset:     (q.page - 1) * q.perPage,
 	})
 	if err != nil {
 		return SandboxList{}, fmt.Errorf("list sandboxes: %w", err)
 	}
-	out := SandboxList{Data: make([]Sandbox, 0, len(rows))}
+	out := SandboxList{
+		Data:  make([]Sandbox, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, row := range rows {
 		out.Data = append(out.Data, toSandbox(row.Sandbox, row.ClusterSlug, row.OrgSlug, row.OrgName, p.InstanceAdmin))
 	}

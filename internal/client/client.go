@@ -82,9 +82,17 @@ func (c *Client) CreateAccessToken(ctx context.Context, req service.CreateAccess
 
 // ListAccessTokens returns an account's access tokens; user "" is the
 // caller's own account.
-func (c *Client) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
+func (c *Client) ListAccessTokens(ctx context.Context, req service.ListAccessTokensRequest) (service.AccessTokenList, error) {
+	query := url.Values{}
+	if req.User != "" {
+		query.Set("user", req.User)
+	}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.AccessTokenList
-	err := c.do(ctx, http.MethodGet, "/v0/access-tokens"+userQuery(user), nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/access-tokens", query), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -103,6 +111,29 @@ func userQuery(user string) string {
 	return "?" + url.Values{"user": {user}}.Encode()
 }
 
+// addListQuery adds a list's paging, search and sort. Empty values are left
+// out, so the server applies its defaults.
+func addListQuery(query url.Values, q service.ListQuery) {
+	for name, value := range map[string]string{
+		"page":     q.Page,
+		"per_page": q.PerPage,
+		"q":        q.Q,
+		"sort":     q.Sort,
+	} {
+		if value != "" {
+			query.Set(name, value)
+		}
+	}
+}
+
+// withQuery appends a query string to a path.
+func withQuery(path string, query url.Values) string {
+	if len(query) == 0 {
+		return path
+	}
+	return path + "?" + query.Encode()
+}
+
 // CreateUser creates an account.
 func (c *Client) CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error) {
 	var out service.User
@@ -111,9 +142,17 @@ func (c *Client) CreateUser(ctx context.Context, req service.CreateUserRequest) 
 }
 
 // ListUsers returns every account.
-func (c *Client) ListUsers(ctx context.Context) (service.UserList, error) {
+func (c *Client) ListUsers(ctx context.Context, req service.ListUsersRequest) (service.UserList, error) {
+	query := url.Values{}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	if req.Role != "" {
+		query.Set("role", req.Role)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.UserList
-	err := c.do(ctx, http.MethodGet, "/v0/users", nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/users", query), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -274,12 +313,16 @@ func (c *Client) AddNode(ctx context.Context, req service.AddNodeRequest) (servi
 
 // ListNodes returns nodes, optionally filtered by cluster.
 func (c *Client) ListNodes(ctx context.Context, req service.ListNodesRequest) (service.NodeList, error) {
-	path := "/v0/nodes"
+	query := url.Values{}
 	if req.Cluster != "" {
-		path += "?cluster=" + url.QueryEscape(req.Cluster)
+		query.Set("cluster", req.Cluster)
 	}
+	if req.Role != "" {
+		query.Set("role", req.Role)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.NodeList
-	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/nodes", query), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -314,12 +357,15 @@ func (c *Client) ListOrganizations(ctx context.Context, req service.ListOrganiza
 	if req.Status != "" {
 		query.Set("status", req.Status)
 	}
-	path := "/v0/organizations"
-	if len(query) > 0 {
-		path += "?" + query.Encode()
+	if req.Region != "" {
+		query.Set("region", req.Region)
 	}
+	if req.Plan != "" {
+		query.Set("plan", req.Plan)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.OrganizationList
-	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/organizations", query), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -379,9 +425,20 @@ func (c *Client) CreateSetupLink(ctx context.Context, req service.CreateSetupLin
 }
 
 // ListSetupLinks returns every setup link, newest first, without tokens.
-func (c *Client) ListSetupLinks(ctx context.Context) (service.SetupLinkList, error) {
+func (c *Client) ListSetupLinks(ctx context.Context, req service.ListSetupLinksRequest) (service.SetupLinkList, error) {
+	query := url.Values{}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	if req.Plan != "" {
+		query.Set("plan", req.Plan)
+	}
+	if req.Region != "" {
+		query.Set("region", req.Region)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.SetupLinkList
-	err := c.do(ctx, http.MethodGet, "/v0/setup-links", nil, &out, defaultTimeout)
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/setup-links", query), nil, &out, defaultTimeout)
 	return out, err
 }
 
@@ -549,9 +606,14 @@ func (c *Client) DeleteSubscription(ctx context.Context, org, region string, for
 }
 
 // ListMembers returns an organization's members.
-func (c *Client) ListMembers(ctx context.Context, org string) (service.MemberList, error) {
+func (c *Client) ListMembers(ctx context.Context, req service.ListMembersRequest) (service.MemberList, error) {
+	query := url.Values{}
+	if req.Role != "" {
+		query.Set("role", req.Role)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.MemberList
-	err := c.doOrg(ctx, org, http.MethodGet, "/v0/members", nil, &out)
+	err := c.doOrg(ctx, req.Org, http.MethodGet, withQuery("/v0/members", query), nil, &out)
 	return out, err
 }
 
@@ -577,9 +639,14 @@ func (c *Client) RemoveMember(ctx context.Context, org, ref string) (service.Mem
 }
 
 // ListAdminKeys returns an organization's admin keys.
-func (c *Client) ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error) {
+func (c *Client) ListAdminKeys(ctx context.Context, req service.ListAdminKeysRequest) (service.AdminKeyList, error) {
+	query := url.Values{}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.AdminKeyList
-	err := c.doOrg(ctx, org, http.MethodGet, "/v0/admin-keys", nil, &out)
+	err := c.doOrg(ctx, req.Org, http.MethodGet, withQuery("/v0/admin-keys", query), nil, &out)
 	return out, err
 }
 
@@ -598,9 +665,14 @@ func (c *Client) RevokeAdminKey(ctx context.Context, org, ref string) (service.A
 }
 
 // ListSandboxKeys returns an organization's sandbox keys.
-func (c *Client) ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error) {
+func (c *Client) ListSandboxKeys(ctx context.Context, req service.ListSandboxKeysRequest) (service.SandboxKeyList, error) {
+	query := url.Values{}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.SandboxKeyList
-	err := c.doOrg(ctx, org, http.MethodGet, "/v0/sandbox-keys", nil, &out)
+	err := c.doOrg(ctx, req.Org, http.MethodGet, withQuery("/v0/sandbox-keys", query), nil, &out)
 	return out, err
 }
 
@@ -627,12 +699,12 @@ func (c *Client) ListSandboxes(ctx context.Context, req service.ListSandboxesReq
 	if req.Status != "" {
 		query.Set("status", req.Status)
 	}
-	path := "/v0/sandboxes"
-	if len(query) > 0 {
-		path += "?" + query.Encode()
+	if req.Organization != "" {
+		query.Set("organization", req.Organization)
 	}
+	addListQuery(query, req.ListQuery)
 	var out service.SandboxList
-	err := c.doOrg(ctx, req.Org, http.MethodGet, path, nil, &out)
+	err := c.doOrg(ctx, req.Org, http.MethodGet, withQuery("/v0/sandboxes", query), nil, &out)
 	return out, err
 }
 
@@ -662,17 +734,26 @@ func sandboxActionPath(id, action, region string) string {
 }
 
 // ListSnapshots lists snapshots, optionally filtered by region.
-func (c *Client) ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error) {
+func (c *Client) ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error) {
 	query := url.Values{}
 	if req.Region != "" {
 		query.Set("region", req.Region)
 	}
-	path := "/v0/snapshots"
-	if len(query) > 0 {
-		path += "?" + query.Encode()
+	if req.Organization != "" {
+		query.Set("organization", req.Organization)
 	}
+	if req.Kind != "" {
+		query.Set("kind", req.Kind)
+	}
+	if req.Status != "" {
+		query.Set("status", req.Status)
+	}
+	if req.Summary != "" {
+		query.Set("summary", req.Summary)
+	}
+	addListQuery(query, req.ListQuery)
 	var out service.SnapshotList
-	err := c.request(ctx, http.MethodGet, path, req.Org, nil, &out, longTimeout)
+	err := c.request(ctx, http.MethodGet, withQuery("/v0/snapshots", query), req.Org, nil, &out, longTimeout)
 	return out, err
 }
 

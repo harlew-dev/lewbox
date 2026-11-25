@@ -1,3 +1,5 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
 import type { PlanRef } from './plan'
 
 export type SetupLinkStatus = 'unused' | 'claimed' | 'used' | 'expired'
@@ -24,6 +26,14 @@ export interface SetupLinkInput {
   // 1..720; 168 when omitted.
   expires_in_hours?: number
   note?: string
+}
+
+export type SetupLinkList = Page<SetupLink>
+
+export interface SetupLinkListQuery extends ListParams {
+  status?: SetupLinkStatus[]
+  plan?: string[]
+  region?: string[]
 }
 
 // What the public setup page shows: names only, never slugs.

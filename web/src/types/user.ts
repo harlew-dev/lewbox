@@ -1,3 +1,9 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
+
+export type UserStatus = 'active' | 'disabled'
+export type UserRole = 'admin' | 'user'
+
 export interface User {
   id: string
   email: string
@@ -6,6 +12,9 @@ export interface User {
   created_at: string
 }
 
-export interface UserList {
-  data: User[]
+export type UserList = Page<User>
+
+export interface UserListQuery extends ListParams {
+  status?: UserStatus[]
+  role?: UserRole[]
 }

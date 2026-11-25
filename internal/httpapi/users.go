@@ -9,9 +9,14 @@ import (
 // Users are accounts. {user} is an ID or email.
 type Users struct{ *server }
 
-// Index lists every account.
+// Index lists accounts.
 func (h Users) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListUsers(r.Context())
+	query := r.URL.Query()
+	resp, err := h.svc.ListUsers(r.Context(), service.ListUsersRequest{
+		ListQuery: listQuery(query),
+		Status:    query.Get("status"),
+		Role:      query.Get("role"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

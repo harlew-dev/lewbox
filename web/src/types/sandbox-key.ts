@@ -1,4 +1,8 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
 import type { Region } from './region'
+
+export type KeyStatus = 'active' | 'expired' | 'revoked'
 
 export interface SandboxKey {
   id: string
@@ -17,4 +21,10 @@ export interface NewSandboxKey extends SandboxKey {
   env: { SB_API_URL: string; SB_API_TOKEN: string }
   // Only in a region that runs the E2B API (the docker runtime).
   e2b_env?: { E2B_API_URL: string; E2B_SANDBOX_URL: string; E2B_API_KEY: string }
+}
+
+export type SandboxKeyList = Page<SandboxKey>
+
+export interface SandboxKeyListQuery extends ListParams {
+  status?: KeyStatus[]
 }

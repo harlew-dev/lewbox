@@ -28,9 +28,10 @@ export interface EventPage {
 
 export interface EventFilters {
   before?: string
-  actor?: string
-  organization?: string
-  action?: string
+  // Each of these is a comma list.
+  actor?: string[]
+  organization?: string[]
+  action?: string[]
   from?: string
   to?: string
   limit?: number

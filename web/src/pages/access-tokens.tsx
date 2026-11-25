@@ -13,21 +13,18 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
-  EmptyState,
   ErrorNotice,
   Field,
   FieldGroup,
   Input,
   Label,
-  ListSkeleton,
+  PaginatedTable,
   PasswordField,
+  SearchField,
   SecretReveal,
   Step,
   Steps,
-  Table,
-  TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
   toast,
@@ -37,10 +34,14 @@ import {
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { EllipsisHorizontalIcon, NoSymbolIcon } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
+import { FilterBar, type FilterDef } from '../components/filter-bar'
 import { KeyExpiryField } from '../components/key-expiry'
+import { NoMatches, NoRecords, SortHeader } from '../components/list'
 import * as api from '../lib/api'
 import { serverURL } from '../lib/commands'
 import { formatDate, relativeTime } from '../lib/format'
+import { isFiltered, listQuery, type ListSpec } from '../lib/list-query'
+import { useListState } from '../lib/use-list'
 import { errorField, failureMessage, useLoad } from '../lib/use-load'
 
 const statusColors: Record<api.AccessToken['status'], BadgeColor> = {
@@ -53,90 +54,151 @@ function TokenStatus({ status }: { status: api.AccessToken['status'] }) {
   return <Badge color={statusColors[status]}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>
 }
 
+const tokenSpec: ListSpec = {
+  sortKeys: ['created', 'name', 'expires'],
+  defaultSort: '-created',
+  descendingFirst: ['created', 'expires'],
+  filters: { status: ['active', 'expired', 'revoked'] },
+}
+
+const tokenFilters: FilterDef[] = [
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'expired', label: 'Expired' },
+      { value: 'revoked', label: 'Revoked' },
+    ],
+  },
+]
+
 // The signed-in account's access tokens (lbp_…) for the Lewbox API. A token
 // acts as the account, so an instance admin's token can manage clusters and
 // nodes.
 export function AccessTokensSection({ instanceAdmin }: { instanceAdmin: boolean }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<api.AccessToken | null>(null)
-  const tokens = useLoad('access-tokens', () => api.listAccessTokens())
-  const list = tokens.data?.data ?? []
+  const list = useListState(tokenSpec)
+  const { state } = list
+  const tokens = useLoad(`access-tokens:${list.key()}`, () =>
+    api.listAccessTokens({
+      ...listQuery(state, tokenSpec),
+      status: state.filters.status as api.KeyStatus[] | undefined,
+    }),
+  )
 
   return (
     <div className="space-y-6">
-      {tokens.loading && !tokens.data ? (
-        <ListSkeleton label="Loading access tokens" rows={2} />
-      ) : tokens.error.message ? (
+      <FilterBar
+        filters={tokenFilters}
+        values={state.filters}
+        onApply={list.setFilter}
+        onRemove={list.removeFilter}
+        onClear={list.clearFilters}
+        leading={
+          <SearchField
+            label="Search access tokens"
+            value={state.q}
+            onSearch={list.setSearch}
+          />
+        }
+      />
+      {tokens.error.message && tokens.data && (
         <ErrorNotice error={tokens.error} onRetry={tokens.reload} />
-      ) : list.length === 0 ? (
-        <EmptyState
-          title="No access tokens"
-          description={
-            instanceAdmin
-              ? 'Lets scripts and CI use the CLI and API as you, including clusters and nodes.'
-              : 'Lets scripts and CI use the CLI and API as you.'
-          }
-        />
+      )}
+      {tokens.error.message && !tokens.data ? (
+        <ErrorNotice error={tokens.error} onRetry={tokens.reload} />
       ) : (
-        <Table dense>
-          <TableHead>
+        <PaginatedTable
+          page={tokens.data ?? undefined}
+          loading={tokens.loading || tokens.stale}
+          label="Access tokens"
+          href={list.href}
+          rowKey={(token) => token.id}
+          head={
             <TableRow>
-              <TableHeader>Name</TableHeader>
+              <SortHeader state={state} spec={tokenSpec} column="name" base={list.params}>
+                Name
+              </SortHeader>
               <TableHeader>Token</TableHeader>
               <TableHeader>Status</TableHeader>
               <TableHeader>Last used</TableHeader>
-              <TableHeader>Expires</TableHeader>
+              <SortHeader state={state} spec={tokenSpec} column="expires" base={list.params}>
+                Expires
+              </SortHeader>
               <TableHeader className="w-0">
                 <span className="sr-only">Actions</span>
               </TableHeader>
             </TableRow>
-          </TableHead>
-          <TableBody>
-            {list.map((token) => (
-              <TableRow key={token.id}>
-                <TableCell className="font-medium" title={`Created ${formatDate(token.created_at)}`}>
-                  {token.name}
-                </TableCell>
-                <TableCell>
-                  <Code>
-                    {token.prefix}…{token.last4}
-                  </Code>
-                </TableCell>
-                <TableCell>
-                  <TokenStatus status={token.status} />
-                </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400" title={formatDate(token.last_used_at)}>
-                  {relativeTime(token.last_used_at)}
-                </TableCell>
-                <TableCell
-                  className="text-zinc-500 dark:text-zinc-400"
-                  title={token.expires_at ? formatDate(token.expires_at) : undefined}
-                >
-                  {token.status === 'revoked'
-                    ? `Revoked ${relativeTime(token.revoked_at).toLowerCase()}`
-                    : token.expires_at
-                      ? relativeTime(token.expires_at)
-                      : 'Never'}
-                </TableCell>
-                <TableCell className="w-0 text-right">
-                  {token.status !== 'revoked' && (
-                    <Dropdown>
-                      <DropdownButton as={Button} plain aria-label={`Actions for ${token.name}`}>
-                        <EllipsisHorizontalIcon />
-                      </DropdownButton>
-                      <DropdownMenu anchor="bottom end">
-                        <DropdownItem variant="danger" onClick={() => setRevokeTarget(token)}>
-                          <NoSymbolIcon data-slot="icon" />
-                          Revoke token
-                        </DropdownItem>
-                      </DropdownMenu>
-                    </Dropdown>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+          }
+          row={(token) => (
+            <TableRow key={token.id}>
+              <TableCell
+                className="font-medium"
+                title={`Created ${formatDate(token.created_at)}`}
+              >
+                {token.name}
+              </TableCell>
+              <TableCell>
+                <Code>
+                  {token.prefix}…{token.last4}
+                </Code>
+              </TableCell>
+              <TableCell>
+                <TokenStatus status={token.status} />
+              </TableCell>
+              <TableCell
+                className="text-zinc-500 dark:text-zinc-400"
+                title={formatDate(token.last_used_at)}
+              >
+                {relativeTime(token.last_used_at)}
+              </TableCell>
+              <TableCell
+                className="text-zinc-500 dark:text-zinc-400"
+                title={token.expires_at ? formatDate(token.expires_at) : undefined}
+              >
+                {token.status === 'revoked'
+                  ? `Revoked ${relativeTime(token.revoked_at).toLowerCase()}`
+                  : token.expires_at
+                    ? relativeTime(token.expires_at)
+                    : 'Never'}
+              </TableCell>
+              <TableCell className="w-0 text-right">
+                {token.status !== 'revoked' && (
+                  <Dropdown>
+                    <DropdownButton as={Button} plain aria-label={`Actions for ${token.name}`}>
+                      <EllipsisHorizontalIcon />
+                    </DropdownButton>
+                    <DropdownMenu anchor="bottom end">
+                      <DropdownItem
+                        variant="danger"
+                        onClick={() => setRevokeTarget(token)}
+                      >
+                        <NoSymbolIcon data-slot="icon" />
+                        Revoke token
+                      </DropdownItem>
+                    </DropdownMenu>
+                  </Dropdown>
+                )}
+              </TableCell>
+            </TableRow>
+          )}
+          empty={
+            isFiltered(state) ? (
+              <NoMatches label="access tokens" onClear={list.clearAll} />
+            ) : (
+              <NoRecords
+                title="No access tokens"
+                description={
+                  instanceAdmin
+                    ? 'Lets scripts and CI use the CLI and API as you, including clusters and nodes.'
+                    : 'Lets scripts and CI use the CLI and API as you.'
+                }
+              />
+            )
+          }
+        />
       )}
 
       <div className="flex justify-end">
@@ -145,7 +207,11 @@ export function AccessTokensSection({ instanceAdmin }: { instanceAdmin: boolean 
         </Button>
       </div>
 
-      <CreateTokenDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={tokens.refresh} />
+      <CreateTokenDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={tokens.refresh}
+      />
       <ConfirmationDialog
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}

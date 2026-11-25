@@ -16,15 +16,12 @@ import {
   FieldGroup,
   Input,
   Label,
-  ListSkeleton,
+  PaginatedTable,
   RadioGroup,
-  Table,
-  TableBody,
+  SearchField,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
-  Text,
   TextLink,
   toast,
   useAction,
@@ -39,14 +36,33 @@ import {
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords, SortHeader } from '../../components/list'
 import { formatDate, relativeTime } from '../../lib/format'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
 import type { Permissions } from '../../lib/organizations'
 import { routes } from '../../lib/routes'
+import { useListState } from '../../lib/use-list'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { RoleBadge, roleOptions } from './roles'
 
 // An organization's members, with role changes, removal and leaving. The
 // page around it owns the "Add member" button and opens the dialog.
+const memberSpec: ListSpec = {
+  sortKeys: ['email', 'role', 'joined'],
+  defaultSort: 'email',
+  descendingFirst: ['joined'],
+  filters: { role: ['owner', 'admin', 'member', 'viewer'] },
+}
+
+const memberFilters: FilterDef[] = [
+  {
+    key: 'role',
+    label: 'Role',
+    options: roleOptions.map((option) => ({ value: option.value, label: option.label })),
+  },
+]
+
 export function MembersSection({
   org,
   can,
@@ -61,8 +77,14 @@ export function MembersSection({
   onLeft: () => void
 }) {
   const { user } = useAuth()
-  const members = useLoad(`members:${org.slug}`, () => api.listMembers(org.slug))
-  const list = members.data?.data ?? []
+  const list = useListState(memberSpec)
+  const { state } = list
+  const members = useLoad(`members:${org.slug}:${list.key()}`, () =>
+    api.listMembers(org.slug, {
+      ...listQuery(state, memberSpec),
+      role: state.filters.role as api.Role[] | undefined,
+    }),
+  )
   const [roleTarget, setRoleTarget] = useState<api.Member | null>(null)
   const [removeTarget, setRemoveTarget] = useState<api.Member | null>(null)
 
@@ -70,42 +92,73 @@ export function MembersSection({
 
   return (
     <>
-      {members.loading && !members.data ? (
-        <ListSkeleton label="Loading members" rows={4} />
-      ) : members.error.message ? (
-        <ErrorNotice error={members.error} onRetry={members.reload} />
-      ) : list.length === 0 ? (
-        <Text>No members yet.</Text>
-      ) : (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeader>Member</TableHeader>
-              <TableHeader>Role</TableHeader>
-              <TableHeader>Added</TableHeader>
-              <TableHeader className="w-0">
-                <span className="sr-only">Actions</span>
-              </TableHeader>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {list.map((member) => {
+      <div className="space-y-4">
+        <FilterBar
+          filters={memberFilters}
+          values={state.filters}
+          onApply={list.setFilter}
+          onRemove={list.removeFilter}
+          onClear={list.clearFilters}
+          leading={
+            <SearchField
+              label="Search members"
+              value={state.q}
+              onSearch={list.setSearch}
+            />
+          }
+        />
+        {members.error.message && members.data && (
+          <ErrorNotice error={members.error} onRetry={members.reload} />
+        )}
+        {members.error.message && !members.data ? (
+          <ErrorNotice error={members.error} onRetry={members.reload} />
+        ) : (
+          <PaginatedTable
+            page={members.data ?? undefined}
+            loading={members.loading || members.stale}
+            label="Members"
+            href={list.href}
+            rowKey={(member) => member.id}
+            head={
+              <TableRow>
+                <SortHeader state={state} spec={memberSpec} column="email" base={list.params}>
+                  Member
+                </SortHeader>
+                <SortHeader state={state} spec={memberSpec} column="role" base={list.params}>
+                  Role
+                </SortHeader>
+                <SortHeader state={state} spec={memberSpec} column="joined" base={list.params}>
+                  Added
+                </SortHeader>
+                <TableHeader className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            }
+            row={(member) => {
               const self = member.user_id === user?.id
               const changeable = can.manage && (member.role !== 'owner' || can.owner)
               return (
                 <TableRow key={member.id}>
                   <TableCell className="font-medium">
                     {user?.instance_admin ? (
-                      <TextLink href={routes.admin.user(member.user_id)}>{member.email}</TextLink>
+                      <TextLink href={routes.admin.user(member.user_id)}>
+                        {member.email}
+                      </TextLink>
                     ) : (
                       member.email
                     )}
-                    {self && <span className="ml-2 text-zinc-500 dark:text-zinc-400">(you)</span>}
+                    {self && (
+                      <span className="ml-2 text-zinc-500 dark:text-zinc-400">(you)</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <RoleBadge role={member.role} />
                   </TableCell>
-                  <TableCell className="text-zinc-500 dark:text-zinc-400" title={formatDate(member.created_at)}>
+                  <TableCell
+                    className="text-zinc-500 dark:text-zinc-400"
+                    title={formatDate(member.created_at)}
+                  >
                     {relativeTime(member.created_at)}
                   </TableCell>
                   <TableCell className="w-0 text-right">
@@ -128,7 +181,10 @@ export function MembersSection({
                               Leave workspace
                             </DropdownItem>
                           ) : (
-                            <DropdownItem variant="danger" onClick={() => setRemoveTarget(member)}>
+                            <DropdownItem
+                              variant="danger"
+                              onClick={() => setRemoveTarget(member)}
+                            >
                               <TrashIcon data-slot="icon" />
                               Remove member
                             </DropdownItem>
@@ -139,12 +195,25 @@ export function MembersSection({
                   </TableCell>
                 </TableRow>
               )
-            })}
-          </TableBody>
-        </Table>
-      )}
+            }}
+            empty={
+              isFiltered(state) ? (
+                <NoMatches label="members" onClear={list.clearAll} />
+              ) : (
+                <NoRecords title="No members yet" description="Add someone to this workspace." />
+              )
+            }
+          />
+        )}
+      </div>
 
-      <AddMemberDialog open={addOpen} org={org} canOwner={can.owner} onClose={onAddClose} onAdded={members.refresh} />
+      <AddMemberDialog
+        open={addOpen}
+        org={org}
+        canOwner={can.owner}
+        onClose={onAddClose}
+        onAdded={members.refresh}
+      />
       <ChangeRoleDialog
         member={roleTarget}
         org={org}
@@ -155,7 +224,13 @@ export function MembersSection({
       <ConfirmationDialog
         open={removeTarget !== null}
         onClose={() => setRemoveTarget(null)}
-        title={leaving ? `Leave ${org.name}?` : removeTarget ? `Remove ${removeTarget.email}?` : 'Remove member?'}
+        title={
+          leaving
+            ? `Leave ${org.name}?`
+            : removeTarget
+              ? `Remove ${removeTarget.email}?`
+              : 'Remove member?'
+        }
         description={
           leaving
             ? 'You lose access to this workspace until someone adds you again.'

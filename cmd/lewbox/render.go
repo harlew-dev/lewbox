@@ -496,6 +496,11 @@ func renderSnapshots(w io.Writer, list service.SnapshotList, now time.Time) erro
 	if err := tw.Flush(); err != nil {
 		return err
 	}
+	if list.Summary != nil {
+		fmt.Fprintf(w, "summary: %d snapshots, %d GB disk, %d MB memory, %d failed, %d workspaces\n",
+			list.Summary.Count, list.Summary.DiskGB, list.Summary.MemoryMB,
+			list.Summary.Failed, list.Summary.Workspaces)
+	}
 	if len(list.PartialNodes) > 0 {
 		fmt.Fprintf(w, "partial: %s did not answer\n", strings.Join(list.PartialNodes, ", "))
 	}

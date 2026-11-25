@@ -13,12 +13,10 @@ import {
   FieldGroup,
   Input,
   Label,
-  ListSkeleton,
   PageHeader,
-  Table,
-  TableBody,
+  PaginatedTable,
+  SearchField,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
   TextLink,
@@ -29,9 +27,13 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords, SortHeader } from '../../components/list'
 import { relativeTime } from '../../lib/format'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
 import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
+import { useListState } from '../../lib/use-list'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { UserActions } from './user-actions'
 
@@ -44,11 +46,48 @@ export function UserBadges({ user }: { user: api.User }) {
   )
 }
 
+const spec: ListSpec = {
+  sortKeys: ['email', 'created', 'status'],
+  defaultSort: 'email',
+  descendingFirst: ['created'],
+  filters: {
+    status: ['active', 'disabled'],
+    role: ['admin', 'user'],
+  },
+}
+
+const filters: FilterDef[] = [
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'disabled', label: 'Disabled' },
+    ],
+  },
+  {
+    key: 'role',
+    label: 'Role',
+    options: [
+      { value: 'admin', label: 'Instance admin' },
+      { value: 'user', label: 'User' },
+    ],
+  },
+]
+
 export function UsersPage() {
   useDocumentTitle('Users')
-  const users = useLoad('users', () => api.listUsers())
-  const userList = users.data?.data ?? []
+  const list = useListState(spec)
+  const { state } = list
+  const users = useLoad(`users:${list.key()}`, () =>
+    api.listUsers({
+      ...listQuery(state, spec),
+      status: state.filters.status as api.UserStatus[] | undefined,
+      role: state.filters.role as api.UserRole[] | undefined,
+    }),
+  )
   const [createOpen, setCreateOpen] = useState(false)
+  const filtered = isFiltered(state)
 
   return (
     <>
@@ -58,24 +97,46 @@ export function UsersPage() {
         actions={<Button onClick={() => setCreateOpen(true)}>New account</Button>}
       />
 
-      {users.loading && !users.data ? (
-        <ListSkeleton label="Loading users" rows={4} />
-      ) : users.error.message ? (
-        <ErrorNotice error={users.error} onRetry={users.reload} />
-      ) : (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeader>Email</TableHeader>
-              <TableHeader>Status</TableHeader>
-              <TableHeader>Created</TableHeader>
-              <TableHeader className="w-0">
-                <span className="sr-only">Actions</span>
-              </TableHeader>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {userList.map((user) => (
+      <div className="space-y-4">
+        <FilterBar
+          filters={filters}
+          values={state.filters}
+          onApply={list.setFilter}
+          onRemove={list.removeFilter}
+          onClear={list.clearFilters}
+          leading={
+            <SearchField label="Search users" value={state.q} onSearch={list.setSearch} />
+          }
+        />
+        {users.error.message && users.data && (
+          <ErrorNotice error={users.error} onRetry={users.reload} />
+        )}
+        {users.error.message && !users.data ? (
+          <ErrorNotice error={users.error} onRetry={users.reload} />
+        ) : (
+          <PaginatedTable
+            page={users.data ?? undefined}
+            loading={users.loading || users.stale}
+            label="Users"
+            href={list.href}
+            rowKey={(user) => user.id}
+            head={
+              <TableRow>
+                <SortHeader state={state} spec={spec} column="email" base={list.params}>
+                  Email
+                </SortHeader>
+                <SortHeader state={state} spec={spec} column="status" base={list.params}>
+                  Status
+                </SortHeader>
+                <SortHeader state={state} spec={spec} column="created" base={list.params}>
+                  Created
+                </SortHeader>
+                <TableHeader className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHeader>
+              </TableRow>
+            }
+            row={(user) => (
               <TableRow key={user.id}>
                 <TableCell className="font-medium">
                   <TextLink href={routes.admin.user(user.id)}>{user.email}</TextLink>
@@ -95,10 +156,20 @@ export function UsersPage() {
                   <UserActions user={user} onChanged={users.reload} onRemoved={users.reload} />
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+            )}
+            empty={
+              filtered ? (
+                <NoMatches label="users" onClear={list.clearAll} />
+              ) : (
+                <NoRecords
+                  title="No accounts yet"
+                  description="Create one to let someone sign in to this instance."
+                />
+              )
+            }
+          />
+        )}
+      </div>
 
       <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </>

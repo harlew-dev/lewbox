@@ -1,6 +1,6 @@
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { choose, json, renderApp, stubAPI } from '../../test/render'
+import { json, renderApp, stubAPI } from '../../test/render'
 
 const euWest = {
   slug: 'eu-west',
@@ -19,18 +19,17 @@ describe('FleetSandboxesPage', () => {
     })
     renderApp('/admin/sandboxes?region=eu-west&status=stopped')
 
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Region' })).toHaveTextContent('EU West'),
-    )
     await waitFor(() => {
       const requests = calls.filter((call) => call.url.startsWith('/v0/sandboxes'))
-      expect(requests.at(-1)?.url).toBe('/v0/sandboxes?region=eu-west&status=stopped')
+      expect(requests.at(-1)?.url).toBe('/v0/sandboxes?status=stopped&region=eu-west')
     })
+    expect(await screen.findByRole('button', { name: /Region.*EU West/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Status.*Stopped/ })).toBeInTheDocument()
 
-    await choose('Status', 'Running')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Region filter' }))
     await waitFor(() => {
       const requests = calls.filter((call) => call.url.startsWith('/v0/sandboxes'))
-      expect(requests.at(-1)?.url).toBe('/v0/sandboxes?region=eu-west&status=started')
+      expect(requests.at(-1)?.url).toBe('/v0/sandboxes?status=stopped')
     })
   })
 })

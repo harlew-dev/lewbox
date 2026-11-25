@@ -12,7 +12,12 @@ type AdminKeys struct{ *server }
 
 // Index lists the organization's admin keys.
 func (h AdminKeys) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListAdminKeys(r.Context(), r.Header.Get(OrganizationHeader))
+	query := r.URL.Query()
+	resp, err := h.svc.ListAdminKeys(r.Context(), service.ListAdminKeysRequest{
+		ListQuery: listQuery(query),
+		Org:       r.Header.Get(OrganizationHeader),
+		Status:    query.Get("status"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

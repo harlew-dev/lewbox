@@ -1,8 +1,8 @@
-import type { OrgStatus, Organization, OrganizationList, OrganizationUpdate } from '../../types/organization'
-import { query, ref, request } from './client'
+import type { Organization, OrganizationList, OrganizationListQuery, OrganizationUpdate } from '../../types/organization'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listOrganizations(filter: { user?: string; status?: OrgStatus } = {}): Promise<OrganizationList> {
-  return request<OrganizationList>(`/v0/organizations${query(filter)}`)
+export async function listOrganizations(filter: OrganizationListQuery = {}): Promise<OrganizationList> {
+  return toPage(await request<PageBody<Organization>>(`/v0/organizations${query(filter)}`))
 }
 
 export function getOrganization(orgRef: string): Promise<Organization> {

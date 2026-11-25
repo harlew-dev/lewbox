@@ -9,6 +9,7 @@ The portal uses the same HTTP API your backend can. It sends and returns JSON, a
 - Errors: `{"error":{"code","message","details"}}`. `400` means the request could not be read; `422` means a value breaks a rule (`details.field` names it) or a quota is reached; `409` means the workspace's current state forbids it; `503` means a region or dependency is down (`Retry-After` says how long to wait).
 - Every response carries `X-Request-ID`; a `500` repeats it in `details.request_id`.
 - Responses carry `Cache-Control: no-store`.
+- Lists that grow are paged: `{"data":[…],"pages":{"current","total","per_page","items"}}`. Pass `page` (1–10 000, default 1), `per_page` (1–100, default 20), `q` (case-insensitive search; `%` and `_` are literal, at most 100 characters) and `sort` (a key from the list; `-` reverses it). Each filter is one comma-separated value, such as `status=started,stopped`. An unknown value is `400` with `details.field`; a page past the end is `200` with `[]`.
 
 ## Authentication
 
@@ -54,11 +55,11 @@ Routes that act on a workspace take it from the `Lewbox-Organization` header (it
 |---|---|---|
 | `GET /v0/profile` | signed in, or a key | `{user, organizations, via}`, or `{organization, admin_key, via}` for a key |
 | `POST /v0/organizations` | signed in | `{name, slug?, setup_token?}` → `201` Organization. With a setup link, the workspace starts with the link's plan and region |
-| `GET /v0/organizations` | signed in, or a key | `{data: [Organization]}`: yours, or the key's own |
+| `GET /v0/organizations` | signed in, or a key | `{data, pages}`: yours, or the key's own. Filters `status`, `region` and `plan`; sort by `name`, `-created` or `status` |
 | `GET /v0/organizations/{organization}` | its members, its keys | Organization |
 | `PATCH /v0/organizations/{organization}` | owner or admin | `{name}` renames → Organization |
 | `GET /v0/organization` | its members, its keys | Organization, from the header or the key |
-| `GET /v0/members` | its members, its keys | `{data: [Member]}` |
+| `GET /v0/members` | its members, its keys | `{data, pages}`. Filter `role`; sort by `email`, `role` or `-joined` |
 | `POST /v0/members` | owner or admin | `{email, role}` → `201` Member. Only owners add owners |
 | `PATCH /v0/members/{member}` | owner or admin | `{role}` → Member. The last owner stays (`409`) |
 | `DELETE /v0/members/{member}` | owner or admin, or themselves | → the Member |
@@ -69,7 +70,7 @@ Roles are `owner`, `admin`, `member` and `viewer`.
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/sandbox-keys` | its members, its keys | `{data: [SandboxKey]}`, live first, revoked ones included |
+| `GET /v0/sandbox-keys` | its members, its keys | `{data, pages}`, newest first, revoked ones included. Filter `status` (active, expired, revoked); sort by `-created`, `name` or `expires` |
 | `POST /v0/sandbox-keys` | owner, admin or member, its keys | `{name, region?, expires_in?}` → `201` NewSandboxKey, with the `avm_…` token shown only here. `region` defaults to the workspace's region; `expires_in` is `90d`, `never` or a duration such as `30d` |
 | `DELETE /v0/sandbox-keys/{sandbox_key}` | owner, admin or member (members only their own), its keys | Revoke the key on the region, then mark it → SandboxKey |
 
@@ -79,10 +80,10 @@ A key is refused with `403` while the workspace is pending or suspended, and wit
 
 | Route | Who | |
 |---|---|---|
-| `GET /v0/sandboxes?region={slug}&status={status}` | its members, its keys | `{data: [Sandbox]}`, not-gone only, newest first, at most 500 |
+| `GET /v0/sandboxes` | its members, its keys | `{data, pages}`, not-gone only, newest first. Filters `status`, `region`; sort by `-created`, `status` or `region`. Search `q` matches the sandbox ID |
 | `POST /v0/sandboxes/{sandbox}/stop` | owner, admin or member, its keys | Stop on the region, then update the mirror → Sandbox |
 | `DELETE /v0/sandboxes/{sandbox}` | same | Delete on the region, then mark it gone → Sandbox |
-| `GET /v0/snapshots?region={slug}` | its members, its keys | `{data: [Snapshot], partial_nodes: [name]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`) and `status`. Partial nodes are the machines that did not answer; archives are never partial |
+| `GET /v0/snapshots` | its members, its keys | `{data, pages, summary?, partial_nodes: [name]}`. One list of the workspace's snapshots and archived sandboxes, newest first, each with its `kind` (`snapshot` or `archive`) and `status`. Filters `kind`, `region` and `status`; search `q` matches the name; sort by `-created`, `name` or `size`. `summary=include` adds totals over the whole filtered set (see the [API reference](../../platform/reference/http-api.md#snapshot-summary)). Partial nodes are the machines that did not answer; archives are never partial |
 | `DELETE /v0/snapshots/{snapshot}?region={slug}` | owner, admin or member, its keys | Delete on the region → Snapshot. An `archive-…` name is `422`: use the archive routes |
 | `GET /v0/archives/{archive}` | its members, its keys | The archive as a Snapshot of `kind: "archive"`. Another workspace's is `404` |
 | `POST /v0/archives/{archive}/restore` | owner, admin or member, its keys | Create a new sandbox from the archive → `{archive, sandbox}`, where `archive` is a Snapshot. The archive is kept |
@@ -107,12 +108,13 @@ Another workspace's sandbox is always `404`, never `403`.
   "status_reason": "",
   "region": {"slug": "eu-west", "name": "EU West", "plan": {"slug": "pro", "name": "Pro"}},
   "members": 3,
+  "running": 1,
   "role": "owner",
   "created_at": "2026-11-11T15:22:35.8Z"
 }
 ```
 
-`status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is `null` until the workspace has a plan.
+`status` is `pending`, `active` or `suspended`; `status_reason` is `""` or `admin`. `region` is `null` until the workspace has a plan. `running` is the number of its sandboxes with status `started` in the mirror.
 
 **Region**: `{slug, name, endpoint_url, runtime, status, stop_policy}` for a region the workspace can use. `stop_policy` is `keep` or `archive`: on an `archive` region a stopped sandbox is archived to storage. A subscribed region also has `plan` (`{slug, name}`) and `limits`.
 

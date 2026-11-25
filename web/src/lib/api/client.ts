@@ -118,14 +118,48 @@ export function ref(value: string): string {
   return encodeURIComponent(value)
 }
 
-// "?a=1&b=2" from the set values, or "".
-export function query(params: Record<string, string | number | undefined>): string {
+type QueryValue = string | number | boolean | ReadonlyArray<string> | undefined | null
+
+// "?a=1&b=2" from the set values, or "". An array is one comma-separated
+// value, which is how the API takes a multi-value filter.
+export function query<T extends object>(params: T): string {
   const search = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') search.set(key, String(value))
+  for (const [key, value] of Object.entries(params) as [string, QueryValue][]) {
+    if (value === undefined || value === null || value === '') continue
+    if (Array.isArray(value)) {
+      if (value.length > 0) search.set(key, value.join(','))
+      continue
+    }
+    search.set(key, String(value))
   }
   const text = search.toString()
   return text ? `?${text}` : ''
+}
+
+// The API writes per_page; @harlew-dev/ui's pagination reads perPage.
+export interface PageBody<T> {
+  data: T[]
+  // Older answers and test stubs may leave this out; one page of everything is
+  // the same answer the library's table needs.
+  pages?: { current: number; total: number; per_page: number; items: number }
+}
+
+export function toPage<T>(body: PageBody<T>): import('@harlew-dev/ui').Page<T> {
+  const pages = body.pages ?? {
+    current: 1,
+    total: 1,
+    per_page: body.data.length || 20,
+    items: body.data.length,
+  }
+  return {
+    data: body.data,
+    pages: {
+      current: pages.current,
+      total: pages.total,
+      perPage: pages.per_page,
+      items: pages.items,
+    },
+  }
 }
 
 // The step a profile test failed at, from an error body's details, if any.

@@ -57,7 +57,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 		"member": f.member,
 		"viewer": f.viewer,
 	} {
-		list, err := f.s.ListSnapshots(ctx, RegionScope{Org: "acme"})
+		list, err := f.s.ListSnapshots(ctx, ListSnapshotsRequest{Org: "acme"})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -68,10 +68,10 @@ func TestListSnapshotsScoping(t *testing.T) {
 		}
 	}
 
-	if _, err := f.s.ListSnapshots(f.outsider, RegionScope{Org: "acme"}); err != nil {
+	if _, err := f.s.ListSnapshots(f.outsider, ListSnapshotsRequest{Org: "acme"}); err != nil {
 		wantCode(t, err, CodeNotFound)
 	}
-	list, err := f.s.ListSnapshots(f.outsider, RegionScope{Org: "other"})
+	list, err := f.s.ListSnapshots(f.outsider, ListSnapshotsRequest{Org: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 
 	// An instance admin with no workspace chosen sees every workspace's
 	// snapshots, with the owner and the node that holds each.
-	list, err = f.s.ListSnapshots(f.root, RegionScope{})
+	list, err = f.s.ListSnapshots(f.root, ListSnapshotsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +99,41 @@ func TestListSnapshotsScoping(t *testing.T) {
 		t.Errorf("fleet owners = %v", owners)
 	}
 
+	// The summary covers the whole filtered set before paging.
+	list, err = f.s.ListSnapshots(f.root, ListSnapshotsRequest{Summary: "include", ListQuery: ListQuery{PerPage: "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Summary == nil || list.Summary.Count != 2 || list.Summary.DiskGB != 20 ||
+		list.Summary.MemoryMB != 1024 || list.Summary.Failed != 0 || list.Summary.Workspaces != 2 {
+		t.Errorf("fleet summary = %+v (page %+v)", list.Summary, list.Data)
+	}
+	if len(list.Summary.ByNode) != 1 || list.Summary.ByNode[0].Node == nil || *list.Summary.ByNode[0].Node != "node-a" ||
+		list.Summary.ByNode[0].Count != 2 || list.Summary.ByNode[0].DiskGB != 20 {
+		t.Errorf("summary by node = %+v", list.Summary.ByNode)
+	}
+	if len(list.Summary.ByWorkspace) != 2 || list.Summary.ByWorkspace[0].Slug != "acme" || list.Summary.ByWorkspace[1].Slug != "other" {
+		t.Errorf("summary by workspace = %+v", list.Summary.ByWorkspace)
+	}
+
+	// A customer's summary keeps the owner and node hidden, like its rows.
+	list, err = f.s.ListSnapshots(f.owner, ListSnapshotsRequest{Org: "acme", Summary: "include"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Summary == nil || list.Summary.Workspaces != 1 || len(list.Summary.ByWorkspace) != 1 ||
+		list.Summary.ByWorkspace[0].Slug != "acme" {
+		t.Errorf("customer summary = %+v", list.Summary)
+	}
+	if len(list.Summary.ByNode) != 1 || list.Summary.ByNode[0].Node != nil {
+		t.Errorf("customer summary leaks a node: %+v", list.Summary.ByNode)
+	}
+	if _, err := f.s.ListSnapshots(f.root, ListSnapshotsRequest{Summary: "yes"}); err == nil {
+		t.Error("summary=yes was accepted")
+	} else {
+		wantField(t, err)
+	}
+
 	// An API key sees its own workspace only.
 	key, err := f.s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "backend", CurrentPassword: testPassword})
 	if err != nil {
@@ -110,7 +145,7 @@ func TestListSnapshotsScoping(t *testing.T) {
 	} else {
 		keyCtx = WithPrincipal(keyCtx, p)
 	}
-	list, err = f.s.ListSnapshots(keyCtx, RegionScope{})
+	list, err = f.s.ListSnapshots(keyCtx, ListSnapshotsRequest{})
 	if err != nil || len(list.Data) != 1 || list.Data[0].Name != "ckpt-a" {
 		t.Errorf("key sees %+v, %v", list.Data, err)
 	}
@@ -138,7 +173,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 	}
 	first.AddSnapshot(org.Team, testSnapshot("ckpt-a"))
 
-	list, err := s.ListSnapshots(root, RegionScope{Org: "acme"})
+	list, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +193,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 		second.AcceptToken(token)
 	}
 	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
-	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
+	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +202,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 	}
 
 	now = now.Add(31 * time.Second)
-	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
+	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +215,7 @@ func TestListSnapshotsMergesNodesAndCaches(t *testing.T) {
 
 	// After the reuse window the viewer token is minted again.
 	now = now.Add(51 * time.Minute)
-	list, err = s.ListSnapshots(root, RegionScope{Org: "acme"})
+	list, err = s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +251,7 @@ func TestDeleteSnapshotOnAnotherNode(t *testing.T) {
 	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
 
 	// The viewer token is minted on the admin node; let the other node see it.
-	if _, err := s.ListSnapshots(root, RegionScope{Org: "acme"}); err != nil {
+	if _, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, token := range first.Tokens() {
@@ -274,7 +309,7 @@ func TestDeleteSnapshot(t *testing.T) {
 		t.Errorf("the runner token is still listed: %+v", f.fake.Tokens())
 	}
 
-	list, err := f.s.ListSnapshots(f.owner, RegionScope{Org: "acme"})
+	list, err := f.s.ListSnapshots(f.owner, ListSnapshotsRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 0 {
 		t.Errorf("list after delete = %+v, %v", list.Data, err)
 	}
@@ -287,7 +322,7 @@ func TestListSnapshotsPartialRegion(t *testing.T) {
 	f := newSandboxFixture(t)
 	pointAtFake(t, f)
 	f.fake.Stop()
-	list, err := f.s.ListSnapshots(f.root, RegionScope{Org: "acme"})
+	list, err := f.s.ListSnapshots(f.root, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatalf("an unreachable region failed the list: %v", err)
 	}
@@ -320,7 +355,7 @@ func TestDeleteSnapshotUnreachableNodeIsNotNotFound(t *testing.T) {
 	f := newSandboxFixture(t)
 	pointAtFake(t, f)
 	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
-	if _, err := f.s.ListSnapshots(f.root, RegionScope{Org: "acme"}); err != nil {
+	if _, err := f.s.ListSnapshots(f.root, ListSnapshotsRequest{Org: "acme"}); err != nil {
 		t.Fatal(err)
 	}
 	f.fake.Stop()
@@ -351,7 +386,7 @@ func TestSnapshotsHideArchivedSandboxes(t *testing.T) {
 	f.fake.AddSnapshot(f.org.Team, testSnapshot("archive-sb-1"))
 	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
 
-	list, err := f.s.ListSnapshots(f.owner, RegionScope{Org: "acme"})
+	list, err := f.s.ListSnapshots(f.owner, ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

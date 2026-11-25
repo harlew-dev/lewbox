@@ -1,14 +1,12 @@
-import type { Node, NodeList } from '../../types/node'
-import { ref, request } from './client'
+import type { Node, NodeList, NodeListQuery } from '../../types/node'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listNodes(cluster?: string): Promise<NodeList> {
-  const query = cluster ? `?cluster=${ref(cluster)}` : ''
-  return request<NodeList>(`/v0/nodes${query}`)
+export async function listNodes(filter: NodeListQuery = {}): Promise<NodeList> {
+  return toPage(await request<PageBody<Node>>(`/v0/nodes${query(filter)}`))
 }
 
 export function removeNode(nodeRef: string, force: boolean): Promise<Node> {
-  const query = force ? '?force=true' : ''
-  return request<Node>(`/v0/nodes/${ref(nodeRef)}${query}`, {
+  return request<Node>(`/v0/nodes/${ref(nodeRef)}${query({ force: force ? 'true' : undefined })}`, {
     method: 'DELETE',
   })
 }

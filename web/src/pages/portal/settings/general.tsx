@@ -145,17 +145,26 @@ function LeaveZone({ org }: { org: api.Organization }) {
   const { organizations, select } = useOrganizations()
   const { reloadOrganizations } = useAuth()
   const navigate = useNavigate()
-  const members = useLoad(`members:${org.slug}`, () => api.listMembers(org.slug))
+  // The member list is paged, so ask for this account and for the owners
+  // separately rather than reading a first page that may hold neither.
+  const self = useLoad(
+    user ? `member:self:${org.slug}:${user.id}` : null,
+    () => api.listMembers(org.slug, { q: user?.email ?? '', per_page: 20 }),
+  )
+  const owners = useLoad(`members:owners:${org.slug}`, () =>
+    api.listMembers(org.slug, { role: ['owner'], per_page: 1 }),
+  )
   const [open, setOpen] = useState(false)
-  const list = members.data?.data ?? []
-  const self = list.find((member) => member.user_id === user?.id)
-  const owners = list.filter((member) => member.role === 'owner')
-  const canLeave = self !== undefined && !(self.role === 'owner' && owners.length === 1)
+  const mine = self.data?.data.find((member) => member.user_id === user?.id)
+  const ownerCount = owners.data?.pages.items ?? 0
+  // Fail closed: an owner can't leave until the owners have loaded and there
+  // is more than one.
+  const canLeave = mine !== undefined && (mine.role !== 'owner' || ownerCount > 1)
   if (!canLeave) return null
 
   async function leave() {
-    if (!self) return
-    await api.removeMember(org.slug, self.id)
+    if (!mine) return
+    await api.removeMember(org.slug, mine.id)
     await reloadOrganizations()
     const next = organizations.find((other) => other.slug !== org.slug)
     if (next) select(next.slug)

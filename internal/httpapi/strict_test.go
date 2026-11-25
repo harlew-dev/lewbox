@@ -130,6 +130,16 @@ func TestStrictQueryParameters(t *testing.T) {
 		})
 	}
 
+	// An unknown or repeated parameter is named, like the list parameters.
+	for path, field := range map[string]string{
+		"/v0/nodes?nope=1":              "nope",
+		"/v0/nodes?cluster=a&cluster=b": "cluster",
+	} {
+		if _, body := ts.do("GET", path, "", headers); !strings.Contains(body, `"details":{"field":"`+field+`"}`) {
+			t.Errorf("%s: body %s, want details.field %q", path, body, field)
+		}
+	}
+
 	// The accepted forms still reach the handler.
 	res, body := ts.do("DELETE", "/v0/nodes/eu-west?force=false", "", headers)
 	if res.StatusCode == http.StatusBadRequest {

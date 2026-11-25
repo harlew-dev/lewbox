@@ -30,10 +30,10 @@ func TestFreshProof(t *testing.T) {
 	wantField(t, err)
 	_, err = s.SetPassword(f.member, "member@example.com", SetPasswordRequest{Password: "a-brand-new-password"})
 	wantField(t, err)
-	if list, err := s.ListAccessTokens(f.member, ""); err != nil || len(list.Data) != 0 {
+	if list, err := s.ListAccessTokens(f.member, ListAccessTokensRequest{User: ""}); err != nil || len(list.Data) != 0 {
 		t.Fatalf("tokens after refused creates = %+v, %v", list, err)
 	}
-	if list, err := s.ListAdminKeys(f.owner, "acme"); err != nil || len(list.Data) != 0 {
+	if list, err := s.ListAdminKeys(f.owner, ListAdminKeysRequest{Org: "acme"}); err != nil || len(list.Data) != 0 {
 		t.Fatalf("keys after refused creates = %+v, %v", list, err)
 	}
 	if _, _, err := s.WebLogin(context.Background(), LoginRequest{Email: "member@example.com", Password: testPassword}); err != nil {

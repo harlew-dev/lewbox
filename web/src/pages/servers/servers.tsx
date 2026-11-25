@@ -6,14 +6,13 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
-  EmptyState,
   ErrorNotice,
-  Listbox,
-  ListboxOption,
   ListSkeleton,
   PageHeader,
   PageTabs,
   PageTransition,
+  PaginatedTable,
+  SearchField,
   Table,
   TableBody,
   TableCell,
@@ -27,12 +26,16 @@ import {
 import { EllipsisHorizontalIcon, TrashIcon } from '@heroicons/react/16/solid'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords, SortHeader } from '../../components/list'
 import { NoClusters } from '../../components/no-clusters'
 import { AliveBadge, StatusBadge } from '../../components/status'
 import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
 import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
+import { useListState } from '../../lib/use-list'
 import { useLoad } from '../../lib/use-load'
 import { AddServerMenu } from './add-server-menu'
 import { RemoveNodeDialog } from './remove-node-dialog'
@@ -136,84 +139,96 @@ function ClustersTab({ load }: { load: ReturnType<typeof useLoad<api.ClusterList
   )
 }
 
+const nodeSpec: ListSpec = {
+  sortKeys: ['cluster', 'name'],
+  defaultSort: 'cluster',
+  filters: {
+    cluster: null,
+    role: ['mixed', 'server', 'worker', 'ingress'],
+  },
+}
+
+const roleOptions = [
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'server', label: 'Server' },
+  { value: 'worker', label: 'Worker' },
+  { value: 'ingress', label: 'Ingress' },
+]
+
 function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: number }) {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const cluster = searchParams.get('cluster') ?? ''
   const [target, setTarget] = useState<api.Node | null>(null)
-  const nodes = useLoad(`nodes:${cluster === '' ? 'all' : cluster}`, () =>
-    api.listNodes(cluster === '' ? undefined : cluster),
+  const list = useListState(nodeSpec)
+  const { state } = list
+  const nodes = useLoad(`nodes:${list.key()}`, () =>
+    api.listNodes({
+      ...listQuery(state, nodeSpec),
+      cluster: state.filters.cluster,
+      role: state.filters.role,
+    }),
   )
-  const nodeList = nodes.data?.data ?? []
+  const alive = useLoad(`nodes:alive:${state.filters.cluster?.join(',') ?? 'all'}`, () =>
+    api.listNodes({ cluster: state.filters.cluster, alive: true, per_page: 1 }),
+  )
+  const total = useLoad(`nodes:total:${state.filters.cluster?.join(',') ?? 'all'}`, () =>
+    api.listNodes({ cluster: state.filters.cluster, per_page: 1 }),
+  )
   const refreshNodes = nodes.refresh
   // Refresh in the background, keeping the list on screen.
   useEffect(() => {
     if (version > 0) refreshNodes()
   }, [version, refreshNodes])
 
-  function changeCluster(value: string) {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current)
-      next.set('tab', 'nodes')
-      if (value === '') next.delete('cluster')
-      else next.set('cluster', value)
-      return next
-    })
-  }
+  const filters: FilterDef[] = [
+    {
+      key: 'cluster',
+      label: 'Cluster',
+      options: clusters.map((cluster) => ({ value: cluster.slug, label: cluster.name })),
+    },
+    { key: 'role', label: 'Role', options: roleOptions },
+  ]
 
   return (
-    <>
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="w-full max-w-xs">
-          <Listbox
-            aria-label="Filter by cluster"
-            value={cluster}
-            onChange={changeCluster}
-            placeholder="All clusters"
-          >
-            <ListboxOption value="">All clusters</ListboxOption>
-            {clusters.map((item) => (
-              <ListboxOption key={item.id} value={item.slug}>
-                {item.name}
-              </ListboxOption>
-            ))}
-          </Listbox>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="w-full">
+          <FilterBar
+            filters={filters}
+            values={state.filters}
+            onApply={list.setFilter}
+            onRemove={list.removeFilter}
+            onClear={list.clearFilters}
+            leading={
+              <SearchField label="Search nodes" value={state.q} onSearch={list.setSearch} />
+            }
+          />
         </div>
-        {nodes.data && (
+        {total.data && (
           <Badge color="zinc">
-            {nodeList.filter((node) => node.alive === true).length} of {nodeList.length} alive
+            {alive.data?.pages.items ?? 0} of {total.data.pages.items} alive
           </Badge>
         )}
       </div>
 
+      {nodes.error.message && nodes.data && (
+        <ErrorNotice error={nodes.error} onRetry={nodes.reload} />
+      )}
       {nodes.error.message && !nodes.data ? (
         <ErrorNotice error={nodes.error} onRetry={nodes.reload} />
       ) : (
-        <>
-          {nodes.error.message && (
-            <ErrorNotice error={nodes.error} onRetry={nodes.reload} className="mb-6" />
-          )}
-          <div
-            aria-busy={nodes.stale || undefined}
-            className={nodes.stale ? 'opacity-60 transition-opacity' : undefined}
-          >
-            {nodes.loading && !nodes.data ? (
-              <ListSkeleton label="Loading nodes" rows={5} />
-            ) : nodeList.length === 0 ? (
-              <EmptyState
-                title="No nodes"
-                description={
-                  cluster === ''
-                    ? 'Nodes appear here when a cluster is registered or a node joins one.'
-                    : 'No nodes belong to this cluster.'
-                }
-                action={<Button href={routes.platformDocs('clusters/add-nodes')}>Read the node guide</Button>}
-              />
-            ) : (
-              <Table>
-          <TableHead>
+        <PaginatedTable
+          page={nodes.data ?? undefined}
+          loading={nodes.loading || nodes.stale}
+          label="Nodes"
+          href={list.href}
+          rowKey={(node) => node.id}
+          head={
             <TableRow>
-              <TableHeader>Node</TableHeader>
-              <TableHeader>Cluster</TableHeader>
+              <SortHeader state={state} spec={nodeSpec} column="name" base={list.params}>
+                Node
+              </SortHeader>
+              <SortHeader state={state} spec={nodeSpec} column="cluster" base={list.params}>
+                Cluster
+              </SortHeader>
               <TableHeader>Role</TableHeader>
               <TableHeader>Status</TableHeader>
               <TableHeader>Version</TableHeader>
@@ -223,48 +238,58 @@ function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: num
                 <span className="sr-only">Actions</span>
               </TableHeader>
             </TableRow>
-          </TableHead>
-          <TableBody>
-            {nodeList.map((node) => (
-              <TableRow key={node.id}>
-                <TableCell className="font-medium">{node.name}</TableCell>
-                <TableCell>
-                  {node.cluster ? (
-                    <TextLink href={routes.admin.cluster(node.cluster)}>
-                      {node.cluster}
-                    </TextLink>
-                  ) : (
-                    <Text>—</Text>
-                  )}
-                </TableCell>
-                <TableCell>{node.role ?? '—'}</TableCell>
-                <TableCell>
-                  <AliveBadge alive={node.alive} />
-                </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400">{node.version ?? '—'}</TableCell>
-                <TableCell
-                  className="text-zinc-500 dark:text-zinc-400"
-                  title={formatDate(node.last_seen_at)}
-                >
-                  {relativeTime(node.last_seen_at)}
-                </TableCell>
-                <TableCell>
-                  <Code>{node.url}</Code>
-                </TableCell>
-                <TableCell className="w-0 text-right">
-                  <NodeActions node={node} onRemove={setTarget} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-              </Table>
-            )}
-          </div>
-        </>
+          }
+          row={(node) => (
+            <TableRow key={node.id}>
+              <TableCell className="font-medium">{node.name}</TableCell>
+              <TableCell>
+                {node.cluster ? (
+                  <TextLink href={routes.admin.cluster(node.cluster)}>{node.cluster}</TextLink>
+                ) : (
+                  <Text>—</Text>
+                )}
+              </TableCell>
+              <TableCell>{node.role ?? '—'}</TableCell>
+              <TableCell>
+                <AliveBadge alive={node.alive} />
+              </TableCell>
+              <TableCell className="text-zinc-500 dark:text-zinc-400">
+                {node.version ?? '—'}
+              </TableCell>
+              <TableCell
+                className="text-zinc-500 dark:text-zinc-400"
+                title={formatDate(node.last_seen_at)}
+              >
+                {relativeTime(node.last_seen_at)}
+              </TableCell>
+              <TableCell>
+                <Code>{node.url}</Code>
+              </TableCell>
+              <TableCell className="w-0 text-right">
+                <NodeActions node={node} onRemove={setTarget} />
+              </TableCell>
+            </TableRow>
+          )}
+          empty={
+            isFiltered(state) ? (
+              <NoMatches label="nodes" onClear={list.clearAll} />
+            ) : (
+              <NoRecords
+                title="No nodes"
+                description="Nodes appear here when a cluster is registered or a node joins one."
+                action={
+                  <Button href={routes.platformDocs('clusters/add-nodes')}>
+                    Read the node guide
+                  </Button>
+                }
+              />
+            )
+          }
+        />
       )}
 
       <RemoveNodeDialog node={target} onClose={() => setTarget(null)} onRemoved={nodes.reload} />
-    </>
+    </div>
   )
 }
 

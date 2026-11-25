@@ -1,23 +1,28 @@
 import {
-  EmptyState,
   ErrorNotice,
-  Listbox,
-  ListboxOption,
-  ListSkeleton,
   PageHeader,
+  SearchField,
   Stat,
   Subheading,
   Text,
 } from '@harlew-dev/ui'
 import { BarList } from '@harlew-dev/ui/chart'
-import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
-import { PartialNotice, SnapshotTable, useSnapshots } from '../../components/snapshot-table'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords } from '../../components/list'
+import {
+  PartialNotice,
+  SnapshotTable,
+  snapshotPage,
+  useSnapshots,
+} from '../../components/snapshot-table'
 import { formatMemory, formatNumber } from '../../lib/format'
-import { one, oneOf, withParam } from '../../lib/query-params'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
+import { loadOrganizationOptions, useOptionLabels } from '../../lib/list-options'
 import { useRegions } from '../../lib/regions'
 import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
+import { useListState } from '../../lib/use-list'
 
 interface Group {
   key: string
@@ -25,19 +30,6 @@ interface Group {
   href: string
   count: number
   diskGB: number
-}
-
-// Sums snapshots by `by`, largest disk first.
-function groupBy(snapshots: api.Snapshot[], by: (snapshot: api.Snapshot) => Omit<Group, 'count' | 'diskGB'>): Group[] {
-  const groups = new Map<string, Group>()
-  for (const snapshot of snapshots) {
-    const group = by(snapshot)
-    const sum = groups.get(group.key) ?? { ...group, count: 0, diskGB: 0 }
-    sum.count += 1
-    sum.diskGB += snapshot.disk_gb
-    groups.set(group.key, sum)
-  }
-  return [...groups.values()].sort((a, b) => b.diskGB - a.diskGB || b.count - a.count || a.label.localeCompare(b.label))
 }
 
 function plural(count: number, word: string): string {
@@ -63,53 +55,92 @@ function GroupList({ title, groups }: { title: string; groups: Group[] }) {
   )
 }
 
-export function FleetSnapshotsPage() {
-  useDocumentTitle('Snapshots')
-  return <SnapshotsView />
+const spec: ListSpec = {
+  sortKeys: ['created', 'name', 'size'],
+  defaultSort: '-created',
+  descendingFirst: ['created', 'size'],
+  filters: {
+    kind: ['snapshot', 'archive'],
+    region: null,
+    organization: null,
+    status: ['pending', 'pushing', 'active', 'error'],
+  },
 }
 
-function SnapshotsView() {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const region = one(searchParams, 'region')
-  const workspace = one(searchParams, 'workspace')
-  const kind = oneOf(searchParams, 'kind', ['snapshot', 'archive'])
-  const snapshots = useSnapshots('')
-  const { load } = snapshots
+const statusOptions = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'pushing', label: 'Pushing' },
+  { value: 'active', label: 'Active' },
+  { value: 'error', label: 'Error' },
+]
+
+export function FleetSnapshotsPage() {
+  useDocumentTitle('Snapshots')
+  const list = useListState(spec)
+  const { state } = list
   const regions = useRegions()
-  const filtered = region !== '' || workspace !== '' || kind !== ''
-
-  function choose(key: string, value: string) {
-    setSearchParams((current) => withParam(current, key, value), { preventScrollReset: true })
-  }
-
-  const workspaces = groupBy(snapshots.list, (snapshot) => ({
-    key: snapshot.organization?.slug ?? '',
-    label: snapshot.organization?.name ?? 'Unknown',
-    href: routes.admin.workspace(snapshot.organization?.slug ?? ''),
-  })).sort((a, b) => a.label.localeCompare(b.label))
-  const list = snapshots.list.filter(
-    (snapshot) =>
-      (!region || snapshot.region === region) &&
-      (!workspace || snapshot.organization?.slug === workspace) &&
-      (!kind || snapshot.kind === kind),
+  const organizations = useOptionLabels(
+    state.filters.organization ?? [],
+    loadOrganizationOptions,
   )
-  const diskGB = list.reduce((sum, snapshot) => sum + snapshot.disk_gb, 0)
-  const memoryMB = list.reduce((sum, snapshot) => sum + snapshot.memory_mb, 0)
-  const failed = list.filter((snapshot) => snapshot.status === 'error').length
-  const owners = new Set(list.map((snapshot) => snapshot.organization?.slug)).size
-  const byNode = groupBy(list, (snapshot) => ({
-    key: `${snapshot.region}/${snapshot.kind === 'archive' ? 'archive' : (snapshot.node ?? '')}`,
-    label:
-      snapshot.kind === 'archive'
-        ? `Archived to storage (${regions.name(snapshot.region)})`
-        : `${snapshot.node ?? 'Unknown node'} (${regions.name(snapshot.region)})`,
-    href: routes.admin.cluster(snapshot.region),
-  }))
-  const byWorkspace = groupBy(list, (snapshot) => ({
-    key: snapshot.organization?.slug ?? '',
-    label: snapshot.organization?.name ?? 'Unknown',
-    href: routes.admin.workspace(snapshot.organization?.slug ?? ''),
-  }))
+  const snapshots = useSnapshots(
+    '',
+    {
+      ...listQuery(state, spec),
+      kind: state.filters.kind as api.SnapshotKind[] | undefined,
+      region: state.filters.region,
+      organization: state.filters.organization,
+      status: state.filters.status as api.SnapshotStatus[] | undefined,
+      summary: 'include',
+    },
+    list.key(),
+  )
+  const { load, summary } = snapshots
+
+  const filters: FilterDef[] = [
+    {
+      key: 'kind',
+      label: 'Kind',
+      options: [
+        { value: 'snapshot', label: 'Snapshots' },
+        { value: 'archive', label: 'Archived sandboxes' },
+      ],
+    },
+    { key: 'status', label: 'Status', options: statusOptions },
+    {
+      key: 'region',
+      label: 'Region',
+      options: regions.list.map((region) => ({ value: region.slug, label: region.name })),
+    },
+    {
+      key: 'organization',
+      label: 'Workspace',
+      load: loadOrganizationOptions,
+      selectedLabels: organizations,
+    },
+  ]
+
+  const byNode: Group[] = (summary?.by_node ?? [])
+    .map((group) => ({
+      key: `${group.region}/${group.kind}/${group.node ?? ''}`,
+      label:
+        group.kind === 'archive'
+          ? `Archived to storage (${regions.name(group.region)})`
+          : `${group.node ?? 'Unknown node'} (${regions.name(group.region)})`,
+      href: routes.admin.cluster(group.region),
+      count: group.count,
+      diskGB: group.disk_gb,
+    }))
+    .sort((a, b) => b.diskGB - a.diskGB || b.count - a.count || a.label.localeCompare(b.label))
+  const byWorkspace: Group[] = (summary?.by_workspace ?? [])
+    .map((group) => ({
+      key: group.slug,
+      label: group.name,
+      href: routes.admin.workspace(group.slug),
+      count: group.count,
+      diskGB: group.disk_gb,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 
   return (
     <>
@@ -117,98 +148,90 @@ function SnapshotsView() {
         title="Snapshots"
         description="Every workspace’s snapshots and archived sandboxes, on every node and in every bucket."
       />
-      <div className="mb-6 flex flex-wrap gap-3">
-        <Listbox aria-label="Kind" value={kind} onChange={(value) => choose('kind', value ?? '')} className="sm:w-48">
-          <ListboxOption value="">All kinds</ListboxOption>
-          <ListboxOption value="snapshot">Snapshots</ListboxOption>
-          <ListboxOption value="archive">Archived sandboxes</ListboxOption>
-        </Listbox>
-        <Listbox aria-label="Region" value={region} onChange={(value) => choose('region', value ?? '')} className="sm:w-48">
-          <ListboxOption value="">All regions</ListboxOption>
-          {regions.list.map((option) => (
-            <ListboxOption key={option.slug} value={option.slug}>
-              {option.name}
-            </ListboxOption>
-          ))}
-        </Listbox>
-        <Listbox aria-label="Workspace" value={workspace} onChange={(value) => choose('workspace', value ?? '')} className="sm:w-48">
-          <ListboxOption value="">All workspaces</ListboxOption>
-          {workspaces.map((option) => (
-            <ListboxOption key={option.key} value={option.key}>
-              {option.label}
-            </ListboxOption>
-          ))}
-        </Listbox>
-      </div>
+      <div className="space-y-4">
+        <FilterBar
+          filters={filters}
+          values={state.filters}
+          onApply={list.setFilter}
+          onRemove={list.removeFilter}
+          onClear={list.clearFilters}
+          leading={
+            <SearchField
+              label="Search snapshots"
+              value={state.q}
+              onSearch={list.setSearch}
+            />
+          }
+        />
 
-      {load.error.message && !load.data ? (
-        <ErrorNotice error={load.error} onRetry={load.reload} />
-      ) : (
-        <>
-          {load.error.message && (
-            <ErrorNotice error={load.error} onRetry={load.reload} className="mb-6" />
-          )}
-          <div
-            aria-busy={load.stale || undefined}
-            className={load.stale ? 'opacity-60 transition-opacity' : undefined}
-          >
-            {load.loading && !load.data ? (
-              <ListSkeleton label="Loading snapshots" rows={4} />
-            ) : (
+        {load.error.message && load.data && (
+          <ErrorNotice error={load.error} onRetry={load.reload} />
+        )}
+        {load.error.message && !load.data ? (
+          <ErrorNotice error={load.error} onRetry={load.reload} />
+        ) : (
+          <>
+            <PartialNotice partial={snapshots.partial} />
+            {summary && (
               <>
-                <PartialNotice partial={snapshots.partial} />
                 <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-4">
-                  <Stat title="Snapshots" value={formatNumber(list.length, 0)}>
-                    <span>across {plural(owners, 'workspace')}</span>
+                  <Stat title="Snapshots" value={formatNumber(summary.count, 0)}>
+                    <span>across {plural(summary.workspaces, 'workspace')}</span>
                   </Stat>
-                  <Stat title="Disk" value={`${formatNumber(diskGB, 0)} GB`}>
+                  <Stat title="Disk" value={`${formatNumber(summary.disk_gb, 0)} GB`}>
                     <span>of sandbox disk captured</span>
                   </Stat>
-                  <Stat title="Memory" value={formatMemory(memoryMB)}>
+                  <Stat title="Memory" value={formatMemory(summary.memory_mb)}>
                     <span>of sandbox memory captured</span>
                   </Stat>
-                  <Stat title="Failed uploads" value={formatNumber(failed, 0)} level={failed > 0 ? 'warn' : undefined}>
+                  <Stat
+                    title="Failed uploads"
+                    value={formatNumber(summary.failed, 0)}
+                    level={summary.failed > 0 ? 'warn' : undefined}
+                  >
                     <span>not pushed to the registry</span>
                   </Stat>
                 </div>
                 <Text className="mt-4">
-                  AerolVM doesn’t report how much space a snapshot takes, so these totals add up the disk and memory
-                  size of the sandbox each snapshot was taken from.
+                  AerolVM doesn’t report how much space a snapshot takes, so these totals add up
+                  the disk and memory size of the sandbox each snapshot was taken from.
                 </Text>
 
-                {list.length === 0 ? (
-                  <div className="mt-10">
-                    <EmptyState
-                      title="No snapshots"
-                      description={
-                        filtered
-                          ? 'None match these filters.'
-                          : 'Snapshots workspaces take and sandboxes archived on stop show up here.'
-                      }
-                    />
+                {summary.count > 0 && (
+                  <div className="mt-14 grid gap-10 lg:grid-cols-2">
+                    <GroupList title="By node" groups={byNode} />
+                    <GroupList title="By workspace" groups={byWorkspace} />
                   </div>
-                ) : (
-                  <>
-                    <div className="mt-14 grid gap-10 lg:grid-cols-2">
-                      <GroupList title="By node" groups={byNode} />
-                      <GroupList title="By workspace" groups={byWorkspace} />
-                    </div>
-                    <Subheading className="mt-14 mb-4">All snapshots and archives</Subheading>
-                    <SnapshotTable
-                      snapshots={list}
-                      regionName={regions.name}
-                      canChange
-                      fleet
-                      onDeleted={snapshots.deleted}
-                      onRestored={snapshots.changed}
-                    />
-                  </>
                 )}
               </>
             )}
-          </div>
-        </>
-      )}
+
+            <Subheading className="mt-14 mb-4">All snapshots and archives</Subheading>
+            <SnapshotTable
+              page={snapshotPage(snapshots)}
+              loading={load.loading || load.stale}
+              sort={state.sort}
+              sortHref={(sort) => list.href({ sort, page: 1 })}
+              href={list.href}
+              regionName={regions.name}
+              canChange
+              fleet
+              onDeleted={snapshots.deleted}
+              onRestored={snapshots.changed}
+              empty={
+                isFiltered(state) ? (
+                  <NoMatches label="snapshots" onClear={list.clearAll} />
+                ) : (
+                  <NoRecords
+                    title="No snapshots"
+                    description="Snapshots workspaces take and sandboxes archived on stop show up here."
+                  />
+                )
+              }
+            />
+          </>
+        )}
+      </div>
     </>
   )
 }

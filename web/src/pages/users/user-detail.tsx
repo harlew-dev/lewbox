@@ -52,9 +52,13 @@ export function UserDetailPage() {
   const { ref = '' } = useParams()
   const navigate = useNavigate()
   const { reloadOrganizations } = useAuth()
-  const all = useLoad('organizations:all', () => api.listOrganizations())
+  // The API pages these lists; this page shows them whole rather than as a
+  // paged table, so ask for the largest page it serves.
+  const all = useLoad('organizations:all', () => api.listOrganizations({ per_page: 100 }))
   const user = useLoad(`user:${ref}`, () => api.getUser(ref))
-  const orgs = useLoad(`organizations:user:${ref}`, () => api.listOrganizations({ user: ref }))
+  const orgs = useLoad(`organizations:user:${ref}`, () =>
+    api.listOrganizations({ user: ref, per_page: 100 }),
+  )
   const [addOpen, setAddOpen] = useState(false)
   useDocumentTitle(user.data?.email ?? 'User')
 

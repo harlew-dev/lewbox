@@ -52,7 +52,9 @@ export const routes = {
   admin: {
     overview: () => '/admin',
     workspaces: (tab?: AdminWorkspacesTab) =>
-      pathWithQuery('/admin/workspaces', { tab: tab === 'all' ? undefined : tab }),
+      tab === 'pending' || tab === 'suspended'
+        ? pathWithQuery('/admin/workspaces', { status: tab })
+        : pathWithQuery('/admin/workspaces', { tab: tab === 'setup' ? tab : undefined }),
     workspace: (slug: string) => `/admin/workspaces/${encodeURIComponent(slug)}`,
     customers: () => '/admin/customers',
     customer: (slug: string) => `/admin/customers/${encodeURIComponent(slug)}`,

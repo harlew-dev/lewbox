@@ -53,15 +53,19 @@ mode, which has no account of its own, --user is required.`,
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the token works until it is revoked")
 	create.Flags().StringVar(&currentPasswordFile, "current-password-file", "", "read your current password from this file's first line (remote backend; asked on a terminal)")
 
+	var tokenStatus string
+	var tokenQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List access tokens, revoked ones included (GET /v0/access-tokens)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListAccessTokens(ctx, user)
+			return b.ListAccessTokens(ctx, service.ListAccessTokensRequest{ListQuery: tokenQuery, User: user, Status: tokenStatus})
 		}),
 	}
+	list.Flags().StringVar(&tokenStatus, "status", "", "only active, expired or revoked tokens, comma separated")
+	addListFlags(list, &tokenQuery, "-created, name or expires; prefix with - to reverse")
 
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",

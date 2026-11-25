@@ -40,8 +40,25 @@ type NewAccessToken struct {
 // AccessTokenList is returned by ListAccessTokens, newest first. Data is
 // never null.
 type AccessTokenList struct {
-	Data []AccessToken `json:"data"`
+	Data  []AccessToken `json:"data"`
+	Pages Pages         `json:"pages"`
 }
+
+// ListAccessTokensRequest pages and filters one account's access tokens.
+type ListAccessTokensRequest struct {
+	ListQuery
+	User   string `json:"user"`
+	Status string `json:"status"`
+}
+
+// accessTokenSorts maps a public sort key to SQL written here.
+var accessTokenSorts = mergeSorts(
+	sortDirections("created", "t.created_at ASC, t.id ASC", "t.created_at DESC, t.id DESC"),
+	sortDirections("name", "lower(t.name) ASC, t.id ASC", "lower(t.name) DESC, t.id DESC"),
+	sortDirections("expires",
+		"(t.expires_at IS NULL) ASC, t.expires_at ASC, t.id ASC",
+		"(t.expires_at IS NULL) ASC, t.expires_at DESC, t.id DESC"),
+)
 
 // CreateAccessTokenRequest is the input to CreateAccessToken. User names the
 // account (ID or email); empty means the caller's own. Only instance admins
@@ -154,22 +171,42 @@ func (s *Service) CreateAccessToken(ctx context.Context, req CreateAccessTokenRe
 }
 
 // ListAccessTokens returns an account's access tokens, revoked ones
-// included, newest first. user is as for CreateAccessTokenRequest.User.
-func (s *Service) ListAccessTokens(ctx context.Context, user string) (AccessTokenList, error) {
+// included, newest first by default. User is as for
+// CreateAccessTokenRequest.User.
+func (s *Service) ListAccessTokens(ctx context.Context, req ListAccessTokensRequest) (AccessTokenList, error) {
 	p, err := requireUser(ctx)
 	if err != nil {
 		return AccessTokenList{}, err
 	}
-	owner, err := s.tokenOwner(ctx, p, user)
+	q, err := parseListQuery(req.ListQuery, accessTokenSorts, "-created")
 	if err != nil {
 		return AccessTokenList{}, err
 	}
-	rows, err := s.queries(ctx).ListAccessTokens(ctx, owner.ID)
+	statuses, err := parseList("status", req.Status, keyStatuses)
+	if err != nil {
+		return AccessTokenList{}, err
+	}
+	owner, err := s.tokenOwner(ctx, p, req.User)
+	if err != nil {
+		return AccessTokenList{}, err
+	}
+	now := s.now()
+	rows, total, err := s.queries(ctx).ListAccessTokensPage(ctx, db.AccessTokenListParams{
+		UserID:   owner.ID,
+		Statuses: statuses,
+		Pattern:  q.pattern,
+		Order:    q.sort,
+		Now:      now,
+		Limit:    q.perPage,
+		Offset:   (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return AccessTokenList{}, fmt.Errorf("list access tokens: %w", err)
 	}
-	now := s.now()
-	out := AccessTokenList{Data: make([]AccessToken, 0, len(rows))}
+	out := AccessTokenList{
+		Data:  make([]AccessToken, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, r := range rows {
 		out.Data = append(out.Data, toAccessToken(r, now))
 	}

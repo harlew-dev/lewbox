@@ -52,10 +52,9 @@ function detailRoutes(org: object) {
 }
 
 describe('workspaces', () => {
-  it('lists workspaces with their cluster and plan, and a tab for those waiting', async () => {
-    stubAPI({
+  it('lists workspaces with their cluster and plan, and applies an old pending tab as a status filter', async () => {
+    const calls = stubAPI({
       'GET /v0/organizations': () => json(200, { data: [pending] }),
-      'GET /v0/sandboxes?status=started': () => json(200, { data: [] }),
     })
     renderApp('/admin/workspaces?tab=pending')
     const row = (await screen.findAllByRole('link', { name: /Acme/ }))[0]!
@@ -66,7 +65,17 @@ describe('workspaces', () => {
     expect(screen.queryByText(/eu-west/)).toBeNull()
     expect(screen.getByText('12.5')).toBeInTheDocument()
     const tabs = screen.getByRole('navigation', { name: 'Workspace views' })
-    expect(within(tabs).getByRole('link', { name: 'Pending' })).toHaveAttribute('aria-current', 'page')
+    expect(within(tabs).getByRole('link', { name: 'Workspaces' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    expect(within(tabs).queryByRole('link', { name: 'Pending' })).toBeNull()
+    expect(await screen.findByRole('button', { name: /Status.*Pending/ })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.url.startsWith('/v0/organizations?status=pending')),
+      ).toBe(true),
+    )
   })
 
   it('approves a pending workspace', async () => {

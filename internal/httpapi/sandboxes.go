@@ -11,10 +11,13 @@ type Sandboxes struct{ *server }
 
 // Index lists mirrored sandboxes, optionally filtered by region and status.
 func (h Sandboxes) Index(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
 	resp, err := h.svc.ListSandboxes(r.Context(), service.ListSandboxesRequest{
-		Region: r.URL.Query().Get("region"),
-		Status: r.URL.Query().Get("status"),
-		Org:    requestOrganization(r),
+		ListQuery:    listQuery(query),
+		Region:       query.Get("region"),
+		Status:       query.Get("status"),
+		Org:          requestOrganization(r),
+		Organization: query.Get("organization"),
 	})
 	h.respond(w, http.StatusOK, resp, err)
 }

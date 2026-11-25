@@ -1,6 +1,6 @@
 # Web console
 
-The React app in `web/` is the Lewbox web console. Vite builds it into `web/dist`, and the Go binary embeds that folder, so `lewbox serve` serves the console, the `/v0` API and the documentation from one origin. The user-facing guide is [Use the web console](../docs/getting-started/web-console.md); this page is for people changing the app.
+The React app in `web/` is the Lewbox web console. Vite builds it into `web/dist`, and the Go binary embeds that folder, so `lewbox serve` serves the console, the `/v0` API and the documentation from one origin. The user-facing guide is [Use the web console](../docs/platform/getting-started/web-console.md); this page is for people changing the app.
 
 ## Stack
 
@@ -50,7 +50,15 @@ A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider
 
 Every page URL is built by `src/lib/routes.ts` (`routes.admin.workspace(slug)`, `routes.docs(path)`), never by string concatenation in a component. Add the builder there when you add a page. The route registry itself stays in `src/app.tsx`.
 
-Reads go through `useLoad(key, loader)`: the key includes everything the loader reads (the workspace, an ID, a filter) and the signed-in user is added by the hook. Answers are cached per key, so a revisit shows the last answer at once and revalidates it; a new key keeps the previous answer on screen (dimmed with `aria-busy`) until the next one arrives. The result also has `loading`, `refreshing`, `stale`, `missing` (404), `error`, `reload()` and `refresh()`. `every` takes milliseconds or `(data) => milliseconds`, so poll only while something is pending. List filters live in the URL through `src/lib/query-params.ts`, with defaults omitted.
+Reads go through `useLoad(key, loader)`: the key includes everything the loader reads (the workspace, an ID, a filter) and the signed-in user is added by the hook. Answers are cached per key, so a revisit shows the last answer at once and revalidates it; a new key keeps the previous answer on screen (dimmed with `aria-busy`) until the next one arrives. The result also has `loading`, `refreshing`, `stale`, `missing` (404), `error`, `reload()` and `refresh()`. `every` takes milliseconds or `(data) => milliseconds`, so poll only while something is pending.
+
+Every paged list uses the same state and table pieces:
+
+- `src/lib/list-query.ts` parses and writes a list's URL state (`page`, `q`, `sort` and one comma-separated parameter per filter). Parsing drops unknown values and falls back to defaults, so a hand-edited URL never causes a 400; writing leaves defaults out and keeps the page's other parameters (`tab`, `org`). Changing a filter, the search or the sort resets to page 1, and a header click toggles between `name` and `-name`. `src/lib/use-list.ts` is the hook around it: every change is a navigation, except search, which replaces the entry after `SearchField`'s 300 ms debounce.
+- The API's paged functions under `src/lib/api/` take a typed query (`src/types/list.ts`) and return the library's `Page<T>`, mapping the API's `per_page` to `perPage`. A caller that only needs a count asks for `per_page: 1` and reads `pages.items`.
+- `src/components/list.tsx` holds the sortable `SortHeader`, the two empty states (`NoRecords` for an empty list, `NoMatches` with Clear filters) and the loading placeholder.
+- A list page renders `SearchField` as the filter bar's `leading`, then `FilterBar` from `src/components/filter-bar.tsx`, then `PaginatedTable`. Filter options are fixed values, the unpaged region and plan lists, or `src/lib/list-options.ts` loaders that search and page the API (workspaces, accounts).
+- The audit trail keeps cursor paging. Its filters and range live in the URL too, and `from`/`to` are built from the range badge at request time.
 
 ## Two sides: portal and console
 
@@ -97,7 +105,7 @@ Both routes are outside `RequireAuth`, so the books are public. They use the lib
 2. Add a sidebar item in `src/components/portal-layout.tsx` or `src/components/console-layout.tsx`. Both fill in `AppShell` (`src/components/app-shell.tsx`), which holds the logo, Docs and the account menu.
    Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, charts from `@harlew-dev/ui/chart`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges, the sandbox and key tables, the key expiry picker, limit meters, the usage chart).
 3. Add a typed function to the resource's module under `src/lib/api/` (`src/lib/api/client.ts` is the only module that calls `fetch`); its request and response types live in `src/types/`. Return the existing interfaces or add one there. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`.
-4. Use `useLoad(key, loader)` for reads (`every` polls in the background only while something is pending; `refresh()` reloads without dropping the data) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts. Keep list filters in the URL with `src/lib/query-params.ts`.
+4. Use `useLoad(key, loader)` for reads (`every` polls in the background only while something is pending; `refresh()` reloads without dropping the data) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts. Keep a list's state in the URL with `useListState` (`src/lib/use-list.ts`) and `src/lib/list-query.ts`, and give it `FilterBar`, `SearchField` and `PaginatedTable` as above.
 5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/profile` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
 6. If the page is documentation, add it to the right book's `README.md` (`docs/consumer/` or `docs/platform/`) so it appears in that nav, and link it with a relative `.md` path.
 

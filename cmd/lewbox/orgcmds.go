@@ -75,18 +75,28 @@ func newOrgCmd(a *app) *cobra.Command {
 	create.Flags().StringVar(&createOwner, "owner", "", "the first owner's email (default: you; instance admins only)")
 	create.Flags().StringVar(&createSetupToken, "setup-token", "", "a setup link's token, for a plan in its region even when sign-up is closed")
 
-	var listUser, listStatus string
+	var listUser, listStatus, listRegion, listPlan string
+	var listQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List organizations (GET /v0/organizations)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{User: listUser, Status: listStatus})
+			return b.ListOrganizations(ctx, service.ListOrganizationsRequest{
+				ListQuery: listQuery,
+				User:      listUser,
+				Status:    listStatus,
+				Region:    listRegion,
+				Plan:      listPlan,
+			})
 		}),
 	}
 	list.Flags().StringVar(&listUser, "user", "", "list this account's organizations and its role in each")
-	list.Flags().StringVar(&listStatus, "status", "", "only pending, active or suspended organizations")
+	list.Flags().StringVar(&listStatus, "status", "", "only pending, active or suspended organizations, comma separated")
+	list.Flags().StringVar(&listRegion, "region", "", "only organizations in these regions, comma separated")
+	list.Flags().StringVar(&listPlan, "plan", "", "only organizations on these plans, comma separated")
+	addListFlags(list, &listQuery, "name, -created or status; prefix with - to reverse")
 
 	get := &cobra.Command{
 		Use:   "get [<id|slug>]",
@@ -185,15 +195,19 @@ func newMemberCmd(a *app) *cobra.Command {
 		Short:   "Manage the members of an organization (--org)",
 	}
 
+	var memberRole string
+	var memberQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List members (GET /v0/members)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
-			return b.ListMembers(ctx, org)
+			return b.ListMembers(ctx, service.ListMembersRequest{ListQuery: memberQuery, Org: org, Role: memberRole})
 		}),
 	}
+	list.Flags().StringVar(&memberRole, "role", "", "only owner, admin, member or viewer members, comma separated")
+	addListFlags(list, &memberQuery, "email, role or -joined; prefix with - to reverse")
 
 	var addRole string
 	add := &cobra.Command{
@@ -268,15 +282,19 @@ func newAdminKeyCmd(a *app) *cobra.Command {
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the key works until it is revoked")
 	create.Flags().StringVar(&currentPasswordFile, "current-password-file", "", "read your current password from this file's first line (remote backend; asked on a terminal)")
 
+	var adminKeyStatus string
+	var adminKeyQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List admin keys, revoked ones included (GET /v0/admin-keys)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
-			return b.ListAdminKeys(ctx, org)
+			return b.ListAdminKeys(ctx, service.ListAdminKeysRequest{ListQuery: adminKeyQuery, Org: org, Status: adminKeyStatus})
 		}),
 	}
+	list.Flags().StringVar(&adminKeyStatus, "status", "", "only active, expired or revoked keys, comma separated")
+	addListFlags(list, &adminKeyQuery, "-created, name or expires; prefix with - to reverse")
 
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",
@@ -335,15 +353,19 @@ func newSandboxKeyCmd(a *app) *cobra.Command {
 	create.Flags().StringVar(&expiresIn, "expires-in", "90d", "how long the key works, such as 30d or 720h")
 	create.Flags().BoolVar(&neverExpires, "never-expires", false, "the key works until it is revoked")
 
+	var sandboxKeyStatus string
+	var sandboxKeyQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List sandbox keys, revoked ones included (GET /v0/sandbox-keys)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.callOrg(func(ctx context.Context, b backend.Backend, org string, _ []string) (any, error) {
-			return b.ListSandboxKeys(ctx, org)
+			return b.ListSandboxKeys(ctx, service.ListSandboxKeysRequest{ListQuery: sandboxKeyQuery, Org: org, Status: sandboxKeyStatus})
 		}),
 	}
+	list.Flags().StringVar(&sandboxKeyStatus, "status", "", "only active, expired or revoked keys, comma separated")
+	addListFlags(list, &sandboxKeyQuery, "-created, name or expires; prefix with - to reverse")
 
 	revoke := &cobra.Command{
 		Use:     "revoke <id|name>",

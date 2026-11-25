@@ -8,13 +8,9 @@ import {
   DialogBody,
   DialogDescription,
   DialogTitle,
-  ErrorNotice,
-  ListSkeleton,
   Notice,
-  Table,
-  TableBody,
+  PaginatedTable,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
   Text,
@@ -24,6 +20,7 @@ import { ArrowUturnLeftIcon, TrashIcon } from '@heroicons/react/16/solid'
 import { useState, type ReactNode } from 'react'
 import * as api from '../lib/api'
 import { formatDate, formatMemory, formatNumber, relativeTime } from '../lib/format'
+import { sortDirection, toggleSort } from '../lib/list-query'
 import { useLoad, type LoadState } from '../lib/use-load'
 
 function snapshotSize(snapshot: api.Snapshot): string {
@@ -54,6 +51,8 @@ export interface SnapshotsState {
   // The snapshots and archives, without those deleted here since the list
   // loaded.
   list: api.Snapshot[]
+  // Totals for the whole filtered set.
+  summary?: api.SnapshotSummary
   // Nodes that didn't answer, so the list may be missing some snapshots.
   partial: string[]
   deleted: (snapshot: api.Snapshot) => void
@@ -62,9 +61,13 @@ export interface SnapshotsState {
 }
 
 // Loads snapshots and archived sandboxes. An empty org is every workspace's,
-// for an instance admin.
-export function useSnapshots(org: string): SnapshotsState {
-  const load = useLoad(`snapshots:${org}`, () => api.listSnapshots(org))
+// for an instance admin. `cacheKey` names the page's query.
+export function useSnapshots(
+  org: string,
+  query: api.SnapshotListQuery = {},
+  cacheKey = '',
+): SnapshotsState {
+  const load = useLoad(`snapshots:${org}:${cacheKey}`, () => api.listSnapshots(org, query))
   // Deleted here, hidden until the list loads again: the answer it was
   // deleted from may still have them.
   const [hidden, setHidden] = useState<{
@@ -75,6 +78,7 @@ export function useSnapshots(org: string): SnapshotsState {
   return {
     load,
     list: (load.data?.data ?? []).filter((snapshot) => !gone.has(key(snapshot))),
+    summary: load.data?.summary,
     partial: load.data?.partial_nodes ?? [],
     deleted: (snapshot) => {
       setHidden({ from: load.data, keys: new Set(gone).add(key(snapshot)) })
@@ -82,6 +86,14 @@ export function useSnapshots(org: string): SnapshotsState {
     },
     changed: load.refresh,
   }
+}
+
+// The list with rows deleted here removed, keeping the page envelope.
+export function snapshotPage(
+  state: SnapshotsState,
+): api.SnapshotList | undefined {
+  const page = state.load.data
+  return page ? { ...page, data: state.list } : undefined
 }
 
 export function PartialNotice({ partial }: { partial: string[] }) {
@@ -107,7 +119,9 @@ function SnapshotStatus({ snapshot }: { snapshot: api.Snapshot }) {
         <span className="whitespace-normal">
           <Badge color="red">Error</Badge>
           {snapshot.error && (
-            <span className="ml-2 text-sm text-zinc-500 dark:text-zinc-400">{snapshot.error}</span>
+            <span className="ml-2 text-sm text-zinc-500 dark:text-zinc-400">
+              {snapshot.error}
+            </span>
           )}
         </span>
       )
@@ -121,7 +135,12 @@ function SnapshotStatus({ snapshot }: { snapshot: api.Snapshot }) {
 // and node of each row, for the operator, and acts in the row's own
 // workspace; otherwise `org` scopes the action.
 export function SnapshotTable({
-  snapshots,
+  page,
+  loading,
+  empty,
+  sort,
+  sortHref,
+  href,
   regionName,
   canChange,
   onDeleted,
@@ -130,7 +149,12 @@ export function SnapshotTable({
   fleet = false,
   showRegion = true,
 }: {
-  snapshots: api.Snapshot[]
+  page: api.SnapshotList | undefined
+  loading: boolean
+  empty: ReactNode
+  sort: string
+  sortHref: (sort: string) => string
+  href: (page: number) => string
   regionName: (slug: string) => string
   canChange: boolean
   onDeleted: (snapshot: api.Snapshot) => void
@@ -145,19 +169,51 @@ export function SnapshotTable({
   const actions = canChange || fleet
   const deletingArchive = deleting?.kind === 'archive'
 
+  function Sorted({
+    column,
+    first = 'ascending',
+    className,
+    children,
+  }: {
+    column: string
+    first?: 'ascending' | 'descending'
+    className?: string
+    children: ReactNode
+  }) {
+    return (
+      <TableHeader
+        href={sortHref(toggleSort(sort, column, first))}
+        sort={sortDirection(sort, column)}
+        className={className}
+      >
+        {children}
+      </TableHeader>
+    )
+  }
+
   return (
     <>
-      <Table>
-        <TableHead>
+      <PaginatedTable
+        page={page}
+        loading={loading}
+        label="Snapshots"
+        href={href}
+        empty={empty}
+        rowKey={key}
+        head={
           <TableRow>
             {fleet && <TableHeader>Workspace</TableHeader>}
             <TableHeader>Kind</TableHeader>
-            <TableHeader>Name</TableHeader>
+            <Sorted column="name">Name</Sorted>
             {showRegion && <TableHeader>Region</TableHeader>}
             {fleet && <TableHeader>Node</TableHeader>}
             <TableHeader>Source sandbox</TableHeader>
-            <TableHeader>Created</TableHeader>
-            <TableHeader>Size</TableHeader>
+            <Sorted column="created" first="descending">
+              Created
+            </Sorted>
+            <Sorted column="size" first="descending">
+              Size
+            </Sorted>
             <TableHeader>Status</TableHeader>
             <TableHeader>Last restored as</TableHeader>
             {actions && (
@@ -166,56 +222,71 @@ export function SnapshotTable({
               </TableHeader>
             )}
           </TableRow>
-        </TableHead>
-        <TableBody>
-          {snapshots.map((snapshot) => {
-            const when =
-              snapshot.kind === 'archive' ? (snapshot.archived_at ?? snapshot.created_at) : snapshot.created_at
-            return (
-              <TableRow key={key(snapshot)}>
-                {fleet && <TableCell className="font-medium">{snapshot.organization?.name ?? '—'}</TableCell>}
-                <TableCell className="whitespace-nowrap">
-                  {snapshot.kind === 'archive' ? 'Archived sandbox' : 'Snapshot'}
+        }
+        row={(snapshot) => {
+          const when =
+            snapshot.kind === 'archive'
+              ? (snapshot.archived_at ?? snapshot.created_at)
+              : snapshot.created_at
+          return (
+            <TableRow key={key(snapshot)}>
+              {fleet && (
+                <TableCell className="font-medium">
+                  {snapshot.organization?.name ?? '—'}
                 </TableCell>
-                <TableCell className="font-medium">{rowLabel(snapshot)}</TableCell>
-                {showRegion && (
-                  <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(snapshot.region)}</TableCell>
+              )}
+              <TableCell className="whitespace-nowrap">
+                {snapshot.kind === 'archive' ? 'Archived sandbox' : 'Snapshot'}
+              </TableCell>
+              <TableCell className="font-medium">{rowLabel(snapshot)}</TableCell>
+              {showRegion && (
+                <TableCell className="text-zinc-500 dark:text-zinc-400">
+                  {regionName(snapshot.region)}
+                </TableCell>
+              )}
+              {fleet && (
+                <TableCell className="text-zinc-500 dark:text-zinc-400">
+                  {snapshot.kind === 'archive' ? '—' : (snapshot.node ?? '—')}
+                </TableCell>
+              )}
+              <TableCell className="max-w-56">
+                {snapshot.source_sandbox_id ? (
+                  <CopyText
+                    value={snapshot.source_sandbox_id}
+                    label={`Copy ${snapshot.source_sandbox_id}`}
+                  />
+                ) : (
+                  '—'
                 )}
-                {fleet && (
-                  <TableCell className="text-zinc-500 dark:text-zinc-400">
-                    {snapshot.kind === 'archive' ? '—' : (snapshot.node ?? '—')}
-                  </TableCell>
+              </TableCell>
+              <TableCell
+                className="text-zinc-500 dark:text-zinc-400"
+                title={formatDate(when)}
+              >
+                {relativeTime(when)}
+              </TableCell>
+              <TableCell className="whitespace-nowrap tabular-nums">
+                {snapshotSize(snapshot)}
+              </TableCell>
+              <TableCell>
+                <SnapshotStatus snapshot={snapshot} />
+              </TableCell>
+              <TableCell className="max-w-56">
+                {snapshot.last_restored_sandbox_id ? (
+                  <CopyText
+                    value={snapshot.last_restored_sandbox_id}
+                    label={`Copy ${snapshot.last_restored_sandbox_id}`}
+                  />
+                ) : (
+                  '—'
                 )}
-                <TableCell className="max-w-56">
-                  {snapshot.source_sandbox_id ? (
-                    <CopyText
-                      value={snapshot.source_sandbox_id}
-                      label={`Copy ${snapshot.source_sandbox_id}`}
-                    />
-                  ) : (
-                    '—'
-                  )}
-                </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400" title={formatDate(when)}>
-                  {relativeTime(when)}
-                </TableCell>
-                <TableCell className="whitespace-nowrap tabular-nums">{snapshotSize(snapshot)}</TableCell>
-                <TableCell>
-                  <SnapshotStatus snapshot={snapshot} />
-                </TableCell>
-                <TableCell className="max-w-56">
-                  {snapshot.last_restored_sandbox_id ? (
-                    <CopyText
-                      value={snapshot.last_restored_sandbox_id}
-                      label={`Copy ${snapshot.last_restored_sandbox_id}`}
-                    />
-                  ) : (
-                    '—'
-                  )}
-                </TableCell>
-                {actions && (
-                  <TableCell className="w-0 text-right whitespace-nowrap">
-                    {!fleet && canChange && snapshot.kind === 'archive' && snapshot.status === 'active' && (
+              </TableCell>
+              {actions && (
+                <TableCell className="w-0 text-right whitespace-nowrap">
+                  {!fleet &&
+                    canChange &&
+                    snapshot.kind === 'archive' &&
+                    snapshot.status === 'active' && (
                       <Button
                         plain
                         aria-label={`Restore ${archiveLabel(snapshot)}`}
@@ -224,16 +295,19 @@ export function SnapshotTable({
                         <ArrowUturnLeftIcon />
                       </Button>
                     )}
-                    <Button plain aria-label={`Delete ${rowLabel(snapshot)}`} onClick={() => setDeleting(snapshot)}>
-                      <TrashIcon />
-                    </Button>
-                  </TableCell>
-                )}
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+                  <Button
+                    plain
+                    aria-label={`Delete ${rowLabel(snapshot)}`}
+                    onClick={() => setDeleting(snapshot)}
+                  >
+                    <TrashIcon />
+                  </Button>
+                </TableCell>
+              )}
+            </TableRow>
+          )
+        }}
+      />
 
       <ConfirmationDialog
         open={restoring !== null}
@@ -280,58 +354,20 @@ export function SnapshotTable({
       <Dialog open={restored !== null} onClose={() => setRestored(null)}>
         <DialogTitle>Sandbox restored</DialogTitle>
         <DialogDescription>
-          {restored ? `${restored.sandbox.name || 'The sandbox'} is starting as a new sandbox.` : ''}
+          {restored
+            ? `${restored.sandbox.name || 'The sandbox'} is starting as a new sandbox.`
+            : ''}
         </DialogDescription>
         <DialogBody>
           <Text className="mb-2">New sandbox ID</Text>
-          {restored && <CopyText value={restored.sandbox.id} label={`Copy ${restored.sandbox.id}`} />}
+          {restored && (
+            <CopyText value={restored.sandbox.id} label={`Copy ${restored.sandbox.id}`} />
+          )}
         </DialogBody>
         <DialogActions>
           <Button onClick={() => setRestored(null)}>Done</Button>
         </DialogActions>
       </Dialog>
-    </>
-  )
-}
-
-// A workspace's snapshots and archived sandboxes, with actions for those who
-// may. `empty` is shown when there are none; the portal hides the region
-// column.
-export function Snapshots({
-  org,
-  canChange,
-  regionName,
-  empty,
-  showRegion = true,
-}: {
-  org: string
-  canChange: boolean
-  regionName: (slug: string) => string
-  empty: ReactNode
-  showRegion?: boolean
-}) {
-  const snapshots = useSnapshots(org)
-  const { load } = snapshots
-
-  if (load.loading && !load.data) return <ListSkeleton label="Loading snapshots" rows={3} />
-  if (load.error.message) return <ErrorNotice error={load.error} onRetry={load.reload} />
-
-  return (
-    <>
-      <PartialNotice partial={snapshots.partial} />
-      {snapshots.list.length === 0 ? (
-        empty
-      ) : (
-        <SnapshotTable
-          snapshots={snapshots.list}
-          regionName={regionName}
-          canChange={canChange}
-          onDeleted={snapshots.deleted}
-          onRestored={snapshots.changed}
-          org={org}
-          showRegion={showRegion}
-        />
-      )}
     </>
   )
 }

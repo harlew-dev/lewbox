@@ -9,9 +9,15 @@ import (
 // Nodes are machines in a cluster. {node} is an ID or name.
 type Nodes struct{ *server }
 
-// Index lists nodes, optionally for one cluster.
+// Index lists nodes, optionally for some clusters and roles.
 func (h Nodes) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListNodes(r.Context(), service.ListNodesRequest{Cluster: r.URL.Query().Get("cluster")})
+	query := r.URL.Query()
+	resp, err := h.svc.ListNodes(r.Context(), service.ListNodesRequest{
+		ListQuery: listQuery(query),
+		Cluster:   query.Get("cluster"),
+		Role:      query.Get("role"),
+		Alive:     query.Get("alive"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

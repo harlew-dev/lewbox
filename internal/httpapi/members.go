@@ -12,7 +12,12 @@ type Members struct{ *server }
 
 // Index lists the header organization's members.
 func (h Members) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListMembers(r.Context(), r.Header.Get(OrganizationHeader))
+	query := r.URL.Query()
+	resp, err := h.svc.ListMembers(r.Context(), service.ListMembersRequest{
+		ListQuery: listQuery(query),
+		Org:       r.Header.Get(OrganizationHeader),
+		Role:      query.Get("role"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

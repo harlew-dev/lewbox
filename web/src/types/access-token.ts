@@ -1,3 +1,7 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
+import type { KeyStatus } from './sandbox-key'
+
 // An account's own token for the Lewbox API (lbp_…). It acts as the
 // account, with the account's rights.
 export interface AccessToken {
@@ -6,7 +10,7 @@ export interface AccessToken {
   name: string
   prefix: string
   last4: string
-  status: 'active' | 'expired' | 'revoked'
+  status: KeyStatus
   created_at: string
   last_used_at?: string
   expires_at?: string
@@ -17,6 +21,8 @@ export interface NewAccessToken extends AccessToken {
   token: string
 }
 
-export interface AccessTokenList {
-  data: AccessToken[]
+export type AccessTokenList = Page<AccessToken>
+
+export interface AccessTokenListQuery extends ListParams {
+  status?: KeyStatus[]
 }

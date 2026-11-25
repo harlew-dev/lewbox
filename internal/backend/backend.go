@@ -17,11 +17,11 @@ type Backend interface {
 	Me(ctx context.Context) (service.Me, error)
 
 	CreateAccessToken(ctx context.Context, req service.CreateAccessTokenRequest) (service.NewAccessToken, error)
-	ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error)
+	ListAccessTokens(ctx context.Context, req service.ListAccessTokensRequest) (service.AccessTokenList, error)
 	RevokeAccessToken(ctx context.Context, user, ref string) (service.AccessToken, error)
 
 	CreateUser(ctx context.Context, req service.CreateUserRequest) (service.User, error)
-	ListUsers(ctx context.Context) (service.UserList, error)
+	ListUsers(ctx context.Context, req service.ListUsersRequest) (service.UserList, error)
 	GetUser(ctx context.Context, ref string) (service.User, error)
 	RemoveUser(ctx context.Context, ref string) (service.User, error)
 	SetUserDisabled(ctx context.Context, ref string, disabled bool) (service.User, error)
@@ -58,7 +58,7 @@ type Backend interface {
 	GetSettings(ctx context.Context) (service.Settings, error)
 	UpdateSettings(ctx context.Context, req service.UpdateSettingsRequest) (service.Settings, error)
 	CreateSetupLink(ctx context.Context, req service.CreateSetupLinkRequest) (service.SetupLink, error)
-	ListSetupLinks(ctx context.Context) (service.SetupLinkList, error)
+	ListSetupLinks(ctx context.Context, req service.ListSetupLinksRequest) (service.SetupLinkList, error)
 	RevokeSetupLink(ctx context.Context, id string) (service.SetupLink, error)
 	ListPlans(ctx context.Context) (service.PlanList, error)
 	GetPlan(ctx context.Context, ref string) (service.Plan, error)
@@ -86,23 +86,23 @@ type Backend interface {
 	SetSubscription(ctx context.Context, org, region string, req service.SetSubscriptionRequest) (service.Subscription, error)
 	DeleteSubscription(ctx context.Context, org, region string, force bool) (service.Subscription, error)
 
-	ListMembers(ctx context.Context, org string) (service.MemberList, error)
+	ListMembers(ctx context.Context, req service.ListMembersRequest) (service.MemberList, error)
 	AddMember(ctx context.Context, org string, req service.AddMemberRequest) (service.Member, error)
 	SetMemberRole(ctx context.Context, org, ref string, req service.SetMemberRoleRequest) (service.Member, error)
 	RemoveMember(ctx context.Context, org, ref string) (service.Member, error)
 
-	ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error)
+	ListAdminKeys(ctx context.Context, req service.ListAdminKeysRequest) (service.AdminKeyList, error)
 	CreateAdminKey(ctx context.Context, org string, req service.CreateAdminKeyRequest) (service.NewAdminKey, error)
 	RevokeAdminKey(ctx context.Context, org, ref string) (service.AdminKey, error)
 
-	ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error)
+	ListSandboxKeys(ctx context.Context, req service.ListSandboxKeysRequest) (service.SandboxKeyList, error)
 	CreateSandboxKey(ctx context.Context, org string, req service.CreateSandboxKeyRequest) (service.NewSandboxKey, error)
 	RevokeSandboxKey(ctx context.Context, org, ref string) (service.SandboxKey, error)
 
 	ListSandboxes(ctx context.Context, req service.ListSandboxesRequest) (service.SandboxList, error)
 	StopSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error)
 	DeleteSandbox(ctx context.Context, id string, req service.RegionScope) (service.Sandbox, error)
-	ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error)
+	ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error)
 	DeleteSnapshot(ctx context.Context, name string, req service.RegionScope) (service.Snapshot, error)
 	GetArchive(ctx context.Context, id string, req service.RegionScope) (service.Snapshot, error)
 	RestoreArchive(ctx context.Context, id string, req service.RegionScope) (service.RestoredArchive, error)
@@ -148,8 +148,8 @@ func (l Local) CreateAccessToken(ctx context.Context, req service.CreateAccessTo
 }
 
 // ListAccessTokens returns an account's access tokens.
-func (l Local) ListAccessTokens(ctx context.Context, user string) (service.AccessTokenList, error) {
-	return l.Svc.ListAccessTokens(l.withPrincipal(ctx), user)
+func (l Local) ListAccessTokens(ctx context.Context, req service.ListAccessTokensRequest) (service.AccessTokenList, error) {
+	return l.Svc.ListAccessTokens(l.withPrincipal(ctx), req)
 }
 
 // RevokeAccessToken revokes an access token.
@@ -163,8 +163,8 @@ func (l Local) CreateUser(ctx context.Context, req service.CreateUserRequest) (s
 }
 
 // ListUsers returns every account.
-func (l Local) ListUsers(ctx context.Context) (service.UserList, error) {
-	return l.Svc.ListUsers(l.withPrincipal(ctx))
+func (l Local) ListUsers(ctx context.Context, req service.ListUsersRequest) (service.UserList, error) {
+	return l.Svc.ListUsers(l.withPrincipal(ctx), req)
 }
 
 // GetUser returns an account by ID or email.
@@ -319,8 +319,8 @@ func (l Local) CreateSetupLink(ctx context.Context, req service.CreateSetupLinkR
 }
 
 // ListSetupLinks returns every setup link, newest first.
-func (l Local) ListSetupLinks(ctx context.Context) (service.SetupLinkList, error) {
-	return l.Svc.ListSetupLinks(l.withPrincipal(ctx))
+func (l Local) ListSetupLinks(ctx context.Context, req service.ListSetupLinksRequest) (service.SetupLinkList, error) {
+	return l.Svc.ListSetupLinks(l.withPrincipal(ctx), req)
 }
 
 // RevokeSetupLink deletes an unused setup link.
@@ -440,8 +440,8 @@ func (l Local) DeleteSubscription(ctx context.Context, org, region string, force
 }
 
 // ListMembers returns an organization's members.
-func (l Local) ListMembers(ctx context.Context, org string) (service.MemberList, error) {
-	return l.Svc.ListMembers(l.withPrincipal(ctx), org)
+func (l Local) ListMembers(ctx context.Context, req service.ListMembersRequest) (service.MemberList, error) {
+	return l.Svc.ListMembers(l.withPrincipal(ctx), req)
 }
 
 // AddMember adds an account to an organization.
@@ -460,8 +460,8 @@ func (l Local) RemoveMember(ctx context.Context, org, ref string) (service.Membe
 }
 
 // ListAdminKeys returns an organization's admin keys.
-func (l Local) ListAdminKeys(ctx context.Context, org string) (service.AdminKeyList, error) {
-	return l.Svc.ListAdminKeys(l.withPrincipal(ctx), org)
+func (l Local) ListAdminKeys(ctx context.Context, req service.ListAdminKeysRequest) (service.AdminKeyList, error) {
+	return l.Svc.ListAdminKeys(l.withPrincipal(ctx), req)
 }
 
 // CreateAdminKey creates an admin key and returns its token once.
@@ -475,8 +475,8 @@ func (l Local) RevokeAdminKey(ctx context.Context, org, ref string) (service.Adm
 }
 
 // ListSandboxKeys returns an organization's sandbox keys.
-func (l Local) ListSandboxKeys(ctx context.Context, org string) (service.SandboxKeyList, error) {
-	return l.Svc.ListSandboxKeys(l.withPrincipal(ctx), org)
+func (l Local) ListSandboxKeys(ctx context.Context, req service.ListSandboxKeysRequest) (service.SandboxKeyList, error) {
+	return l.Svc.ListSandboxKeys(l.withPrincipal(ctx), req)
 }
 
 // CreateSandboxKey mints a sandbox key and returns its token once.
@@ -505,7 +505,7 @@ func (l Local) DeleteSandbox(ctx context.Context, id string, req service.RegionS
 }
 
 // ListSnapshots lists the snapshots of the workspaces the caller may see.
-func (l Local) ListSnapshots(ctx context.Context, req service.RegionScope) (service.SnapshotList, error) {
+func (l Local) ListSnapshots(ctx context.Context, req service.ListSnapshotsRequest) (service.SnapshotList, error) {
 	return l.Svc.ListSnapshots(l.withPrincipal(ctx), req)
 }
 

@@ -43,6 +43,13 @@ func invalid(format string, a ...any) error {
 	return &Error{Code: CodeInvalid, Message: fmt.Sprintf(format, a...)}
 }
 
+// badRequestField is badRequest for one malformed query parameter, named in
+// details. List parameters are parsed strictly, so a bad page, sort or filter
+// value is a 400 that says which parameter was wrong.
+func badRequestField(field, format string, a ...any) error {
+	return &Error{Code: CodeBadRequest, Message: fmt.Sprintf(format, a...), Details: FieldDetails{Field: field}}
+}
+
 // FieldDetails names the one request field an invalid error is about.
 type FieldDetails struct {
 	Field string `json:"field"`

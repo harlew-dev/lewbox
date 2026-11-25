@@ -1,10 +1,12 @@
-import type { Sandbox, SandboxFilter } from '../../types/sandbox'
-import { query, ref, request } from './client'
+import type { Sandbox, SandboxList, SandboxListQuery } from '../../types/sandbox'
+import { query, ref, request, toPage, type PageBody } from './client'
 
 // The organization goes in the header and, for instance admins who see
 // every organization, in ?org= too. Without one an admin sees the fleet.
-export function listSandboxes(filter: SandboxFilter = {}): Promise<{ data: Sandbox[] }> {
-  return request<{ data: Sandbox[] }>(`/v0/sandboxes${query({ ...filter })}`, { org: filter.org })
+export async function listSandboxes(filter: SandboxListQuery = {}): Promise<SandboxList> {
+  return toPage(
+    await request<PageBody<Sandbox>>(`/v0/sandboxes${query({ ...filter })}`, { org: filter.org }),
+  )
 }
 
 export function stopSandbox(sandbox: Pick<Sandbox, 'id' | 'region'>, org?: string): Promise<Sandbox> {

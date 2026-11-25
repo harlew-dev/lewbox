@@ -12,7 +12,12 @@ type SandboxKeys struct{ *server }
 
 // Index lists the organization's sandbox keys.
 func (h SandboxKeys) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListSandboxKeys(r.Context(), r.Header.Get(OrganizationHeader))
+	query := r.URL.Query()
+	resp, err := h.svc.ListSandboxKeys(r.Context(), service.ListSandboxKeysRequest{
+		ListQuery: listQuery(query),
+		Org:       r.Header.Get(OrganizationHeader),
+		Status:    query.Get("status"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

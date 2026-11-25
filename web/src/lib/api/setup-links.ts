@@ -1,8 +1,14 @@
-import type { SetupLink, SetupLinkInfo, SetupLinkInput } from '../../types/setup-link'
-import { ref, request } from './client'
+import type {
+  SetupLink,
+  SetupLinkInfo,
+  SetupLinkInput,
+  SetupLinkList,
+  SetupLinkListQuery,
+} from '../../types/setup-link'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listSetupLinks(): Promise<{ data: SetupLink[] }> {
-  return request<{ data: SetupLink[] }>('/v0/setup-links')
+export async function listSetupLinks(filter: SetupLinkListQuery = {}): Promise<SetupLinkList> {
+  return toPage(await request<PageBody<SetupLink>>(`/v0/setup-links${query(filter)}`))
 }
 
 export function createSetupLink(input: SetupLinkInput): Promise<SetupLink> {

@@ -633,7 +633,7 @@ func TestSandboxKeys(t *testing.T) {
 	if _, errOut, code := e.cli("subscription", "set", "eu-west", "--plan", "free", "--org", "acme"); code != 0 {
 		t.Fatalf("subscription set: %s", errOut)
 	}
-	if got := e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200); got != `{"data":[]}`+"\n" {
+	if got := e.sameOrg("acme", []string{"key", "list", "--org", "acme"}, "GET", "/v0/sandbox-keys", 200); got != `{"data":[],"pages":{"current":1,"total":1,"per_page":20,"items":0}}`+"\n" {
 		t.Errorf("empty key list = %q", got)
 	}
 
@@ -891,8 +891,83 @@ func TestSnapshots(t *testing.T) {
 	}
 	e.sameError([]string{"snapshot", "delete", "ckpt-1", "--region", "eu-west", "--org", "acme", "--yes"},
 		"DELETE", "/v0/snapshots/ckpt-1?region=eu-west", "", 404)
-	if got, errOut, code := e.cli("snapshot", "list", "--org", "acme"); code != 0 || got != `{"data":[],"partial_nodes":[]}`+"\n" {
+	if got, errOut, code := e.cli("snapshot", "list", "--org", "acme"); code != 0 || got != `{"data":[],"pages":{"current":1,"total":1,"per_page":20,"items":0},"partial_nodes":[]}`+"\n" {
 		t.Errorf("list after delete: exit %d stdout %q stderr %q", code, got, errOut)
+	}
+}
+
+// TestListCommandsPageSortSearchAndFilter checks that every paged list
+// command's flags reach the same API body, byte for byte.
+func TestListCommandsPageSortSearchAndFilter(t *testing.T) {
+	e := newEnv(t)
+	if _, errOut, code := e.cli("org", "create", "acme", "--name", "Acme"); code != 0 {
+		t.Fatalf("org create: %s", errOut)
+	}
+
+	cases := []struct {
+		name   string
+		org    string
+		args   []string
+		method string
+		path   string
+	}{
+		{
+			name: "users", args: []string{"user", "list", "--page", "1", "--per-page", "1", "--sort", "email", "--search", "admin"},
+			method: "GET", path: "/v0/users?page=1&per_page=1&sort=email&q=admin",
+		},
+		{
+			name: "organizations", args: []string{"org", "list", "--status", "active", "--sort", "-created", "--page", "1", "--per-page", "1"},
+			method: "GET", path: "/v0/organizations?status=active&sort=-created&page=1&per_page=1",
+		},
+		{
+			name: "members", org: "acme", args: []string{"member", "list", "--org", "acme", "--role", "owner", "--search", "admin", "--sort", "email"},
+			method: "GET", path: "/v0/members?role=owner&q=admin&sort=email",
+		},
+		{
+			name: "admin keys", org: "acme", args: []string{"admin-key", "list", "--org", "acme", "--status", "active", "--page", "1", "--per-page", "5"},
+			method: "GET", path: "/v0/admin-keys?status=active&page=1&per_page=5",
+		},
+		{
+			name: "sandbox keys", org: "acme", args: []string{"key", "list", "--org", "acme", "--status", "active", "--sort", "name"},
+			method: "GET", path: "/v0/sandbox-keys?status=active&sort=name",
+		},
+		{
+			name: "access tokens", args: []string{"token", "list", "--user", adminEmail, "--status", "active", "--sort", "-created", "--page", "1", "--per-page", "5"},
+			method: "GET", path: "/v0/access-tokens?user=" + adminEmail + "&status=active&sort=-created&page=1&per_page=5",
+		},
+		{
+			name: "setup links", args: []string{"setup-link", "list", "--status", "unused", "--plan", "free"},
+			method: "GET", path: "/v0/setup-links?status=unused&plan=free",
+		},
+		{
+			name: "nodes", args: []string{"node", "list", "--role", "mixed", "--sort", "name", "--page", "1", "--per-page", "5"},
+			method: "GET", path: "/v0/nodes?role=mixed&sort=name&page=1&per_page=5",
+		},
+		{
+			name: "sandboxes", args: []string{"sandbox", "list", "--status", "started", "--sort", "-created", "--page", "1", "--per-page", "5"},
+			method: "GET", path: "/v0/sandboxes?status=started&sort=-created&page=1&per_page=5",
+		},
+		{
+			name: "snapshots", args: []string{"snapshot", "list", "--kind", "snapshot", "--status", "active", "--sort", "name", "--page", "1", "--per-page", "5"},
+			method: "GET", path: "/v0/snapshots?kind=snapshot&status=active&sort=name&page=1&per_page=5",
+		},
+		{
+			name: "snapshot summary", args: []string{"snapshot", "list", "--summary", "--per-page", "5"},
+			method: "GET", path: "/v0/snapshots?summary=include&per_page=5",
+		},
+		{
+			name: "nodes alive", args: []string{"node", "list", "--alive", "true", "--per-page", "1"},
+			method: "GET", path: "/v0/nodes?alive=true&per_page=1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.org != "" {
+				e.sameOrg(tc.org, tc.args, tc.method, tc.path, http.StatusOK)
+				return
+			}
+			e.same(tc.args, tc.method, tc.path, "", http.StatusOK)
+		})
 	}
 }
 
@@ -1573,7 +1648,7 @@ func TestLoginWithAdminKey(t *testing.T) {
 		t.Fatalf("login --key-stdin: exit %d stdout %s stderr %s", code, out, errOut)
 	}
 	// The key's organization became the context's default.
-	if out, errOut, code := remote("", "member", "list"); code != 0 || out != `{"data":[]}`+"\n" {
+	if out, errOut, code := remote("", "member", "list"); code != 0 || out != `{"data":[],"pages":{"current":1,"total":1,"per_page":20,"items":0}}`+"\n" {
 		t.Fatalf("member list: exit %d stdout %s stderr %s", code, out, errOut)
 	}
 	if _, errOut, code := remote("", "cluster", "list"); code != 1 || !strings.Contains(errOut, "admin key") {

@@ -13,21 +13,18 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
-  EmptyState,
   ErrorNotice,
   Field,
   FieldGroup,
   Input,
   Label,
-  ListSkeleton,
+  PaginatedTable,
   PasswordField,
+  SearchField,
   SecretReveal,
   Step,
   Steps,
-  Table,
-  TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
   Text,
@@ -38,11 +35,15 @@ import {
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { EllipsisHorizontalIcon, NoSymbolIcon } from '@heroicons/react/16/solid'
 import { useState, type FormEvent } from 'react'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords, SortHeader } from '../../components/list'
 import { KeyExpiryField } from '../../components/key-expiry'
 import * as api from '../../lib/api'
 import { serverURL } from '../../lib/commands'
 import { formatDate, relativeTime } from '../../lib/format'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
 import type { Permissions } from '../../lib/organizations'
+import { useListState } from '../../lib/use-list'
 import { errorField, failureMessage, useLoad } from '../../lib/use-load'
 
 const statusColors: Record<api.AdminKey['status'], BadgeColor> = {
@@ -54,6 +55,25 @@ const statusColors: Record<api.AdminKey['status'], BadgeColor> = {
 function KeyStatus({ status }: { status: api.AdminKey['status'] }) {
   return <Badge color={statusColors[status]}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>
 }
+
+const keySpec: ListSpec = {
+  sortKeys: ['created', 'name', 'expires'],
+  defaultSort: '-created',
+  descendingFirst: ['created', 'expires'],
+  filters: { status: ['active', 'expired', 'revoked'] },
+}
+
+const keyFilters: FilterDef[] = [
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'expired', label: 'Expired' },
+      { value: 'revoked', label: 'Revoked' },
+    ],
+  },
+]
 
 // An organization's management API keys (lba_…) for the Lewbox API. The
 // page around it owns the "Create management key" button and opens the
@@ -70,39 +90,66 @@ export function AdminKeysSection({
   onCreateClose: () => void
 }) {
   const [revokeTarget, setRevokeTarget] = useState<api.AdminKey | null>(null)
-  const keys = useLoad(`admin-keys:${org.slug}`, () => api.listAdminKeys(org.slug))
-  const list = keys.data?.data ?? []
+  const list = useListState(keySpec)
+  const { state } = list
+  const keys = useLoad(`admin-keys:${org.slug}:${list.key()}`, () =>
+    api.listAdminKeys(org.slug, {
+      ...listQuery(state, keySpec),
+      status: state.filters.status as api.KeyStatus[] | undefined,
+    }),
+  )
 
   return (
     <>
-      {keys.loading && !keys.data ? (
-        <ListSkeleton label="Loading API keys" rows={3} />
-      ) : keys.error.message ? (
-        <ErrorNotice error={keys.error} onRetry={keys.reload} />
-      ) : list.length === 0 ? (
-        <EmptyState
-          title="No management API keys"
-          description="Lets your backend call the Lewbox API as this workspace."
+      <div className="space-y-4">
+        <FilterBar
+          filters={keyFilters}
+          values={state.filters}
+          onApply={list.setFilter}
+          onRemove={list.removeFilter}
+          onClear={list.clearFilters}
+          leading={
+            <SearchField
+              label="Search management keys"
+              value={state.q}
+              onSearch={list.setSearch}
+            />
+          }
         />
-      ) : (
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeader>Name</TableHeader>
-              <TableHeader>Key</TableHeader>
-              <TableHeader>Status</TableHeader>
-              <TableHeader>Created</TableHeader>
-              <TableHeader>Last used</TableHeader>
-              <TableHeader>Expires</TableHeader>
-              {can.manage && (
-                <TableHeader className="w-0">
-                  <span className="sr-only">Actions</span>
-                </TableHeader>
-              )}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {list.map((key) => (
+        {keys.error.message && keys.data && (
+          <ErrorNotice error={keys.error} onRetry={keys.reload} />
+        )}
+        {keys.error.message && !keys.data ? (
+          <ErrorNotice error={keys.error} onRetry={keys.reload} />
+        ) : (
+          <PaginatedTable
+            page={keys.data ?? undefined}
+            loading={keys.loading || keys.stale}
+            label="Management API keys"
+            href={list.href}
+            rowKey={(key) => key.id}
+            head={
+              <TableRow>
+                <SortHeader state={state} spec={keySpec} column="name" base={list.params}>
+                  Name
+                </SortHeader>
+                <TableHeader>Key</TableHeader>
+                <TableHeader>Status</TableHeader>
+                <SortHeader state={state} spec={keySpec} column="created" base={list.params}>
+                  Created
+                </SortHeader>
+                <TableHeader>Last used</TableHeader>
+                <SortHeader state={state} spec={keySpec} column="expires" base={list.params}>
+                  Expires
+                </SortHeader>
+                {can.manage && (
+                  <TableHeader className="w-0">
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                )}
+              </TableRow>
+            }
+            row={(key) => (
               <TableRow key={key.id}>
                 <TableCell className="font-medium">{key.name}</TableCell>
                 <TableCell>
@@ -113,11 +160,17 @@ export function AdminKeysSection({
                 <TableCell>
                   <KeyStatus status={key.status} />
                 </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400" title={formatDate(key.created_at)}>
+                <TableCell
+                  className="text-zinc-500 dark:text-zinc-400"
+                  title={formatDate(key.created_at)}
+                >
                   {relativeTime(key.created_at)}
                   {key.created_by && <Text size="sm">by {key.created_by}</Text>}
                 </TableCell>
-                <TableCell className="text-zinc-500 dark:text-zinc-400" title={formatDate(key.last_used_at)}>
+                <TableCell
+                  className="text-zinc-500 dark:text-zinc-400"
+                  title={formatDate(key.last_used_at)}
+                >
                   {relativeTime(key.last_used_at)}
                 </TableCell>
                 <TableCell
@@ -134,11 +187,18 @@ export function AdminKeysSection({
                   <TableCell className="w-0 text-right">
                     {key.status !== 'revoked' && (
                       <Dropdown>
-                        <DropdownButton as={Button} plain aria-label={`Actions for ${key.name}`}>
+                        <DropdownButton
+                          as={Button}
+                          plain
+                          aria-label={`Actions for ${key.name}`}
+                        >
                           <EllipsisHorizontalIcon />
                         </DropdownButton>
                         <DropdownMenu anchor="bottom end">
-                          <DropdownItem variant="danger" onClick={() => setRevokeTarget(key)}>
+                          <DropdownItem
+                            variant="danger"
+                            onClick={() => setRevokeTarget(key)}
+                          >
                             <NoSymbolIcon data-slot="icon" />
                             Revoke key
                           </DropdownItem>
@@ -148,12 +208,27 @@ export function AdminKeysSection({
                   </TableCell>
                 )}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
+            )}
+            empty={
+              isFiltered(state) ? (
+                <NoMatches label="management keys" onClear={list.clearAll} />
+              ) : (
+                <NoRecords
+                  title="No management API keys"
+                  description="Lets your backend call the Lewbox API as this workspace."
+                />
+              )
+            }
+          />
+        )}
+      </div>
 
-      <CreateKeyDialog open={createOpen} org={org} onClose={onCreateClose} onCreated={keys.refresh} />
+      <CreateKeyDialog
+        open={createOpen}
+        org={org}
+        onClose={onCreateClose}
+        onCreated={keys.refresh}
+      />
       <ConfirmationDialog
         open={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}

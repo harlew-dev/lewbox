@@ -206,7 +206,11 @@ describe('AccountPage', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Revoke token' })).at(-1)!)
 
     // A successful revoke reloads the list.
-    await waitFor(() => expect(calls.filter((call) => call.url === '/v0/access-tokens')).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        calls.filter((call) => call.url.startsWith('/v0/access-tokens')).length,
+      ).toBe(2),
+    )
     expect(calls.filter((call) => call.method === 'DELETE')).toHaveLength(1)
   })
 })

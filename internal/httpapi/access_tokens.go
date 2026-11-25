@@ -12,7 +12,12 @@ type AccessTokens struct{ *server }
 
 // Index lists an account's access tokens.
 func (h AccessTokens) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListAccessTokens(r.Context(), r.URL.Query().Get("user"))
+	query := r.URL.Query()
+	resp, err := h.svc.ListAccessTokens(r.Context(), service.ListAccessTokensRequest{
+		ListQuery: listQuery(query),
+		User:      query.Get("user"),
+		Status:    query.Get("status"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

@@ -117,7 +117,7 @@ func TestBackendsAgree(t *testing.T) {
 		return v, err
 	}
 	listUsers := func(ctx context.Context, b backend.Backend) (any, error) {
-		v, err := b.ListUsers(ctx)
+		v, err := b.ListUsers(ctx, service.ListUsersRequest{})
 		return v, err
 	}
 	getAdmin := func(ctx context.Context, b backend.Backend) (any, error) {
@@ -403,8 +403,12 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	}
 
 	getOrg := func(ctx context.Context, b backend.Backend) (any, error) { return b.GetOrganization(ctx, "acme") }
-	listMembers := func(ctx context.Context, b backend.Backend) (any, error) { return b.ListMembers(ctx, "acme") }
-	listKeys := func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAdminKeys(ctx, "acme") }
+	listMembers := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListMembers(ctx, service.ListMembersRequest{Org: "acme"})
+	}
+	listKeys := func(ctx context.Context, b backend.Backend) (any, error) {
+		return b.ListAdminKeys(ctx, service.ListAdminKeysRequest{Org: "acme"})
+	}
 	setMemberRole := func(role string) callFunc {
 		return func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.SetMemberRole(ctx, "acme", "member@example.com", service.SetMemberRoleRequest{Role: role})
@@ -486,7 +490,7 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 		},
 		both("list members after remove", listMembers),
 		both("no organization chosen", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.ListMembers(ctx, "")
+			return b.ListMembers(ctx, service.ListMembersRequest{Org: ""})
 		}),
 		both("missing organization", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.GetOrganization(ctx, "missing")
@@ -505,7 +509,7 @@ func TestOrganizationBackendsAgree(t *testing.T) {
 	if org, err := keyed.GetOrganization(ctx, ""); err != nil || org.Slug != "acme" {
 		t.Fatalf("own organization with key = %+v, %v", org, err)
 	}
-	if members, err := keyed.ListMembers(ctx, ""); err != nil || len(members.Data) != 1 {
+	if members, err := keyed.ListMembers(ctx, service.ListMembersRequest{Org: ""}); err != nil || len(members.Data) != 1 {
 		t.Fatalf("members with key = %+v, %v", members, err)
 	}
 	if _, err := keyed.ListClusters(ctx); err == nil || !strings.Contains(err.Error(), "admin key") {
@@ -525,13 +529,17 @@ func TestAccessTokenBackendsAgree(t *testing.T) {
 
 	// Local mode names the account; the remote admin's own is the default.
 	listOwn := step{
-		name:    "list tokens",
-		local:   func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, adminEmail) },
-		remote:  func(ctx context.Context, b backend.Backend) (any, error) { return b.ListAccessTokens(ctx, "") },
+		name: "list tokens",
+		local: func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListAccessTokens(ctx, service.ListAccessTokensRequest{User: adminEmail})
+		},
+		remote: func(ctx context.Context, b backend.Backend) (any, error) {
+			return b.ListAccessTokens(ctx, service.ListAccessTokensRequest{User: ""})
+		},
 		compare: true,
 	}
 	listDev := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListAccessTokens(ctx, "dev@example.com")
+		return b.ListAccessTokens(ctx, service.ListAccessTokensRequest{User: "dev@example.com"})
 	}
 	var token string
 	afterRevoke := listOwn
@@ -583,7 +591,7 @@ func TestAccessTokenBackendsAgree(t *testing.T) {
 			return b.RevokeAccessToken(ctx, adminEmail, "missing")
 		}),
 		both("missing account", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.ListAccessTokens(ctx, "nobody@example.com")
+			return b.ListAccessTokens(ctx, service.ListAccessTokensRequest{User: "nobody@example.com"})
 		}),
 		both("bad expiry", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.CreateAccessToken(ctx, service.CreateAccessTokenRequest{Name: "x", User: adminEmail, ExpiresIn: "soon"})
@@ -633,7 +641,7 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 	}
 
 	listKeys := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListSandboxKeys(ctx, "acme")
+		return b.ListSandboxKeys(ctx, service.ListSandboxKeysRequest{Org: "acme"})
 	}
 	runSteps(t, h, []step{
 		{
@@ -670,7 +678,7 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 		},
 		both("list sandbox keys after revoke", listKeys),
 		both("no organization chosen", func(ctx context.Context, b backend.Backend) (any, error) {
-			return b.ListSandboxKeys(ctx, "")
+			return b.ListSandboxKeys(ctx, service.ListSandboxKeysRequest{Org: ""})
 		}),
 		both("missing region", func(ctx context.Context, b backend.Backend) (any, error) {
 			return b.CreateSandboxKey(ctx, "acme", service.CreateSandboxKeyRequest{Name: "x", Region: "missing"})
@@ -683,7 +691,7 @@ func TestSandboxKeyBackendsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyed := client.New(h.url, key.Token, nil)
-	if _, err := keyed.ListSandboxKeys(ctx, ""); err != nil {
+	if _, err := keyed.ListSandboxKeys(ctx, service.ListSandboxKeysRequest{Org: ""}); err != nil {
 		t.Errorf("admin key lists sandbox keys: %v", err)
 	}
 	created, err := keyed.CreateSandboxKey(ctx, "", service.CreateSandboxKeyRequest{Name: "from-key", Region: "eu-west"})
@@ -803,7 +811,7 @@ func TestSnapshotBackendsAgree(t *testing.T) {
 	})
 
 	listSnapshots := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListSnapshots(ctx, service.RegionScope{Org: "acme"})
+		return b.ListSnapshots(ctx, service.ListSnapshotsRequest{Org: "acme"})
 	}
 	runSteps(t, h, []step{
 		both("list snapshots", listSnapshots),
@@ -886,7 +894,7 @@ func TestArchiveBackendsAgree(t *testing.T) {
 	// Archives are part of the snapshot list, so the parity check lists both
 	// and keeps the archive rows.
 	listArchives := func(ctx context.Context, b backend.Backend) (any, error) {
-		list, err := b.ListSnapshots(ctx, service.RegionScope{Org: "acme"})
+		list, err := b.ListSnapshots(ctx, service.ListSnapshotsRequest{Org: "acme"})
 		if err != nil {
 			return nil, err
 		}
@@ -1102,7 +1110,7 @@ func TestSetupLinkBackendsAgree(t *testing.T) {
 
 	var first service.SetupLink
 	listLinks := func(ctx context.Context, b backend.Backend) (any, error) {
-		return b.ListSetupLinks(ctx)
+		return b.ListSetupLinks(ctx, service.ListSetupLinksRequest{})
 	}
 	runSteps(t, h, []step{
 		{

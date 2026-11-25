@@ -1,3 +1,6 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
+
 export interface Node {
   id: string
   name: string
@@ -19,6 +22,10 @@ export interface NodeSettingsState {
   reasons: string[]
 }
 
-export interface NodeList {
-  data: Node[]
+export type NodeList = Page<Node>
+
+export interface NodeListQuery extends ListParams {
+  cluster?: string[]
+  role?: string[]
+  alive?: boolean
 }

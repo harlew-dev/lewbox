@@ -195,7 +195,7 @@ func TestListAndGetUsers(t *testing.T) {
 	createUser(t, s, "zoe@example.com", false)
 	createUser(t, s, "ada@example.com", false)
 
-	list, err := s.ListUsers(localCtx())
+	list, err := s.ListUsers(localCtx(), ListUsersRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestBootstrapAdmin(t *testing.T) {
 	if err != nil || created {
 		t.Fatalf("second bootstrap = %v, %v", created, err)
 	}
-	users, err := s.ListUsers(localCtx())
+	users, err := s.ListUsers(localCtx(), ListUsersRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestPermissions(t *testing.T) {
 	if _, err := s.AddNode(anon, AddNodeRequest{Name: "n1", URL: "https://n1.example"}); err != nil {
 		wantCode(t, err, CodeUnauthorized)
 	}
-	if _, err := s.ListUsers(anon); err != nil {
+	if _, err := s.ListUsers(anon, ListUsersRequest{}); err != nil {
 		wantCode(t, err, CodeUnauthorized)
 	}
 	if _, err := s.CreateUser(anon, CreateUserRequest{Email: "x@example.com", Password: testPassword}); err != nil {
@@ -462,7 +462,7 @@ func TestPermissions(t *testing.T) {
 	if _, err := s.AddNode(plainCtx, AddNodeRequest{Name: "n1", URL: "https://n1.example"}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.ListUsers(plainCtx); err != nil {
+	if _, err := s.ListUsers(plainCtx, ListUsersRequest{}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
 	if _, err := s.CreateUser(plainCtx, CreateUserRequest{Email: "x@example.com", Password: testPassword}); err != nil {

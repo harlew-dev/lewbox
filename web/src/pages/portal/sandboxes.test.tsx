@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { acme, acmeMembership, choose, customerUser, json, renderApp, stubAPI } from '../../test/render'
+import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
 const sandbox = {
   id: 'sb-7f3a9c',
@@ -39,7 +39,8 @@ describe('SandboxesPage', () => {
       ),
     )
 
-    await choose('Status', 'All statuses')
+    expect(screen.getByRole('button', { name: /Status.*Stopped/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Status filter' }))
     await waitFor(() => {
       const requests = calls.filter((call) => call.url.startsWith('/v0/sandboxes'))
       expect(requests.at(-1)?.url).toBe('/v0/sandboxes?org=acme')
@@ -50,7 +51,7 @@ describe('SandboxesPage', () => {
     const calls = stubAPI(
       {
         'GET /v0/organizations/acme': () => json(200, acme),
-        'GET /v0/sandboxes?org=acme': () => json(200, { data: [sandbox] }),
+        'GET /v0/sandboxes': () => json(200, { data: [sandbox] }),
         'POST /v0/sandboxes/sb-7f3a9c/stop?region=eu-west': () => json(200, { ...sandbox, status: 'stopped' }),
       },
       customerUser,
@@ -63,8 +64,8 @@ describe('SandboxesPage', () => {
     expect(screen.getByText('1 vCPU · 1 GB')).toBeInTheDocument()
     // The portal hides the region column: a workspace has one region.
     expect(screen.queryByRole('columnheader', { name: 'Region' })).toBeNull()
-    expect(screen.getByRole('combobox', { name: 'Status' })).toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: 'Region' })).toBeNull()
+    expect(screen.getByRole('button', { name: /Status/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Region/ })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for sb-7f3a9c' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Stop' }))

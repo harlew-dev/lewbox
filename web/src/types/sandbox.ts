@@ -1,3 +1,6 @@
+import type { Page } from '@harlew-dev/ui'
+import type { ListParams } from './list'
+
 export type SandboxStatus = 'creating' | 'started' | 'stopped' | 'destroyed' | 'error'
 
 export interface Sandbox {
@@ -17,8 +20,13 @@ export interface Sandbox {
   last_seen_at: string
 }
 
-export interface SandboxFilter {
-  region?: string
-  status?: string
+export type SandboxList = Page<Sandbox>
+
+export interface SandboxListQuery extends ListParams {
+  status?: string[]
+  region?: string[]
+  // Instance admins only.
+  organization?: string[]
+  // The workspace whose sandboxes these are; sent as the header and ?org=.
   org?: string
 }

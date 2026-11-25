@@ -244,8 +244,9 @@ func withMethodNotAllowed(next http.Handler, mux *http.ServeMux) http.Handler {
 // queryAllowLists names the parameters each route accepts. A route absent from
 // the map accepts none. Anything not listed, or listed twice, is a 400.
 var queryAllowLists = map[string][]string{
-	"GET " + Prefix + "/access-tokens":                   {"user"},
+	"GET " + Prefix + "/access-tokens":                   {"user", "status", "page", "per_page", "q", "sort"},
 	"DELETE " + Prefix + "/access-tokens/{access_token}": {"user"},
+	"GET " + Prefix + "/admin-keys":                      {"status", "page", "per_page", "q", "sort"},
 	"GET " + Prefix + "/archives/{archive}":              {"org"},
 	"POST " + Prefix + "/archives/{archive}/restore":     {"org"},
 	"DELETE " + Prefix + "/archives/{archive}":           {"org"},
@@ -254,16 +255,20 @@ var queryAllowLists = map[string][]string{
 	"GET " + Prefix + "/clusters/{cluster}/metrics":      {"range"},
 	"GET " + Prefix + "/clusters/resolve":                {"cluster"},
 	"GET " + Prefix + "/events":                          {"before", "actor", "organization", "action", "from", "to", "limit"},
-	"GET " + Prefix + "/nodes":                           {"cluster"},
+	"GET " + Prefix + "/members":                         {"role", "page", "per_page", "q", "sort"},
+	"GET " + Prefix + "/nodes":                           {"cluster", "role", "alive", "page", "per_page", "q", "sort"},
 	"DELETE " + Prefix + "/nodes/{node}":                 {"force"},
-	"GET " + Prefix + "/organizations":                   {"user", "status"},
-	"GET " + Prefix + "/sandboxes":                       {"region", "status", "org"},
+	"GET " + Prefix + "/organizations":                   {"user", "status", "region", "plan", "page", "per_page", "q", "sort"},
+	"GET " + Prefix + "/sandbox-keys":                    {"status", "page", "per_page", "q", "sort"},
+	"GET " + Prefix + "/sandboxes":                       {"region", "status", "org", "organization", "page", "per_page", "q", "sort"},
 	"POST " + Prefix + "/sandboxes/{sandbox}/stop":       {"region", "org"},
 	"DELETE " + Prefix + "/sandboxes/{sandbox}":          {"region", "org"},
-	"GET " + Prefix + "/snapshots":                       {"region", "org"},
+	"GET " + Prefix + "/setup-links":                     {"status", "plan", "region", "page", "per_page", "q", "sort"},
+	"GET " + Prefix + "/snapshots":                       {"region", "org", "organization", "kind", "status", "summary", "page", "per_page", "q", "sort"},
 	"DELETE " + Prefix + "/snapshots/{snapshot}":         {"region", "org"},
 	"DELETE " + Prefix + "/subscriptions/{region}":       {"force"},
 	"GET " + Prefix + "/usage":                           {"from", "to", "granularity", "org"},
+	"GET " + Prefix + "/users":                           {"status", "role", "page", "per_page", "q", "sort"},
 }
 
 // withQueryAllowList rejects an unknown, repeated or malformed query
@@ -293,13 +298,19 @@ func checkQuery(r *http.Request, allowed []string) error {
 	}
 	for name, list := range values {
 		if !names[name] {
-			return badBody("unknown query parameter " + name)
+			return badQuery(name, "unknown query parameter "+name)
 		}
 		if len(list) > 1 {
-			return badBody("query parameter " + name + " must appear once")
+			return badQuery(name, "query parameter "+name+" must appear once")
 		}
 	}
 	return nil
+}
+
+// badQuery is a 400 that names the query parameter in details.field, like
+// the list parameters the service rejects.
+func badQuery(name, message string) error {
+	return &service.Error{Code: service.CodeBadRequest, Message: message, Details: service.FieldDetails{Field: name}}
 }
 
 // remoteHost strips the port from a RemoteAddr.

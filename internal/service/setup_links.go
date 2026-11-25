@@ -46,8 +46,23 @@ type SetupLinkWorkspace struct {
 
 // SetupLinkList is returned by ListSetupLinks. Data is never null.
 type SetupLinkList struct {
-	Data []SetupLink `json:"data"`
+	Data  []SetupLink `json:"data"`
+	Pages Pages       `json:"pages"`
 }
+
+// ListSetupLinksRequest pages and filters setup links.
+type ListSetupLinksRequest struct {
+	ListQuery
+	Status string `json:"status"`
+	Plan   string `json:"plan"`
+	Region string `json:"region"`
+}
+
+// setupLinkSorts maps a public sort key to SQL written here.
+var setupLinkSorts = mergeSorts(
+	sortDirections("created", "l.created_at ASC, l.id ASC", "l.created_at DESC, l.id DESC"),
+	sortDirections("expires", "l.expires_at ASC, l.id ASC", "l.expires_at DESC, l.id DESC"),
+)
 
 // CreateSetupLinkRequest is the input to CreateSetupLink. ExpiresInHours
 // defaults to 168 and must be 1..720. Plan and Region are a slug or ID.
@@ -160,17 +175,53 @@ func (s *Service) CreateSetupLink(ctx context.Context, req CreateSetupLinkReques
 	return out, nil
 }
 
-// ListSetupLinks returns every setup link, newest first, never its token.
-// Instance admins only.
-func (s *Service) ListSetupLinks(ctx context.Context) (SetupLinkList, error) {
+// ListSetupLinks returns setup links, newest first by default, never their
+// tokens. Instance admins only.
+func (s *Service) ListSetupLinks(ctx context.Context, req ListSetupLinksRequest) (SetupLinkList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return SetupLinkList{}, err
 	}
-	rows, err := s.queries(ctx).ListSetupLinks(ctx)
+	q, err := parseListQuery(req.ListQuery, setupLinkSorts, "-created")
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	statuses, err := parseList("status", req.Status, []string{setupLinkUnused, setupLinkClaimed, setupLinkUsed, setupLinkExpired})
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	plans, err := parseList("plan", req.Plan, nil)
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	planIDs, err := s.planIDsForFilter(ctx, plans, "plan")
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	regions, err := parseList("region", req.Region, nil)
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	clusterIDs, err := s.clusterIDsForFilter(ctx, regions, "region")
+	if err != nil {
+		return SetupLinkList{}, err
+	}
+	rows, total, err := s.queries(ctx).ListSetupLinksPage(ctx, db.SetupLinkListParams{
+		Statuses:   statuses,
+		PlanIDs:    planIDs,
+		ClusterIDs: clusterIDs,
+		Pattern:    q.pattern,
+		Order:      q.sort,
+		Now:        s.now(),
+		Limit:      q.perPage,
+		Offset:     (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return SetupLinkList{}, fmt.Errorf("list setup links: %w", err)
 	}
-	out := SetupLinkList{Data: make([]SetupLink, 0, len(rows))}
+	out := SetupLinkList{
+		Data:  make([]SetupLink, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, row := range rows {
 		link, err := s.setupLinkResponse(ctx, row)
 		if err != nil {

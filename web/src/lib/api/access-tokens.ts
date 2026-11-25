@@ -1,9 +1,16 @@
 import type { KeyLifetime } from '../../types/key'
-import type { AccessToken, AccessTokenList, NewAccessToken } from '../../types/access-token'
-import { ref, request } from './client'
+import type {
+  AccessToken,
+  AccessTokenList,
+  AccessTokenListQuery,
+  NewAccessToken,
+} from '../../types/access-token'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listAccessTokens(): Promise<AccessTokenList> {
-  return request<AccessTokenList>('/v0/access-tokens')
+export async function listAccessTokens(
+  filter: AccessTokenListQuery = {},
+): Promise<AccessTokenList> {
+  return toPage(await request<PageBody<AccessToken>>(`/v0/access-tokens${query(filter)}`))
 }
 
 // A token that never expires is sent with an empty expires_in. current_password

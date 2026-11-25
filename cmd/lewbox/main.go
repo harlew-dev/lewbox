@@ -377,12 +377,19 @@ func confirmed(line string, defaultYes bool) bool {
 	return false
 }
 
-// write prints a result as JSON or text.
+// write prints a result as JSON or text. A paged list also prints its page
+// summary to stderr in text mode; --json stays byte-identical to the API.
 func (a *app) write(v any) error {
 	if a.jsonMode() {
 		return httpapi.Encode(a.stdout, v)
 	}
-	return renderAt(a.stdout, v, time.Now())
+	if err := renderAt(a.stdout, v, time.Now()); err != nil {
+		return err
+	}
+	if line, ok := pageLine(v); ok {
+		fmt.Fprintln(a.stderr, line)
+	}
+	return nil
 }
 
 // printError prints a failure the way the current output mode wants it.
@@ -490,17 +497,21 @@ func newNodeCmd(a *app) *cobra.Command {
 
 	add := newAddNodeCmd(a)
 
-	var nodeCluster string
+	var nodeCluster, nodeRole, nodeAlive string
+	var nodeQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List nodes (GET /v0/nodes)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListNodes(ctx, service.ListNodesRequest{Cluster: nodeCluster})
+			return b.ListNodes(ctx, service.ListNodesRequest{ListQuery: nodeQuery, Cluster: nodeCluster, Role: nodeRole, Alive: nodeAlive})
 		}),
 	}
-	list.Flags().StringVar(&nodeCluster, "cluster", "", "only nodes in this cluster ID or slug")
+	list.Flags().StringVar(&nodeCluster, "cluster", "", "only nodes in these cluster IDs or slugs, comma separated")
+	list.Flags().StringVar(&nodeRole, "role", "", "only server, worker, ingress or mixed nodes, comma separated")
+	list.Flags().StringVar(&nodeAlive, "alive", "", "only alive (true) or down (false) nodes")
+	addListFlags(list, &nodeQuery, "cluster or name; prefix with - to reverse")
 
 	get := &cobra.Command{
 		Use:   "get <id|name>",
@@ -779,15 +790,20 @@ func newUserCmd(a *app) *cobra.Command {
 	create.Flags().BoolVar(&createAdmin, "instance-admin", false, "make the account an instance admin")
 	create.Flags().BoolVar(&createPasswordStdin, "password-stdin", false, "read the password from stdin")
 
+	var userStatus, userRole string
+	var userQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List accounts (GET /v0/users)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListUsers(ctx)
+			return b.ListUsers(ctx, service.ListUsersRequest{ListQuery: userQuery, Status: userStatus, Role: userRole})
 		}),
 	}
+	list.Flags().StringVar(&userStatus, "status", "", "only active or disabled accounts, comma separated")
+	list.Flags().StringVar(&userRole, "role", "", "only admin or user accounts, comma separated")
+	addListFlags(list, &userQuery, "email, -created or status; prefix with - to reverse")
 
 	get := &cobra.Command{
 		Use:   "get <id|email>",

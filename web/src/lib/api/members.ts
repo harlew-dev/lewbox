@@ -1,8 +1,13 @@
-import type { Member, MemberList, Role } from '../../types/organization'
-import { ref, request } from './client'
+import type {
+  Member,
+  MemberList,
+  MemberListQuery,
+  Role,
+} from '../../types/organization'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listMembers(org: string): Promise<MemberList> {
-  return request<MemberList>('/v0/members', { org })
+export async function listMembers(org: string, filter: MemberListQuery = {}): Promise<MemberList> {
+  return toPage(await request<PageBody<Member>>(`/v0/members${query(filter)}`, { org }))
 }
 
 export function addMember(org: string, input: { email: string; role: Role }): Promise<Member> {

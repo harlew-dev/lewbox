@@ -22,6 +22,7 @@ import {
   ListSkeleton,
   PageHeader,
   PageTabs,
+  SearchField,
   Subheading,
   Text,
   tabFrom,
@@ -33,17 +34,21 @@ import { EllipsisHorizontalIcon, PencilIcon, TrashIcon } from '@heroicons/react/
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useRefreshPending } from '../../components/console-layout'
+import { FilterBar, type FilterDef } from '../../components/filter-bar'
+import { NoMatches, NoRecords } from '../../components/list'
 import { SandboxKeyTable } from '../../components/sandbox-key-table'
-import { SandboxTable } from '../../components/sandbox-table'
+import { SandboxTable, sandboxStatusOptions } from '../../components/sandbox-table'
 import { SubscriptionTable } from '../../components/subscription-table'
 import { UsageSummary } from '../../components/usage-summary'
 import * as api from '../../lib/api'
 import { daysAgo, formatLimit, formatMemory, formatNumber } from '../../lib/format'
 import { invalidLimitReason, limitText, parseLimit, validLimits } from '../../lib/limits'
+import { isFiltered, listQuery, type ListSpec } from '../../lib/list-query'
 import { orgPermissions } from '../../lib/organizations'
 import { useRegions, type Regions } from '../../lib/regions'
 import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
+import { useListState } from '../../lib/use-list'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { MembersSection } from '../organizations/members'
 import { OrgStatusBadge } from '../organizations/roles'
@@ -438,25 +443,155 @@ function SubscriptionForm({
   )
 }
 
+const workspaceSandboxSpec: ListSpec = {
+  sortKeys: ['created', 'status', 'region'],
+  defaultSort: '-created',
+  descendingFirst: ['created'],
+  filters: {
+    status: sandboxStatusOptions.map((option) => option.value),
+    region: null,
+  },
+}
+
 function WorkspaceSandboxes({ org }: { org: api.Organization }) {
-  const sandboxes = useLoad(
-    `sandboxes:${org.slug}:all`,
-    () => api.listSandboxes({ org: org.slug }),
-    { every: (data) => (data?.data.some((sandbox) => sandbox.status === 'creating') ? 10_000 : 0) },
-  )
+  const list = useListState(workspaceSandboxSpec)
+  const { state } = list
   const regions = useRegions()
-  const list = sandboxes.data?.data ?? []
-  if (sandboxes.loading && !sandboxes.data) return <ListSkeleton label="Loading sandboxes" rows={3} />
-  if (sandboxes.error.message) return <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
-  if (list.length === 0) return <EmptyState title="No sandboxes" description={`${org.name} has no sandboxes right now.`} />
-  return <SandboxTable sandboxes={list} regionName={regions.name} canChange org={org.slug} onChanged={sandboxes.refresh} />
+  const sandboxes = useLoad(`sandboxes:${org.slug}:${list.key()}`, () =>
+    api.listSandboxes({
+      ...listQuery(state, workspaceSandboxSpec),
+      org: org.slug,
+      status: state.filters.status,
+      region: state.filters.region,
+    }),
+    {
+      every: (data) =>
+        data?.data.some((sandbox) => sandbox.status === 'creating') ? 10_000 : 0,
+    },
+  )
+  const filters: FilterDef[] = [
+    { key: 'status', label: 'Status', options: sandboxStatusOptions },
+    {
+      key: 'region',
+      label: 'Region',
+      options: regions.list.map((region) => ({ value: region.slug, label: region.name })),
+    },
+  ]
+  return (
+    <div className="space-y-4">
+      <FilterBar
+        filters={filters}
+        values={state.filters}
+        onApply={list.setFilter}
+        onRemove={list.removeFilter}
+        onClear={list.clearFilters}
+        leading={
+          <SearchField
+            label="Search sandboxes"
+            value={state.q}
+            onSearch={list.setSearch}
+          />
+        }
+      />
+      {sandboxes.error.message && sandboxes.data && (
+        <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
+      )}
+      {sandboxes.error.message && !sandboxes.data ? (
+        <ErrorNotice error={sandboxes.error} onRetry={sandboxes.reload} />
+      ) : (
+        <SandboxTable
+          page={sandboxes.data ?? undefined}
+          loading={sandboxes.loading || sandboxes.stale}
+          label="Sandboxes"
+          sort={state.sort}
+          sortHref={(sort) => list.href({ sort, page: 1 })}
+          href={list.href}
+          regionName={regions.name}
+          canChange
+          org={org.slug}
+          onChanged={sandboxes.refresh}
+          empty={
+            isFiltered(state) ? (
+              <NoMatches label="sandboxes" onClear={list.clearAll} />
+            ) : (
+              <NoRecords
+                title="No sandboxes"
+                description={`${org.name} has no sandboxes right now.`}
+              />
+            )
+          }
+        />
+      )}
+    </div>
+  )
+}
+
+const workspaceKeySpec: ListSpec = {
+  sortKeys: ['created', 'name', 'expires'],
+  defaultSort: '-created',
+  descendingFirst: ['created', 'expires'],
+  filters: { status: ['active', 'expired', 'revoked'] },
 }
 
 function WorkspaceKeys({ org }: { org: api.Organization }) {
-  const keys = useLoad(`sandbox-keys:${org.slug}`, () => api.listSandboxKeys(org.slug))
-  const list = keys.data?.data ?? []
-  if (keys.loading && !keys.data) return <ListSkeleton label="Loading API keys" rows={3} />
-  if (keys.error.message) return <ErrorNotice error={keys.error} onRetry={keys.reload} />
-  if (list.length === 0) return <EmptyState title="No API keys" description={`${org.name} hasn’t created a key yet.`} />
-  return <SandboxKeyTable keys={list} org={org.slug} canRevoke onRevoked={keys.refresh} />
+  const list = useListState(workspaceKeySpec)
+  const { state } = list
+  const keys = useLoad(`sandbox-keys:${org.slug}:${list.key()}`, () =>
+    api.listSandboxKeys(org.slug, {
+      ...listQuery(state, workspaceKeySpec),
+      status: state.filters.status as api.KeyStatus[] | undefined,
+    }),
+  )
+  const filters: FilterDef[] = [
+    {
+      key: 'status',
+      label: 'Status',
+      options: [
+        { value: 'active', label: 'Active' },
+        { value: 'expired', label: 'Expired' },
+        { value: 'revoked', label: 'Revoked' },
+      ],
+    },
+  ]
+  return (
+    <div className="space-y-4">
+      <FilterBar
+        filters={filters}
+        values={state.filters}
+        onApply={list.setFilter}
+        onRemove={list.removeFilter}
+        onClear={list.clearFilters}
+        leading={
+          <SearchField label="Search API keys" value={state.q} onSearch={list.setSearch} />
+        }
+      />
+      {keys.error.message && keys.data && (
+        <ErrorNotice error={keys.error} onRetry={keys.reload} />
+      )}
+      {keys.error.message && !keys.data ? (
+        <ErrorNotice error={keys.error} onRetry={keys.reload} />
+      ) : (
+        <SandboxKeyTable
+          page={keys.data ?? undefined}
+          loading={keys.loading || keys.stale}
+          sort={state.sort}
+          sortHref={(sort) => list.href({ sort, page: 1 })}
+          href={list.href}
+          org={org.slug}
+          canRevoke
+          onRevoked={keys.refresh}
+          empty={
+            isFiltered(state) ? (
+              <NoMatches label="API keys" onClear={list.clearAll} />
+            ) : (
+              <NoRecords
+                title="No API keys"
+                description={`${org.name} hasn’t created a key yet.`}
+              />
+            )
+          }
+        />
+      )}
+    </div>
+  )
 }

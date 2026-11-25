@@ -39,7 +39,7 @@ func TestSetupLinksAdminOnly(t *testing.T) {
 	if _, err := s.CreateSetupLink(ada, CreateSetupLinkRequest{Plan: "free", Region: "eu-west"}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
-	if _, err := s.ListSetupLinks(ada); err != nil {
+	if _, err := s.ListSetupLinks(ada, ListSetupLinksRequest{}); err != nil {
 		wantCode(t, err, CodeForbidden)
 	}
 	if _, err := s.RevokeSetupLink(ada, "missing"); err != nil {
@@ -81,7 +81,7 @@ func TestSetupLinksAdminOnly(t *testing.T) {
 		t.Errorf("the token itself was found: %v", err)
 	}
 
-	list, err := s.ListSetupLinks(localCtx())
+	list, err := s.ListSetupLinks(localCtx(), ListSetupLinksRequest{})
 	if err != nil || len(list.Data) != 1 || list.Data[0].Token != "" {
 		t.Fatalf("list = %+v, %v", list.Data, err)
 	}
@@ -97,7 +97,7 @@ func TestSetupLinksAdminOnly(t *testing.T) {
 	if err != nil || revoked.ID != link.ID {
 		t.Fatalf("revoke = %+v, %v", revoked, err)
 	}
-	if list, err := s.ListSetupLinks(localCtx()); err != nil || len(list.Data) != 0 {
+	if list, err := s.ListSetupLinks(localCtx(), ListSetupLinksRequest{}); err != nil || len(list.Data) != 0 {
 		t.Errorf("links after revoke = %+v, %v", list.Data, err)
 	}
 	if _, err := s.RevokeSetupLink(localCtx(), link.ID); err != nil {
@@ -128,7 +128,7 @@ func TestSetupLinkSignupClaims(t *testing.T) {
 	if !row.ClaimedBy.Valid || row.ClaimedBy.String != resp.User.ID || !row.ClaimedAt.Valid || row.UsedAt.Valid {
 		t.Errorf("claimed row = %+v", row)
 	}
-	links, err := s.ListSetupLinks(localCtx())
+	links, err := s.ListSetupLinks(localCtx(), ListSetupLinksRequest{})
 	if err != nil || len(links.Data) != 1 || links.Data[0].Status != setupLinkClaimed {
 		t.Fatalf("links = %+v, %v", links.Data, err)
 	}
@@ -178,7 +178,7 @@ func TestSetupLinkCreatesWorkspace(t *testing.T) {
 	if !row.UsedAt.Valid || !row.OrgID.Valid || row.OrgID.String != org.ID {
 		t.Errorf("used row = %+v", row)
 	}
-	links, err := s.ListSetupLinks(localCtx())
+	links, err := s.ListSetupLinks(localCtx(), ListSetupLinksRequest{})
 	if err != nil || len(links.Data) != 1 || links.Data[0].Status != setupLinkUsed {
 		t.Fatalf("links = %+v, %v", links.Data, err)
 	}
@@ -235,7 +235,7 @@ func TestSetupLinkExpiryAndRevoke(t *testing.T) {
 
 	link := testSetupLink(t, s, CreateSetupLinkRequest{Plan: "free", Region: "eu-west", ExpiresInHours: 1})
 	now = now.Add(2 * time.Hour)
-	if links, err := s.ListSetupLinks(localCtx()); err != nil || len(links.Data) != 1 || links.Data[0].Status != setupLinkExpired {
+	if links, err := s.ListSetupLinks(localCtx(), ListSetupLinksRequest{}); err != nil || len(links.Data) != 1 || links.Data[0].Status != setupLinkExpired {
 		t.Fatalf("links = %+v, %v", links.Data, err)
 	}
 	if _, err := s.SetupLinkInfo(ctx, link.Token); err != nil {

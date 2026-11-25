@@ -108,7 +108,7 @@ func TestOrganizationVisibility(t *testing.T) {
 	// Someone else's organization is not found, not forbidden.
 	_, err = s.GetOrganization(outsider, "acme")
 	wantCode(t, err, CodeNotFound)
-	_, err = s.ListMembers(outsider, "acme")
+	_, err = s.ListMembers(outsider, ListMembersRequest{Org: "acme"})
 	wantCode(t, err, CodeNotFound)
 
 	// Listing another account's organizations is for instance admins.
@@ -127,7 +127,7 @@ func TestOrganizationVisibility(t *testing.T) {
 	}
 
 	// No organization named and not an admin key: the caller must choose.
-	_, err = s.ListMembers(f.member, "")
+	_, err = s.ListMembers(f.member, ListMembersRequest{Org: ""})
 	if se := wantCode(t, err, CodeBadRequest); !strings.Contains(se.Message, "choose a workspace") {
 		t.Errorf("message = %q", se.Message)
 	}
@@ -138,7 +138,7 @@ func TestMemberRoles(t *testing.T) {
 	s := f.s
 
 	// Members and viewers can read, not change.
-	if list, err := s.ListMembers(f.viewer, "acme"); err != nil || len(list.Data) != 4 {
+	if list, err := s.ListMembers(f.viewer, ListMembersRequest{Org: "acme"}); err != nil || len(list.Data) != 4 {
 		t.Fatalf("viewer list = %+v, %v", list, err)
 	}
 	_, err := s.AddMember(f.member, "acme", AddMemberRequest{Email: "outsider@example.com"})
@@ -188,7 +188,7 @@ func TestMemberRoles(t *testing.T) {
 		t.Fatalf("instance admin adds an instance admin: %v", err)
 	}
 	// A customer sees "operator" instead of the operator's address.
-	list, err := s.ListMembers(f.owner, "acme")
+	list, err := s.ListMembers(f.owner, ListMembersRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestMemberRoles(t *testing.T) {
 	if !masked {
 		t.Errorf("members = %+v, want the instance admin shown as operator", list.Data)
 	}
-	list, err = s.ListMembers(f.root, "acme")
+	list, err = s.ListMembers(f.root, ListMembersRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestAdminKeys(t *testing.T) {
 	s := f.s
 
 	// Members and viewers can't see or make keys; owners and admins can.
-	_, err := s.ListAdminKeys(f.member, "acme")
+	_, err := s.ListAdminKeys(f.member, ListAdminKeysRequest{Org: "acme"})
 	wantCode(t, err, CodeForbidden)
 	_, err = s.CreateAdminKey(f.viewer, "acme", CreateAdminKeyRequest{Name: "ci"})
 	wantCode(t, err, CodeForbidden)
@@ -278,10 +278,10 @@ func TestAdminKeys(t *testing.T) {
 	if org, err := s.GetOrganization(kctx, ""); err != nil || org.Slug != "acme" {
 		t.Fatalf("key's own organization = %+v, %v", org, err)
 	}
-	if list, err := s.ListMembers(kctx, ""); err != nil || len(list.Data) != 4 {
+	if list, err := s.ListMembers(kctx, ListMembersRequest{Org: ""}); err != nil || len(list.Data) != 4 {
 		t.Fatalf("key lists members = %+v, %v", list, err)
 	}
-	if keys, err := s.ListAdminKeys(kctx, "acme"); err != nil || len(keys.Data) != 1 || keys.Data[0].LastUsedAt == nil {
+	if keys, err := s.ListAdminKeys(kctx, ListAdminKeysRequest{Org: "acme"}); err != nil || len(keys.Data) != 1 || keys.Data[0].LastUsedAt == nil {
 		t.Fatalf("key lists keys = %+v, %v", keys, err)
 	}
 	_, err = s.CreateAdminKey(kctx, "", CreateAdminKeyRequest{Name: "another"})
@@ -292,7 +292,7 @@ func TestAdminKeys(t *testing.T) {
 	// It is confined to its organization's routes.
 	_, err = s.ListClusters(kctx)
 	wantCode(t, err, CodeForbidden)
-	_, err = s.ListUsers(kctx)
+	_, err = s.ListUsers(kctx, ListUsersRequest{})
 	wantCode(t, err, CodeForbidden)
 	_, err = s.ListNodes(kctx, ListNodesRequest{})
 	wantCode(t, err, CodeForbidden)
@@ -313,7 +313,7 @@ func TestAdminKeys(t *testing.T) {
 	clock = now.Add(31 * 24 * time.Hour)
 	_, err = s.Authenticate(context.Background(), key.Token)
 	wantCode(t, err, CodeUnauthorized)
-	keys, err := s.ListAdminKeys(f.owner, "acme")
+	keys, err := s.ListAdminKeys(f.owner, ListAdminKeysRequest{Org: "acme"})
 	if err != nil || keys.Data[0].Status != keyStatusExpired {
 		t.Fatalf("expired key = %+v, %v", keys, err)
 	}
@@ -341,7 +341,7 @@ func TestRevokeAndSuspend(t *testing.T) {
 	}
 	_, err = s.Authenticate(context.Background(), never.Token)
 	wantCode(t, err, CodeForbidden)
-	if _, err := s.ListMembers(f.member, "acme"); err != nil {
+	if _, err := s.ListMembers(f.member, ListMembersRequest{Org: "acme"}); err != nil {
 		t.Errorf("member read while suspended: %v", err)
 	}
 	_, err = s.CreateAdminKey(f.owner, "acme", CreateAdminKeyRequest{Name: "more", CurrentPassword: testPassword})

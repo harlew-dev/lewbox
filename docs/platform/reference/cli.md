@@ -25,6 +25,23 @@ How a command picks its orchestrator: [Sign in](../accounts/sign-in.md#which-orc
 
 ***
 
+## List flags
+
+The `list` commands that grow (accounts, organizations, members, keys, tokens, setup links, nodes, sandboxes and snapshots) take these flags. They are the API's `page`, `per_page`, `q` and `sort`, and `--json` is byte-identical to the API body.
+
+| Flag | |
+|---|---|
+| `--search Q` | Case-insensitive search of the columns the list documents. `%`, `_` and `\` are literal; at most 100 characters |
+| `--sort KEY` | One of the list's sort keys; `-` reverses it, such as `--sort -created` |
+| `--page N` | The page to show, 1–10 000. Default 1 |
+| `--per-page N` | Rows per page, 1–100. Default 20 |
+
+Every filter flag (`--status`, `--region`, `--role`, `--kind`, `--plan`, `--organization`) takes a comma list, such as `--status started,stopped`; at most 50 values. An unknown value is an error naming the flag.
+
+In text mode the last line is the page summary, written to stderr: `Page 2 of 7 · 131 sandboxes`. `--json` never prints it. The sort keys, search columns and filter values for each list are in the [HTTP API reference](http-api.md#lists).
+
+***
+
 ## Getting started
 
 ### `lewbox version`
@@ -72,9 +89,9 @@ The signed-in account, how you're signed in (`session`, `access_token`, `admin_k
 
 Creates an [access token](../accounts/access-tokens.md) and prints its `lbp_…` token, once. The token acts as the account, with its rights: an instance admin's token can run every operator command. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. Any account can create its own tokens, but not while signed in with a token. A remote orchestrator also asks for your **current password**: the CLI prompts without echo on a terminal, or reads its first line from `--current-password-file`. Local mode needs none. `--user` names another account (instance admins only); it is required in local mode, which has no account. Aliases: `tokens`, `access-token`, `access-tokens`.
 
-### `lewbox token list [--user EMAIL]` · `lewbox token revoke ID|NAME [--user EMAIL]`
+### `lewbox token list [--user EMAIL] [--status LIST]` · `lewbox token revoke ID|NAME [--user EMAIL]`
 
-Lists the account's tokens, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm. `--user` works as for `create`.
+Lists the account's tokens, revoked ones included, with their status and last use; or revokes one at once. `--user` works as for `create`; `--status` keeps `active`, `expired` or `revoked` ones. Takes the [list flags](#list-flags); sort by `-created`, `name` or `expires`.
 
 ### `lewbox context list|use NAME|remove NAME`
 
@@ -276,9 +293,9 @@ Stops managing the cluster: revokes Lewbox's admin token and the organization ke
 
 ## Nodes
 
-### `lewbox node list [--cluster REF]`
+### `lewbox node list [--cluster REF[,REF]] [--role ROLE[,ROLE]] [--alive true|false]`
 
-Every node, or one cluster's, with its cluster, role, version, whether it's alive, and its URL.
+Every node, or those in the named clusters, roles and liveness, with its cluster, role, version, whether it's alive, and its URL. `--alive true` keeps nodes that answered and `--alive false` those that did not. Takes the [list flags](#list-flags); sort by `cluster` or `name`.
 
 ### `lewbox node get ID|NAME`
 
@@ -304,9 +321,9 @@ Removes this node's local copies of snapshots already archived in the cluster's 
 
 Creates an account. Prompts for the password twice on a terminal.
 
-### `lewbox user list` · `lewbox user get ID|EMAIL`
+### `lewbox user list [--status LIST] [--role LIST]` · `lewbox user get ID|EMAIL`
 
-Lists accounts (admins only), or shows one (admins, or the account itself).
+Lists accounts (admins only), or shows one (admins, or the account itself). `--status` keeps `active` or `disabled` accounts and `--role` keeps `admin` or `user` ones. Takes the [list flags](#list-flags); sort by `email`, `-created` or `status`.
 
 ### `lewbox user set-password ID|EMAIL [--password-stdin] [--current-password-file PATH]`
 
@@ -330,9 +347,9 @@ See [Organizations and API keys](../accounts/organizations-and-api-keys.md).
 
 Creates an organization. Anyone may create their own while sign-up is `open` (active) or `approval` (pending), or with a setup link's `--setup-token` in any mode (active, on the link's plan and region). An instance admin may create one for another owner; `--owner` is for instance admins. The slug is generated from `--name` when it is left out, so `--name` is then required. A workspace created by its owner gets the default plan in the default region, if both are set; one created with a setup link gets the link's plan in its region instead. An instance admin's workspace has no plan unless it uses a setup token.
 
-### `lewbox org list [--user ID|EMAIL] [--status STATUS]` · `lewbox org get [ID|SLUG]`
+### `lewbox org list [--user ID|EMAIL] [--status LIST] [--region LIST] [--plan LIST]` · `lewbox org get [ID|SLUG]`
 
-Lists the organizations you can see (instance admins: all of them), or one. `--user` lists that account's organizations and its role in each; `--status` keeps `pending`, `active` or `suspended` ones. `get` with no argument shows `--org`, the context's default, or an API key's own.
+Lists the organizations you can see (instance admins: all of them), or one. `--user` lists that account's organizations and its role in each; `--status` keeps `pending`, `active` or `suspended` ones; `--region` and `--plan` keep the organizations subscribed there or on those plans. Takes the [list flags](#list-flags); sort by `name`, `-created` or `status`. `get` with no argument shows `--org`, the context's default, or an API key's own.
 
 ### `lewbox org update ID|SLUG [--name NAME]`
 
@@ -346,25 +363,25 @@ Instance admins only. Suspending stops the organization's API keys and leaves it
 
 Makes it the current context's default organization for `member`, `admin-key` and `key`. Not available in local mode: pass `--org` there.
 
-### `lewbox member list` · `add EMAIL [--role ROLE]` · `set-role EMAIL|ID ROLE` · `remove EMAIL|ID`
+### `lewbox member list [--role LIST]` · `add EMAIL [--role ROLE]` · `set-role EMAIL|ID ROLE` · `remove EMAIL|ID`
 
-The organization's members. Roles are `owner`, `admin`, `member` (default) and `viewer`. Owners and admins manage members; only owners manage owners; anyone can remove themselves. The last owner stays. `remove` asks to confirm.
+The organization's members. Roles are `owner`, `admin`, `member` (default) and `viewer`; `list --role` keeps the named ones. The list takes the [list flags](#list-flags) and sorts by `email`, `role` or `-joined`. Owners and admins manage members; only owners manage owners; anyone can remove themselves. The last owner stays. `remove` asks to confirm.
 
 ### `lewbox admin-key create NAME [--expires-in DUR | --never-expires] [--current-password-file PATH]`
 
 Creates an API key and prints its `lba_…` token, once. `--expires-in` takes `30d`, `720h` and so on, from 1 hour to 3650 days; the default is `90d`. A remote orchestrator also asks for your **current password**: the CLI prompts without echo on a terminal, or reads its first line from `--current-password-file`. Local mode needs none. Owners and admins.
 
-### `lewbox admin-key list` · `lewbox admin-key revoke ID|NAME`
+### `lewbox admin-key list [--status LIST]` · `lewbox admin-key revoke ID|NAME`
 
-Lists the keys, revoked ones included, with their status and last use; or revokes one at once. Revoke asks to confirm.
+Lists the keys, revoked ones included, with their status and last use; or revokes one at once. `--status` keeps `active`, `expired` or `revoked` keys. Takes the [list flags](#list-flags); sort by `-created`, `name` or `expires`. Revoke asks to confirm.
 
 ### `lewbox key create NAME [--region SLUG] [--expires-in DUR | --never-expires]`
 
 Creates a sandbox key for the organization's team and prints its `avm_…` token, once, with `SB_API_URL`/`SB_API_TOKEN` and, in a `docker` region, the E2B settings. `--region` defaults to the organization's region (a workspace has one); without a plan there the key is refused with `409`, and a pending or suspended workspace with `403`. `--expires-in` defaults to `90d` and takes the same durations as `admin-key`. Owners, admins and members.
 
-### `lewbox key list` · `lewbox key revoke ID|NAME`
+### `lewbox key list [--status LIST]` · `lewbox key revoke ID|NAME`
 
-Lists the keys, live ones first and revoked ones included; or revokes one, which stops working within a few seconds. A member can revoke only the keys they created; owners and admins can revoke any. Revoke asks to confirm.
+Lists the keys, newest first and revoked ones included; or revokes one, which stops working within a few seconds. `--status` keeps `active`, `expired` or `revoked` keys. Takes the [list flags](#list-flags); sort by `-created`, `name` or `expires`. A member can revoke only the keys they created; owners and admins can revoke any. Revoke asks to confirm.
 
 ***
 
@@ -376,17 +393,17 @@ See [Customers, plans and limits](../accounts/customers-and-plans.md).
 
 The regions a caller can use. Instance admins see every ready or degraded cluster; everyone else sees the regions their organization is subscribed to, with the plan and limits there. Any signed-in account or API key.
 
-### `lewbox sandbox list [--region SLUG] [--status STATUS] [--all]`
+### `lewbox sandbox list [--region LIST] [--status LIST] [--organization LIST] [--all]`
 
-Sandboxes Lewbox has mirrored from every region, newest first. Members see their organization's; instance admins see the whole fleet with `--all` (or with no organization chosen). `--status` is `creating`, `started`, `stopped`, `destroyed` or `error`.
+Sandboxes Lewbox has mirrored from every region, newest first. Members see their organization's; instance admins see the whole fleet with `--all` (or with no organization chosen). `--status` is `creating`, `started`, `stopped`, `destroyed` or `error`; `--organization` keeps the named workspaces (instance admins). Takes the [list flags](#list-flags); sort by `-created`, `status`, `region` or `workspace`.
 
 ### `lewbox sandbox stop ID [--region SLUG]` · `lewbox sandbox delete ID [--region SLUG] [--yes]`
 
 Stops or deletes the sandbox on its cluster, then updates Lewbox's mirror. `--region` picks the cluster when the same ID exists more than once. Delete asks to confirm.
 
-### `lewbox snapshot list [--region SLUG]` · `lewbox snapshot delete NAME [--region SLUG] [--yes]`
+### `lewbox snapshot list [--region LIST] [--organization LIST] [--kind LIST] [--status LIST] [--summary]` · `lewbox snapshot delete NAME [--region SLUG] [--yes]`
 
-Your workspace's snapshots and archived sandboxes in one table, newest first, from every node of every subscribed region (or one region). Each row has a KIND column (`snapshot` or `archive`) and a STATUS column (`pending`, `pushing`, `active` or `error`; an empty status, for a region with no registry, prints `-`). A node that did not answer is listed as partial. `--region` picks the region when the same name exists more than once; delete asks to confirm. As an instance admin without `--org`, the list is every workspace's, with WORKSPACE and NODE columns; an archive has no node.
+Your workspace's snapshots and archived sandboxes in one table, newest first, from every node of every subscribed region (or the named regions). Each row has a KIND column (`snapshot` or `archive`) and a STATUS column (`pending`, `pushing`, `active` or `error`; an empty status, for a region with no registry, prints `-`). `--kind` and `--status` keep the named kinds and states; `--organization` keeps the named workspaces (instance admins). Takes the [list flags](#list-flags) and sorts by `-created`, `name` or `size`. `--summary` adds a totals line over the whole filtered set (count, disk, memory, failed and workspaces). A node that did not answer is listed as partial. For delete, `--region` picks the region when the same name exists more than once; it asks to confirm. As an instance admin without `--org`, the list is every workspace's, with WORKSPACE and NODE columns; an archive has no node.
 
 ### `lewbox archive show ID` · `lewbox archive restore ID` · `lewbox archive delete ID [--yes]`
 
@@ -410,9 +427,9 @@ Shows the instance settings, or changes them. Instance admins only. `--signup` i
 
 Creates a single-use onboarding link for that plan in that region and prints its `lbs_…` token once, with the `/setup/<token>` path to send (prefixed by the context's server URL when known). Whoever opens it can register even while sign-up is `closed`, then create a workspace: it is active at once and subscribed to the link's plan and region. `--expires` defaults to `7d` and takes whole hours from `1h` to `720h`, such as `48h` or `30d`. Instance admins only.
 
-### `lewbox setup-link list` · `lewbox setup-link revoke ID [--yes]`
+### `lewbox setup-link list [--status LIST] [--plan LIST] [--region LIST]` · `lewbox setup-link revoke ID [--yes]`
 
-Lists setup links, newest first, with their status (`unused`, `claimed`, `used` or `expired`), who claimed one and the workspace it created; never the token. `revoke` deletes an unused link and asks to confirm. A used link cannot be revoked (`409`).
+Lists setup links, newest first, with their status (`unused`, `claimed`, `used` or `expired`), who claimed one and the workspace it created; never the token. The filters keep the named states, plans or regions. Takes the [list flags](#list-flags) and sorts by `-created` or `expires`. `revoke` deletes an unused link and asks to confirm. A used link cannot be revoked (`409`).
 
 ### `lewbox subscription list [--org SLUG]` · `lewbox subscription set REGION --plan SLUG [--max-sandboxes N|plan] [--max-vcpus N|plan] [--max-memory SIZE|plan] [--org SLUG]` · `lewbox subscription remove REGION [--force] [--org SLUG] [--yes]`
 
@@ -434,9 +451,9 @@ Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB
 
 Deletes a plan no subscription uses and that is not the default. Asks to confirm.
 
-### `lewbox events [--actor ID|EMAIL] [--workspace ID|SLUG] [--action NAME] [--from TIME] [--to TIME] [--limit N] [--before ID]`
+### `lewbox events [--actor LIST] [--workspace LIST] [--action LIST] [--from TIME] [--to TIME] [--limit N] [--before ID]`
 
-The audit trail, newest first: every state change made through Lewbox, with who made it, the public ID or name of what changed, the workspace when there is one, the client IP and the changed fields. Instance admins only. `--action` is an event name such as `plan.updated`; `--from` and `--to` are RFC 3339 times (`to` is exclusive). `--limit` defaults to 50, at most 200. Page on with `--before` set to the `next` value the previous page printed (JSON) or showed as `next:` (text). See [Audit trail](../operations/audit-trail.md).
+The audit trail, newest first: every state change made through Lewbox, with who made it, the public ID or name of what changed, the workspace when there is one, the client IP and the changed fields. Instance admins only. `--actor`, `--workspace` and `--action` take comma lists of account IDs or emails, workspace IDs or slugs, and event names such as `plan.updated`. `--from` and `--to` are RFC 3339 times (`to` is exclusive). `--limit` defaults to 50, at most 200. Page on with `--before` set to the `next` value the previous page printed (JSON) or showed as `next:` (text). See [Audit trail](../operations/audit-trail.md).
 
 ### `lewbox dns-profile list` · `lewbox dns-profile show ID|NAME`
 

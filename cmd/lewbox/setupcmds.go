@@ -83,15 +83,26 @@ func newSetupLinkCmd(a *app) *cobra.Command {
 	create.Flags().StringVar(&expires, "expires", "7d", "how long the link works, such as 7d or 48h, from 1h to 720h")
 	create.Flags().StringVar(&note, "note", "", "a note for yourself")
 
+	var listStatus, listPlan, listRegion string
+	var listQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List setup links, newest first (GET /v0/setup-links)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListSetupLinks(ctx)
+			return b.ListSetupLinks(ctx, service.ListSetupLinksRequest{
+				ListQuery: listQuery,
+				Status:    listStatus,
+				Plan:      listPlan,
+				Region:    listRegion,
+			})
 		}),
 	}
+	list.Flags().StringVar(&listStatus, "status", "", "only unused, claimed, used or expired links, comma separated")
+	list.Flags().StringVar(&listPlan, "plan", "", "only links for these plans, comma separated")
+	list.Flags().StringVar(&listRegion, "region", "", "only links for these regions, comma separated")
+	addListFlags(list, &listQuery, "-created or expires; prefix with - to reverse")
 
 	revoke := &cobra.Command{
 		Use:     "revoke <id>",

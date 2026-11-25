@@ -1,9 +1,17 @@
 import type { KeyLifetime } from '../../types/key'
-import type { AdminKey, AdminKeyList, NewAdminKey } from '../../types/admin-key'
-import { ref, request } from './client'
+import type {
+  AdminKey,
+  AdminKeyList,
+  AdminKeyListQuery,
+  NewAdminKey,
+} from '../../types/admin-key'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listAdminKeys(org: string): Promise<AdminKeyList> {
-  return request<AdminKeyList>('/v0/admin-keys', { org })
+export async function listAdminKeys(
+  org: string,
+  filter: AdminKeyListQuery = {},
+): Promise<AdminKeyList> {
+  return toPage(await request<PageBody<AdminKey>>(`/v0/admin-keys${query(filter)}`, { org }))
 }
 
 // A management key that never expires is sent with an empty expires_in.

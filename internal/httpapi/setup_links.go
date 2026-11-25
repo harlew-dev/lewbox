@@ -10,9 +10,15 @@ import (
 // instance-admin only, except Check, which is the public page's lookup.
 type SetupLinks struct{ *server }
 
-// Index lists every setup link, newest first, without tokens.
+// Index lists setup links, newest first, without tokens.
 func (h SetupLinks) Index(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ListSetupLinks(r.Context())
+	query := r.URL.Query()
+	resp, err := h.svc.ListSetupLinks(r.Context(), service.ListSetupLinksRequest{
+		ListQuery: listQuery(query),
+		Status:    query.Get("status"),
+		Plan:      query.Get("plan"),
+		Region:    query.Get("region"),
+	})
 	h.respond(w, http.StatusOK, resp, err)
 }
 

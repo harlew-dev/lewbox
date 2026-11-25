@@ -23,8 +23,25 @@ type User struct {
 
 // UserList is returned by ListUsers. Data is never null.
 type UserList struct {
-	Data []User `json:"data"`
+	Data  []User `json:"data"`
+	Pages Pages  `json:"pages"`
 }
+
+// ListUsersRequest pages and filters accounts. Status is active or disabled;
+// Role is admin or user.
+type ListUsersRequest struct {
+	ListQuery
+	Status string `json:"status"`
+	Role   string `json:"role"`
+}
+
+// userSorts maps a public sort key to SQL written here. status sorts active
+// accounts before disabled ones.
+var userSorts = mergeSorts(
+	sortDirections("email", "lower(email) ASC, id ASC", "lower(email) DESC, id DESC"),
+	sortDirections("created", "created_at ASC, id ASC", "created_at DESC, id DESC"),
+	sortDirections("status", "disabled ASC, id ASC", "disabled DESC, id DESC"),
+)
 
 // CreateUserRequest is the input to CreateUser.
 type CreateUserRequest struct {
@@ -177,16 +194,54 @@ func (s *Service) insertUser(ctx context.Context, nu newUser) (User, error) {
 	return toUser(row), nil
 }
 
-// ListUsers returns every account, ordered by email.
-func (s *Service) ListUsers(ctx context.Context) (UserList, error) {
+// ListUsers returns accounts, ordered by email by default.
+func (s *Service) ListUsers(ctx context.Context, req ListUsersRequest) (UserList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return UserList{}, err
 	}
-	rows, err := s.queries(ctx).ListUsers(ctx)
+	q, err := parseListQuery(req.ListQuery, userSorts, "email")
+	if err != nil {
+		return UserList{}, err
+	}
+	statuses, err := parseList("status", req.Status, []string{"active", "disabled"})
+	if err != nil {
+		return UserList{}, err
+	}
+	roles, err := parseList("role", req.Role, []string{"admin", "user"})
+	if err != nil {
+		return UserList{}, err
+	}
+	disabled := make([]int64, 0, len(statuses))
+	for _, status := range statuses {
+		if status == "disabled" {
+			disabled = append(disabled, 1)
+		} else {
+			disabled = append(disabled, 0)
+		}
+	}
+	instanceAdmins := make([]int64, 0, len(roles))
+	for _, role := range roles {
+		if role == "admin" {
+			instanceAdmins = append(instanceAdmins, 1)
+		} else {
+			instanceAdmins = append(instanceAdmins, 0)
+		}
+	}
+	rows, total, err := s.queries(ctx).ListUsersPage(ctx, db.UserListParams{
+		Disabled:      disabled,
+		InstanceAdmin: instanceAdmins,
+		Pattern:       q.pattern,
+		Order:         q.sort,
+		Limit:         q.perPage,
+		Offset:        (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return UserList{}, fmt.Errorf("list users: %w", err)
 	}
-	out := UserList{Data: make([]User, 0, len(rows))}
+	out := UserList{
+		Data:  make([]User, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, r := range rows {
 		out.Data = append(out.Data, toUser(r))
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"uuid"
@@ -62,12 +63,13 @@ type EventList struct {
 	Next *string `json:"next"`
 }
 
-// ListEventsRequest filters the audit log. Every field is optional.
+// ListEventsRequest filters the audit log. Every field is optional. Actor,
+// Organization and Action take comma-separated multi-value filters.
 type ListEventsRequest struct {
 	Before       string `json:"before,omitempty"`       // the ID of the last row seen
-	Actor        string `json:"actor,omitempty"`        // an account ID or email
-	Organization string `json:"organization,omitempty"` // a workspace ID or slug
-	Action       string `json:"action,omitempty"`       // an event name
+	Actor        string `json:"actor,omitempty"`        // account IDs or emails
+	Organization string `json:"organization,omitempty"` // workspace IDs or slugs
+	Action       string `json:"action,omitempty"`       // event names
 	From         string `json:"from,omitempty"`         // RFC 3339, inclusive
 	To           string `json:"to,omitempty"`           // RFC 3339, exclusive
 	Limit        int    `json:"limit,omitempty"`
@@ -230,9 +232,14 @@ func (s *Service) ListEvents(ctx context.Context, req ListEventsRequest) (EventL
 	}
 	out := EventList{Data: []Event{}}
 
-	action := strings.TrimSpace(req.Action)
-	if action != "" && !eventNameRE.MatchString(action) {
-		return EventList{}, invalidField("action", "action must be an event name such as plan.updated")
+	actions, err := parseList("action", req.Action, nil)
+	if err != nil {
+		return EventList{}, err
+	}
+	for _, action := range actions {
+		if !eventNameRE.MatchString(action) {
+			return EventList{}, badRequestField("action", "action must be an event name such as plan.updated")
+		}
 	}
 	from, err := parseEventTime(req.From, "from")
 	if err != nil {
@@ -253,39 +260,48 @@ func (s *Service) ListEvents(ctx context.Context, req ListEventsRequest) (EventL
 		return EventList{}, invalidField("limit", "limit must be between 1 and %d", eventPageMax)
 	}
 
-	actorID := ""
-	if ref := strings.TrimSpace(req.Actor); ref != "" {
-		actorID, err = s.eventActorFilter(ctx, ref)
+	actorRefs, err := parseList("actor", req.Actor, nil)
+	if err != nil {
+		return EventList{}, err
+	}
+	actorIDs := make([]string, 0, len(actorRefs))
+	for _, ref := range actorRefs {
+		id, err := s.eventActorFilter(ctx, ref)
 		if err != nil {
 			return EventList{}, err
 		}
-		if actorID == "" {
-			return out, nil
+		if id != "" {
+			actorIDs = append(actorIDs, id)
 		}
 	}
-	orgID := ""
-	if ref := strings.TrimSpace(req.Organization); ref != "" {
-		orgID, err = s.eventOrganizationFilter(ctx, ref)
+	if len(actorRefs) > 0 && len(actorIDs) == 0 {
+		return out, nil
+	}
+	orgRefs, err := parseList("organization", req.Organization, nil)
+	if err != nil {
+		return EventList{}, err
+	}
+	orgIDs := make([]string, 0, len(orgRefs))
+	for _, ref := range orgRefs {
+		id, err := s.eventOrganizationFilter(ctx, ref)
 		if err != nil {
 			return EventList{}, err
 		}
-		if orgID == "" {
-			return out, nil
+		if id != "" {
+			orgIDs = append(orgIDs, id)
 		}
+	}
+	if len(orgRefs) > 0 && len(orgIDs) == 0 {
+		return out, nil
 	}
 
-	params := db.ListEventsParams{
-		ActorID:        actorID,
-		OrganizationID: orgID,
-		Name:           action,
-		BeforeID:       "",
-		RowLimit:       int64(limit + 1),
-	}
-	if !from.IsZero() {
-		params.FromTime = from
-	}
-	if !to.IsZero() {
-		params.ToTime = to
+	params := db.EventListParams{
+		ActorIDs:        actorIDs,
+		OrganizationIDs: orgIDs,
+		Names:           actions,
+		FromTime:        from,
+		ToTime:          to,
+		RowLimit:        limit + 1,
 	}
 	if before := strings.TrimSpace(req.Before); before != "" {
 		cursor, err := s.queries(ctx).GetEventByID(ctx, before)
@@ -295,14 +311,14 @@ func (s *Service) ListEvents(ctx context.Context, req ListEventsRequest) (EventL
 		if err != nil {
 			return EventList{}, fmt.Errorf("get event cursor: %w", err)
 		}
-		if !eventMatchesCursor(cursor, actorID, orgID, action, from, to) {
+		if !eventMatchesCursor(cursor, actorIDs, orgIDs, actions, from, to) {
 			return EventList{}, invalid("that page is no longer available")
 		}
 		params.BeforeID = cursor.ID
 		params.BeforeTime = cursor.CreatedAt
 	}
 
-	rows, err := s.queries(ctx).ListEvents(ctx, params)
+	rows, err := s.queries(ctx).ListEventsFiltered(ctx, params)
 	if err != nil {
 		return EventList{}, fmt.Errorf("list events: %w", err)
 	}
@@ -363,14 +379,14 @@ func (s *Service) eventOrganizationFilter(ctx context.Context, ref string) (stri
 
 // eventMatchesCursor reports whether the cursor row belongs to the page's
 // scope, so a cursor from another filter is refused instead of skipping rows.
-func eventMatchesCursor(row db.Event, actorID, orgID, action string, from, to time.Time) bool {
-	if actorID != "" && (!row.ActorID.Valid || row.ActorID.String != actorID) {
+func eventMatchesCursor(row db.Event, actorIDs, orgIDs, actions []string, from, to time.Time) bool {
+	if len(actorIDs) > 0 && (!row.ActorID.Valid || !slices.Contains(actorIDs, row.ActorID.String)) {
 		return false
 	}
-	if orgID != "" && (!row.OrganizationID.Valid || row.OrganizationID.String != orgID) {
+	if len(orgIDs) > 0 && (!row.OrganizationID.Valid || !slices.Contains(orgIDs, row.OrganizationID.String)) {
 		return false
 	}
-	if action != "" && row.Name != action {
+	if len(actions) > 0 && !slices.Contains(actions, row.Name) {
 		return false
 	}
 	if !from.IsZero() && row.CreatedAt.Before(from) {

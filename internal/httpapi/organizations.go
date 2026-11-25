@@ -13,9 +13,13 @@ type Organizations struct{ *server }
 
 // Index lists organizations.
 func (h Organizations) Index(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
 	resp, err := h.svc.ListOrganizations(r.Context(), service.ListOrganizationsRequest{
-		User:   r.URL.Query().Get("user"),
-		Status: r.URL.Query().Get("status"),
+		ListQuery: listQuery(query),
+		User:      query.Get("user"),
+		Status:    query.Get("status"),
+		Region:    query.Get("region"),
+		Plan:      query.Get("plan"),
 	})
 	h.respond(w, http.StatusOK, resp, err)
 }

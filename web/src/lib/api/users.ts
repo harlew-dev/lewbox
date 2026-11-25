@@ -1,8 +1,8 @@
-import type { User, UserList } from '../../types/user'
-import { ref, request } from './client'
+import type { User, UserList, UserListQuery } from '../../types/user'
+import { query, ref, request, toPage, type PageBody } from './client'
 
-export function listUsers(): Promise<UserList> {
-  return request<UserList>('/v0/users')
+export async function listUsers(filter: UserListQuery = {}): Promise<UserList> {
+  return toPage(await request<PageBody<User>>(`/v0/users${query(filter)}`))
 }
 
 export function createUser(input: {

@@ -140,7 +140,7 @@ export function WaitForClusterStep({ slug }: { slug: string }) {
 // The last step of "Add a node": waits for a node that wasn't in the cluster
 // when the commands were shown. With a name, only that node counts.
 export function WaitForNodeStep({ cluster, node }: { cluster: string; node?: string }) {
-  const list = async () => (await api.listNodes(cluster)).data
+  const list = async () => (await api.listNodes({ cluster: [cluster], per_page: 100 })).data
   const result = usePollFor(
     list,
     async (before): Promise<WaitResult<api.Node>> => {

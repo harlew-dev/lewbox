@@ -15,7 +15,8 @@ describe('routes', () => {
   it('builds the console pages and leaves defaults out', () => {
     expect(routes.admin.overview()).toBe('/admin')
     expect(routes.admin.workspaces()).toBe('/admin/workspaces')
-    expect(routes.admin.workspaces('pending')).toBe('/admin/workspaces?tab=pending')
+    expect(routes.admin.workspaces('pending')).toBe('/admin/workspaces?status=pending')
+    expect(routes.admin.workspaces('setup')).toBe('/admin/workspaces?tab=setup')
     expect(routes.admin.workspace('acme labs')).toBe('/admin/workspaces/acme%20labs')
     expect(routes.admin.servers()).toBe('/admin/servers')
     expect(routes.admin.servers('nodes', 'eu west')).toBe('/admin/servers?tab=nodes&cluster=eu+west')

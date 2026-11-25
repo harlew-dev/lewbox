@@ -449,7 +449,7 @@ func TestSubscriptionLimitsAndStatus(t *testing.T) {
 		t.Errorf("suspended list = %+v, %v", list, err)
 	}
 	if _, err := s.ListOrganizations(localCtx(), ListOrganizationsRequest{Status: "gone"}); err != nil {
-		wantCode(t, err, CodeInvalid)
+		wantCode(t, err, CodeBadRequest)
 	}
 }
 

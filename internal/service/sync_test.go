@@ -503,7 +503,7 @@ func TestSandboxRegionIsScopedToSubscriptions(t *testing.T) {
 		t.Errorf("message = %q", se.Message)
 	}
 	_, err = f.s.ListSandboxes(localCtx(), ListSandboxesRequest{Org: "acme", Region: "us-east"})
-	wantCode(t, err, CodeNotFound)
+	wantCode(t, err, CodeBadRequest)
 }
 
 // A Firecracker stop writes the VM's memory to disk, and AerolVM abandons it

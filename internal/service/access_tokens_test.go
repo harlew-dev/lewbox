@@ -65,21 +65,21 @@ func TestAccessTokens(t *testing.T) {
 	// A token can't mint another, but can list and revoke.
 	_, err = s.CreateAccessToken(tctx, CreateAccessTokenRequest{Name: "more"})
 	wantCode(t, err, CodeForbidden)
-	list, err := s.ListAccessTokens(tctx, "")
+	list, err := s.ListAccessTokens(tctx, ListAccessTokensRequest{User: ""})
 	if err != nil || len(list.Data) != 1 || list.Data[0].ID != tok.ID || list.Data[0].LastUsedAt == nil {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
 
 	// Plain users can't reach another account's tokens, and aren't told
 	// whether it exists.
-	_, err = s.ListAccessTokens(f.member, "viewer@example.com")
+	_, err = s.ListAccessTokens(f.member, ListAccessTokensRequest{User: "viewer@example.com"})
 	wantCode(t, err, CodeForbidden)
-	_, err = s.ListAccessTokens(f.member, "nobody@example.com")
+	_, err = s.ListAccessTokens(f.member, ListAccessTokensRequest{User: "nobody@example.com"})
 	wantCode(t, err, CodeForbidden)
 	_, err = s.RevokeAccessToken(f.member, "viewer@example.com", "laptop")
 	wantCode(t, err, CodeForbidden)
 	// Naming yourself is fine.
-	if _, err := s.ListAccessTokens(f.member, "MEMBER@example.com"); err != nil {
+	if _, err := s.ListAccessTokens(f.member, ListAccessTokensRequest{User: "MEMBER@example.com"}); err != nil {
 		t.Errorf("own tokens by email: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestAccessTokens(t *testing.T) {
 	clock = now.Add(31 * 24 * time.Hour)
 	_, err = s.Authenticate(context.Background(), tok.Token)
 	wantCode(t, err, CodeUnauthorized)
-	list, _ = s.ListAccessTokens(f.member, "")
+	list, _ = s.ListAccessTokens(f.member, ListAccessTokensRequest{User: ""})
 	if list.Data[0].Status != keyStatusExpired {
 		t.Errorf("status after expiry = %q", list.Data[0].Status)
 	}
@@ -132,7 +132,7 @@ func TestAccessTokensForInstanceAdmins(t *testing.T) {
 	if _, err := s.ListClusters(tctx); err != nil {
 		t.Errorf("clusters with an admin's token: %v", err)
 	}
-	if _, err := s.ListUsers(tctx); err != nil {
+	if _, err := s.ListUsers(tctx, ListUsersRequest{}); err != nil {
 		t.Errorf("users with an admin's token: %v", err)
 	}
 
@@ -143,11 +143,11 @@ func TestAccessTokensForInstanceAdmins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.ListAccessTokens(f.root, "owner@example.com")
+	list, err := s.ListAccessTokens(f.root, ListAccessTokensRequest{User: "owner@example.com"})
 	if err != nil || len(list.Data) != 1 || list.Data[0].UserID != theirs.UserID {
 		t.Fatalf("admin lists another's tokens = %+v, %v", list, err)
 	}
-	_, err = s.ListAccessTokens(f.root, "nobody@example.com")
+	_, err = s.ListAccessTokens(f.root, ListAccessTokensRequest{User: "nobody@example.com"})
 	wantCode(t, err, CodeNotFound)
 	if _, err := s.RevokeAccessToken(f.root, "owner@example.com", "ops"); err != nil {
 		t.Errorf("admin revokes another's token: %v", err)
@@ -175,7 +175,7 @@ func TestAccessTokensForInstanceAdmins(t *testing.T) {
 	}
 	_, err = s.Authenticate(context.Background(), opsTok.Token)
 	wantCode(t, err, CodeUnauthorized)
-	list, _ = s.ListAccessTokens(f.root, other.Email)
+	list, _ = s.ListAccessTokens(f.root, ListAccessTokensRequest{User: other.Email})
 	if len(list.Data) != 1 || list.Data[0].Status != keyStatusRevoked {
 		t.Errorf("tokens after disable = %+v", list.Data)
 	}

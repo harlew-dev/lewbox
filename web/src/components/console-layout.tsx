@@ -28,8 +28,10 @@ export function useRefreshPending(): () => void {
 export function ConsoleLayout({ children }: { children: ReactNode }) {
   const { organizations } = useAuth()
   const isActive = useIsActive()
-  const pending = useLoad('organizations:pending', () => api.listOrganizations({ status: 'pending' }))
-  const pendingCount = pending.data?.data.length ?? 0
+  const pending = useLoad('organizations:pending:count', () =>
+    api.listOrganizations({ status: ['pending'], per_page: 1 }),
+  )
+  const pendingCount = pending.data?.pages.items ?? 0
   type NavItem = { href: string; label: string; icon: typeof HomeIcon; exact?: boolean; badge?: number }
   const groups: { heading?: string; items: NavItem[] }[] = [
     {

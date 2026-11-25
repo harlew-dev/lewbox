@@ -601,7 +601,7 @@ func TestListSnapshotsArchiveScoping(t *testing.T) {
 	viewer := f.member(t, "viewer@example.com", roleViewer)
 
 	for name, ctx := range map[string]context.Context{"member": member, "viewer": viewer} {
-		list, err := f.s.ListSnapshots(ctx, RegionScope{Org: "acme"})
+		list, err := f.s.ListSnapshots(ctx, ListSnapshotsRequest{Org: "acme"})
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -610,10 +610,10 @@ func TestListSnapshotsArchiveScoping(t *testing.T) {
 		}
 	}
 
-	if _, err := f.s.ListSnapshots(outsider, RegionScope{Org: "acme"}); err != nil {
+	if _, err := f.s.ListSnapshots(outsider, ListSnapshotsRequest{Org: "acme"}); err != nil {
 		wantCode(t, err, CodeNotFound)
 	}
-	list, err := f.s.ListSnapshots(outsider, RegionScope{Org: "other"})
+	list, err := f.s.ListSnapshots(outsider, ListSnapshotsRequest{Org: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +623,7 @@ func TestListSnapshotsArchiveScoping(t *testing.T) {
 
 	// An instance admin with no workspace sees every workspace's archives,
 	// with the owner on each row.
-	list, err = f.s.ListSnapshots(localCtx(), RegionScope{})
+	list, err = f.s.ListSnapshots(localCtx(), ListSnapshotsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,12 +637,12 @@ func TestListSnapshotsArchiveScoping(t *testing.T) {
 	if len(owners) != 2 || owners[acmeRow.ID] != "acme" || owners[otherRow.ID] != "other" {
 		t.Errorf("fleet owners = %v", owners)
 	}
-	list, err = f.s.ListSnapshots(localCtx(), RegionScope{Region: "eu-west"})
+	list, err = f.s.ListSnapshots(localCtx(), ListSnapshotsRequest{Region: "eu-west"})
 	if err != nil || len(list.Data) != 2 {
 		t.Errorf("filtered fleet list = %+v, %v", list.Data, err)
 	}
-	if _, err := f.s.ListSnapshots(localCtx(), RegionScope{Region: "missing"}); err != nil {
-		wantCode(t, err, CodeNotFound)
+	if _, err := f.s.ListSnapshots(localCtx(), ListSnapshotsRequest{Region: "missing"}); err != nil {
+		wantCode(t, err, CodeBadRequest)
 	}
 }
 
@@ -739,7 +739,7 @@ func TestDeleteArchiveAPI(t *testing.T) {
 	if snapshots := f.fake.Snapshots(f.org.Team); len(snapshots) != 0 {
 		t.Errorf("the snapshot survived: %+v", snapshots)
 	}
-	list, err := f.s.ListSnapshots(member, RegionScope{Org: "acme"})
+	list, err := f.s.ListSnapshots(member, ListSnapshotsRequest{Org: "acme"})
 	if err != nil || len(list.Data) != 0 {
 		t.Errorf("list after delete = %+v, %v", list.Data, err)
 	}
@@ -755,7 +755,7 @@ func TestListArchivesOmitsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := f.s.ListSnapshots(localCtx(), RegionScope{Org: "acme"})
+	list, err := f.s.ListSnapshots(localCtx(), ListSnapshotsRequest{Org: "acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

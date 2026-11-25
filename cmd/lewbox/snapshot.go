@@ -18,17 +18,32 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		Short:   "List and delete sandbox snapshots",
 	}
 
-	var listRegion string
+	var listRegion, listOrganization, listKind, listStatus string
+	var listSummary bool
+	var listQuery service.ListQuery
 	list := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List snapshots (GET /v0/snapshots)",
 		Args:    usageArgs(cobra.NoArgs),
 		RunE: a.call(func(ctx context.Context, b backend.Backend, _ []string) (any, error) {
-			return b.ListSnapshots(ctx, service.RegionScope{Region: listRegion, Org: a.org})
+			return b.ListSnapshots(ctx, service.ListSnapshotsRequest{
+				ListQuery:    listQuery,
+				Region:       listRegion,
+				Org:          a.org,
+				Organization: listOrganization,
+				Kind:         listKind,
+				Status:       listStatus,
+				Summary:      summaryValue(listSummary),
+			})
 		}),
 	}
-	list.Flags().StringVar(&listRegion, "region", "", "only snapshots in this region")
+	list.Flags().StringVar(&listRegion, "region", "", "only snapshots in these regions, comma separated")
+	list.Flags().StringVar(&listOrganization, "organization", "", "only these workspaces, comma separated (instance admins)")
+	list.Flags().StringVar(&listKind, "kind", "", "only snapshot or archive, comma separated")
+	list.Flags().StringVar(&listStatus, "status", "", "only pending, pushing, active or error, comma separated")
+	list.Flags().BoolVar(&listSummary, "summary", false, "include totals over the whole filtered set")
+	addListFlags(list, &listQuery, "-created, name or size; prefix with - to reverse")
 
 	var deleteRegion string
 	remove := &cobra.Command{
@@ -49,4 +64,12 @@ func newSnapshotCmd(a *app) *cobra.Command {
 
 	snapshot.AddCommand(list, remove)
 	return snapshot
+}
+
+// summaryValue maps the CLI's --summary to the API's value.
+func summaryValue(include bool) string {
+	if include {
+		return "include"
+	}
+	return ""
 }

@@ -28,6 +28,7 @@ type Organization struct {
 	Team         string              `json:"team,omitempty"`
 	Region       *OrganizationRegion `json:"region"`
 	Members      int                 `json:"members"`
+	Running      int                 `json:"running"`
 	Role         string              `json:"role,omitempty"`
 	VcpuHours30d *float64            `json:"vcpu_hours_30d,omitempty"`
 	CreatedAt    time.Time           `json:"created_at"`
@@ -55,16 +56,31 @@ type Limits struct {
 
 // OrganizationList is returned by ListOrganizations. Data is never null.
 type OrganizationList struct {
-	Data []Organization `json:"data"`
+	Data  []Organization `json:"data"`
+	Pages Pages          `json:"pages"`
 }
 
 // ListOrganizationsRequest filters ListOrganizations. User (an ID or email)
 // lists that account's organizations instead of the caller's view. Status
-// keeps only pending, active or suspended organizations.
+// keeps only pending, active or suspended organizations; Region, Plan and
+// Organization are comma-separated multi-value filters.
 type ListOrganizationsRequest struct {
+	ListQuery
 	User   string `json:"user"`
 	Status string `json:"status"`
+	Region string `json:"region"`
+	Plan   string `json:"plan"`
 }
+
+// organizationSorts maps a public sort key to SQL written here. Every order
+// ends in the organization's unique ID.
+var organizationSorts = mergeSorts(
+	sortDirections("name", "lower(o.name) ASC, o.id ASC", "lower(o.name) DESC, o.id DESC"),
+	sortDirections("created", "o.created_at ASC, o.id ASC", "o.created_at DESC, o.id DESC"),
+	sortDirections("status",
+		"CASE o.status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 WHEN 'suspended' THEN 2 ELSE 3 END ASC, o.id ASC",
+		"CASE o.status WHEN 'pending' THEN 0 WHEN 'active' THEN 1 WHEN 'suspended' THEN 2 ELSE 3 END DESC, o.id DESC"),
+)
 
 // CreateOrganizationRequest is the input to CreateOrganization. Slug is
 // generated from the name when it is empty. Owner is an account's email or ID;
@@ -97,8 +113,26 @@ type Member struct {
 
 // MemberList is returned by ListMembers. Data is never null.
 type MemberList struct {
-	Data []Member `json:"data"`
+	Data  []Member `json:"data"`
+	Pages Pages    `json:"pages"`
 }
+
+// ListMembersRequest pages and filters one organization's members. Role is a
+// comma-separated multi-value filter.
+type ListMembersRequest struct {
+	ListQuery
+	Org  string `json:"org"`
+	Role string `json:"role"`
+}
+
+// memberSorts maps a public sort key to SQL written here.
+var memberSorts = mergeSorts(
+	sortDirections("email", "lower(u.email) ASC, m.id ASC", "lower(u.email) DESC, m.id DESC"),
+	sortDirections("role",
+		"CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 WHEN 'viewer' THEN 3 ELSE 4 END ASC, m.id ASC",
+		"CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 WHEN 'viewer' THEN 3 ELSE 4 END DESC, m.id DESC"),
+	sortDirections("joined", "m.created_at ASC, m.id ASC", "m.created_at DESC, m.id DESC"),
+)
 
 // AddMemberRequest is the input to AddMember. Email is an existing
 // account's; Role defaults to "member".
@@ -275,7 +309,20 @@ func (s *Service) toOrganization(ctx context.Context, row db.Organization, role 
 			return Organization{}, err
 		}
 	}
-	return toOrganization(row, role, counts, subs, usage, admin), nil
+	running, err := s.startedSandboxes(ctx, row.ID)
+	if err != nil {
+		return Organization{}, err
+	}
+	return toOrganization(row, role, counts, subs, usage, admin, running), nil
+}
+
+// startedSandboxes counts an organization's started sandboxes in the mirror.
+func (s *Service) startedSandboxes(ctx context.Context, orgID string) (int, error) {
+	n, err := s.queries(ctx).CountStartedSandboxesByOrg(ctx, orgID)
+	if err != nil {
+		return 0, fmt.Errorf("count started sandboxes: %w", err)
+	}
+	return n, nil
 }
 
 // vcpuHoursByOrg sums each organization's metered vCPUs over the last 30 days.
@@ -370,7 +417,7 @@ func effectiveLimits(plan db.Plan, maxSandboxes, maxVcpus, maxMemoryMB sql.NullI
 
 // toOrganization renders an organization. admin decides whether to include
 // the fields only instance admins see: team and recent vCPU-hours.
-func toOrganization(row db.Organization, role string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool) Organization {
+func toOrganization(row db.Organization, role string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool, running int) Organization {
 	org := Organization{
 		ID:           row.ID,
 		Slug:         row.Slug,
@@ -379,6 +426,7 @@ func toOrganization(row db.Organization, role string, counts map[string]int, sub
 		StatusReason: row.StatusReason,
 		Region:       subs.region(row.ID),
 		Members:      counts[row.ID],
+		Running:      running,
 		Role:         role,
 		CreatedAt:    row.CreatedAt.UTC(),
 	}
@@ -403,12 +451,87 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	if err != nil {
 		return OrganizationList{}, err
 	}
-	status := strings.ToLower(strings.TrimSpace(req.Status))
-	switch status {
-	case "", orgPending, orgActive, orgSuspended:
-	default:
-		return OrganizationList{}, invalidField("status", "status must be pending, active or suspended")
+	q, err := parseListQuery(req.ListQuery, organizationSorts, "name")
+	if err != nil {
+		return OrganizationList{}, err
 	}
+	statuses, err := parseList("status", req.Status, []string{orgPending, orgActive, orgSuspended})
+	if err != nil {
+		return OrganizationList{}, err
+	}
+	regions, err := parseList("region", req.Region, nil)
+	if err != nil {
+		return OrganizationList{}, err
+	}
+	regionSlugs, err := s.regionSlugsForFilter(ctx, nil, regions, "region")
+	if err != nil {
+		return OrganizationList{}, err
+	}
+	plans, err := parseList("plan", req.Plan, nil)
+	if err != nil {
+		return OrganizationList{}, err
+	}
+	planSlugs, err := s.planSlugsForFilter(ctx, plans, "plan")
+	if err != nil {
+		return OrganizationList{}, err
+	}
+
+	userRef := strings.TrimSpace(req.User)
+	userID := ""
+	if userRef != "" {
+		if !p.InstanceAdmin && !p.selfRef(userRef) {
+			return OrganizationList{}, forbidden("only an instance admin can list another account's workspaces")
+		}
+		user, err := s.findUser(ctx, userRef)
+		if err != nil {
+			return OrganizationList{}, err
+		}
+		userID = user.ID
+	}
+
+	params := db.OrganizationListParams{
+		Statuses: statuses,
+		Regions:  regionSlugs,
+		Plans:    planSlugs,
+		Pattern:  q.pattern,
+		Order:    q.sort,
+		Limit:    q.perPage,
+		Offset:   (q.page - 1) * q.perPage,
+	}
+	roleUserID := ""
+	switch {
+	case p.Kind == "key":
+		if userRef != "" {
+			return OrganizationList{}, forbidden("an admin key cannot list another account's workspaces")
+		}
+		params.ScopeOrgID = p.OrgID
+	case userID != "":
+		params.ScopeUserID = userID
+		roleUserID = userID
+	case !p.InstanceAdmin:
+		params.ScopeUserID = p.UserID
+		roleUserID = p.UserID
+	default:
+		if p.Kind == "user" {
+			roleUserID = p.UserID
+		}
+	}
+
+	rows, total, err := s.queries(ctx).ListOrganizationsPage(ctx, params)
+	if err != nil {
+		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
+	}
+	roles := map[string]string{}
+	if roleUserID != "" {
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		if roles, err = s.queries(ctx).RolesForOrganizations(ctx, roleUserID, ids); err != nil {
+			return OrganizationList{}, fmt.Errorf("list roles: %w", err)
+		}
+	}
+
 	counts, err := s.memberCounts(ctx)
 	if err != nil {
 		return OrganizationList{}, err
@@ -417,77 +540,18 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	if err != nil {
 		return OrganizationList{}, err
 	}
-	out := OrganizationList{Data: []Organization{}}
-	keep := func(org Organization) bool {
-		return status == "" || org.Status == status
-	}
 	var usage map[string]float64
 	if p.InstanceAdmin {
 		if usage, err = s.vcpuHoursByOrg(ctx); err != nil {
 			return OrganizationList{}, err
 		}
 	}
-
-	if p.Kind == "key" {
-		if strings.TrimSpace(req.User) != "" {
-			return OrganizationList{}, forbidden("an admin key cannot list another account's workspaces")
-		}
-		row, err := s.queries(ctx).GetOrganizationByID(ctx, p.OrgID)
-		if err != nil {
-			return OrganizationList{}, fmt.Errorf("get organization: %w", err)
-		}
-		if org := toOrganization(row, "", counts, subs, nil, false); keep(org) {
-			out.Data = append(out.Data, org)
-		}
-		return out, nil
+	out := OrganizationList{
+		Data:  make([]Organization, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
 	}
-
-	if ref := strings.TrimSpace(req.User); ref != "" {
-		if !p.InstanceAdmin && !p.selfRef(ref) {
-			return OrganizationList{}, forbidden("only an instance admin can list another account's workspaces")
-		}
-		user, err := s.findUser(ctx, ref)
-		if err != nil {
-			return OrganizationList{}, err
-		}
-		return s.organizationsOf(ctx, user.ID, counts, subs, usage, p.InstanceAdmin, keep)
-	}
-
-	if !p.InstanceAdmin {
-		return s.organizationsOf(ctx, p.UserID, counts, subs, nil, false, keep)
-	}
-	rows, err := s.queries(ctx).ListOrganizations(ctx)
-	if err != nil {
-		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
-	}
-	roles := map[string]string{}
-	if p.Kind == "user" {
-		mine, err := s.queries(ctx).ListOrganizationsForUser(ctx, p.UserID)
-		if err != nil {
-			return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
-		}
-		for _, m := range mine {
-			roles[m.Organization.ID] = m.Role
-		}
-	}
-	for _, r := range rows {
-		if org := toOrganization(r, roles[r.ID], counts, subs, usage, true); keep(org) {
-			out.Data = append(out.Data, org)
-		}
-	}
-	return out, nil
-}
-
-func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool, keep func(Organization) bool) (OrganizationList, error) {
-	rows, err := s.queries(ctx).ListOrganizationsForUser(ctx, userID)
-	if err != nil {
-		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
-	}
-	out := OrganizationList{Data: make([]Organization, 0, len(rows))}
-	for _, r := range rows {
-		if org := toOrganization(r.Organization, r.Role, counts, subs, usage, admin); keep(org) {
-			out.Data = append(out.Data, org)
-		}
+	for _, row := range rows {
+		out.Data = append(out.Data, toOrganization(row.Organization, roles[row.ID], counts, subs, usage, p.InstanceAdmin, int(row.Running)))
 	}
 	return out, nil
 }
@@ -1024,17 +1088,37 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 	return s.toOrganization(ctx, row, c.role, c.p.InstanceAdmin)
 }
 
-// ListMembers returns an organization's members, ordered by email.
-func (s *Service) ListMembers(ctx context.Context, org string) (MemberList, error) {
-	c, err := s.orgFor(ctx, org, accessRead)
+// ListMembers returns an organization's members, ordered by email by
+// default.
+func (s *Service) ListMembers(ctx context.Context, req ListMembersRequest) (MemberList, error) {
+	c, err := s.orgFor(ctx, req.Org, accessRead)
 	if err != nil {
 		return MemberList{}, err
 	}
-	rows, err := s.queries(ctx).ListMembers(ctx, c.org.ID)
+	q, err := parseListQuery(req.ListQuery, memberSorts, "email")
+	if err != nil {
+		return MemberList{}, err
+	}
+	roles, err := parseList("role", req.Role, []string{roleOwner, roleAdmin, roleMember, roleViewer})
+	if err != nil {
+		return MemberList{}, err
+	}
+	rows, total, err := s.queries(ctx).ListMembersPage(ctx, db.MemberListParams{
+		OrgID:             c.org.ID,
+		Roles:             roles,
+		Pattern:           q.pattern,
+		HideOperatorEmail: !c.p.InstanceAdmin,
+		Order:             q.sort,
+		Limit:             q.perPage,
+		Offset:            (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return MemberList{}, fmt.Errorf("list members: %w", err)
 	}
-	out := MemberList{Data: make([]Member, 0, len(rows))}
+	out := MemberList{
+		Data:  make([]Member, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
 	for _, r := range rows {
 		email := r.Email
 		if !c.p.InstanceAdmin && r.InstanceAdmin != 0 {

@@ -7,19 +7,18 @@ import {
   DropdownButton,
   DropdownItem,
   DropdownMenu,
-  Table,
-  TableBody,
+  PaginatedTable,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
   toast,
   type BadgeColor,
 } from '@harlew-dev/ui'
 import { EllipsisHorizontalIcon, StopCircleIcon, TrashIcon } from '@heroicons/react/16/solid'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import * as api from '../lib/api'
 import { formatAge, formatDate, formatMemory, formatNumber, relativeTime } from '../lib/format'
+import { sortDirection, toggleSort } from '../lib/list-query'
 
 const statuses: Record<string, { label: string; color: BadgeColor }> = {
   creating: { label: 'Starting', color: 'amber' },
@@ -56,7 +55,13 @@ type Pending = { sandbox: api.Sandbox; action: 'stop' | 'delete' }
 // `regionName` turns a sandbox's region slug into its name; the portal hides
 // the column because a workspace has one region.
 export function SandboxTable({
-  sandboxes,
+  page,
+  loading,
+  label,
+  empty,
+  sort,
+  sortHref,
+  href,
   regionName,
   fleet = false,
   canChange,
@@ -64,7 +69,13 @@ export function SandboxTable({
   onChanged,
   showRegion = true,
 }: {
-  sandboxes: api.Sandbox[]
+  page: api.SandboxList | undefined
+  loading: boolean
+  label: string
+  empty: ReactNode
+  sort: string
+  sortHref: (sort: string) => string
+  href: (page: number) => string
   regionName: (slug: string) => string
   fleet?: boolean
   canChange: boolean
@@ -75,69 +86,117 @@ export function SandboxTable({
   const [pending, setPending] = useState<Pending | null>(null)
   const stopping = pending?.action === 'stop'
 
+  function Sorted({
+    column,
+    first = 'ascending',
+    className,
+    children,
+  }: {
+    column: string
+    first?: 'ascending' | 'descending'
+    className?: string
+    children: ReactNode
+  }) {
+    return (
+      <TableHeader
+        href={sortHref(toggleSort(sort, column, first))}
+        sort={sortDirection(sort, column)}
+        className={className}
+      >
+        {children}
+      </TableHeader>
+    )
+  }
+
   return (
     <>
-      <Table>
-        <TableHead>
+      <PaginatedTable
+        page={page}
+        loading={loading}
+        label={label}
+        href={href}
+        empty={empty}
+        rowKey={(sandbox) => `${sandbox.region}/${sandbox.id}`}
+        head={
           <TableRow>
-            {fleet && <TableHeader>Workspace</TableHeader>}
+            {fleet && <Sorted column="workspace">Workspace</Sorted>}
             <TableHeader>Sandbox</TableHeader>
-            {showRegion && <TableHeader>Region</TableHeader>}
-            <TableHeader>Status</TableHeader>
+            {showRegion && <Sorted column="region">Region</Sorted>}
+            <Sorted column="status">Status</Sorted>
             <TableHeader>Size</TableHeader>
-            <TableHeader>{fleet ? 'Running for' : 'Started'}</TableHeader>
+            <Sorted column="created" first="descending">
+              {fleet ? 'Running for' : 'Started'}
+            </Sorted>
             {canChange && (
               <TableHeader className="w-0">
                 <span className="sr-only">Actions</span>
               </TableHeader>
             )}
           </TableRow>
-        </TableHead>
-        <TableBody>
-          {sandboxes.map((sandbox) => (
-            <TableRow key={`${sandbox.region}/${sandbox.id}`}>
-              {fleet && (
-                <TableCell className="font-medium">{sandbox.organization?.name ?? 'Unassigned'}</TableCell>
+        }
+        row={(sandbox) => (
+          <TableRow key={`${sandbox.region}/${sandbox.id}`}>
+            {fleet && (
+              <TableCell className="font-medium">
+                {sandbox.organization?.name ?? 'Unassigned'}
+              </TableCell>
+            )}
+            <TableCell className="max-w-56">
+              <CopyText value={sandbox.id} label={`Copy ${sandbox.id}`} />
+              {sandbox.image && (
+                <div className="truncate text-xs/5 text-zinc-500 dark:text-zinc-400">
+                  {sandbox.image}
+                </div>
               )}
-              <TableCell className="max-w-56">
-                <CopyText value={sandbox.id} label={`Copy ${sandbox.id}`} />
-                {sandbox.image && <div className="truncate text-xs/5 text-zinc-500 dark:text-zinc-400">{sandbox.image}</div>}
+            </TableCell>
+            {showRegion && (
+              <TableCell className="text-zinc-500 dark:text-zinc-400">
+                {regionName(sandbox.region)}
               </TableCell>
-              {showRegion && (
-                <TableCell className="text-zinc-500 dark:text-zinc-400">{regionName(sandbox.region)}</TableCell>
-              )}
-              <TableCell>
-                <SandboxStatus sandbox={sandbox} />
-              </TableCell>
-              <TableCell className="whitespace-nowrap tabular-nums">{sandboxSize(sandbox)}</TableCell>
-              <TableCell className="text-zinc-500 tabular-nums dark:text-zinc-400" title={formatDate(sandbox.created_at)}>
-                {fleet ? (sandbox.status === 'started' ? formatAge(sandbox.created_at) : '—') : relativeTime(sandbox.created_at)}
-              </TableCell>
-              {canChange && (
-                <TableCell className="w-0 text-right">
-                  <Dropdown>
-                    <DropdownButton as={Button} plain aria-label={`Actions for ${sandbox.id}`}>
-                      <EllipsisHorizontalIcon />
-                    </DropdownButton>
-                    <DropdownMenu anchor="bottom end">
-                      {sandbox.status === 'started' && (
-                        <DropdownItem onClick={() => setPending({ sandbox, action: 'stop' })}>
-                          <StopCircleIcon data-slot="icon" />
-                          Stop
-                        </DropdownItem>
-                      )}
-                      <DropdownItem variant="danger" onClick={() => setPending({ sandbox, action: 'delete' })}>
-                        <TrashIcon data-slot="icon" />
-                        Delete
+            )}
+            <TableCell>
+              <SandboxStatus sandbox={sandbox} />
+            </TableCell>
+            <TableCell className="whitespace-nowrap tabular-nums">
+              {sandboxSize(sandbox)}
+            </TableCell>
+            <TableCell
+              className="text-zinc-500 tabular-nums dark:text-zinc-400"
+              title={formatDate(sandbox.created_at)}
+            >
+              {fleet
+                ? sandbox.status === 'started'
+                  ? formatAge(sandbox.created_at)
+                  : '—'
+                : relativeTime(sandbox.created_at)}
+            </TableCell>
+            {canChange && (
+              <TableCell className="w-0 text-right">
+                <Dropdown>
+                  <DropdownButton as={Button} plain aria-label={`Actions for ${sandbox.id}`}>
+                    <EllipsisHorizontalIcon />
+                  </DropdownButton>
+                  <DropdownMenu anchor="bottom end">
+                    {sandbox.status === 'started' && (
+                      <DropdownItem onClick={() => setPending({ sandbox, action: 'stop' })}>
+                        <StopCircleIcon data-slot="icon" />
+                        Stop
                       </DropdownItem>
-                    </DropdownMenu>
-                  </Dropdown>
-                </TableCell>
-              )}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                    )}
+                    <DropdownItem
+                      variant="danger"
+                      onClick={() => setPending({ sandbox, action: 'delete' })}
+                    >
+                      <TrashIcon data-slot="icon" />
+                      Delete
+                    </DropdownItem>
+                  </DropdownMenu>
+                </Dropdown>
+              </TableCell>
+            )}
+          </TableRow>
+        )}
+      />
 
       <ConfirmationDialog
         open={pending !== null}

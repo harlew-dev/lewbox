@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -146,6 +147,17 @@ func requestOrganization(r *http.Request) string {
 		return org
 	}
 	return r.Header.Get(OrganizationHeader)
+}
+
+// listQuery reads the paging, search and sort parameters. The service parses
+// and validates them, so a bad value is the same 400 as the CLI's.
+func listQuery(values url.Values) service.ListQuery {
+	return service.ListQuery{
+		Page:    values.Get("page"),
+		PerPage: values.Get("per_page"),
+		Q:       values.Get("q"),
+		Sort:    values.Get("sort"),
+	}
 }
 
 // queryBool parses an optional boolean query parameter. Only the words true

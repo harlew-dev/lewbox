@@ -19,8 +19,9 @@ func newSandboxCmd(a *app) *cobra.Command {
 	}
 
 	var (
-		region, status string
-		all            bool
+		region, status, organization string
+		all                          bool
+		listQuery                    service.ListQuery
 	)
 	list := &cobra.Command{
 		Use:     "list",
@@ -32,12 +33,20 @@ func newSandboxCmd(a *app) *cobra.Command {
 			if all {
 				org = ""
 			}
-			return b.ListSandboxes(ctx, service.ListSandboxesRequest{Region: region, Status: status, Org: org})
+			return b.ListSandboxes(ctx, service.ListSandboxesRequest{
+				ListQuery:    listQuery,
+				Region:       region,
+				Status:       status,
+				Org:          org,
+				Organization: organization,
+			})
 		}),
 	}
-	list.Flags().StringVar(&region, "region", "", "only sandboxes in this region")
-	list.Flags().StringVar(&status, "status", "", "only sandboxes with this status")
+	list.Flags().StringVar(&region, "region", "", "only sandboxes in these regions, comma separated")
+	list.Flags().StringVar(&status, "status", "", "only creating, started, stopped, destroyed or error sandboxes, comma separated")
+	list.Flags().StringVar(&organization, "organization", "", "only these workspaces, comma separated (instance admins)")
 	list.Flags().BoolVar(&all, "all", false, "every organization (instance admins)")
+	addListFlags(list, &listQuery, "-created, status, region or workspace; prefix with - to reverse")
 
 	var stopRegion string
 	stop := &cobra.Command{

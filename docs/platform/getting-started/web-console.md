@@ -50,12 +50,12 @@ The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sand
 | Page | Shows | Actions |
 |---|---|---|
 | Overview (Home) | Workspaces (and how many are pending), running sandboxes, capacity in use, 30-day uptime per cluster, running sandboxes over 7 days, the top workspaces this month | Open a cluster or workspace |
-| Workspaces | Every workspace: its cluster and plan, status, running sandboxes, vCPU-hours over 30 days. Tabs for pending and suspended workspaces, and for **setup links** | **New workspace**: the owner's email (and a password if the account is new), a workspace name, a cluster and a plan, in one dialog. **Create setup link**: a single-use link for a plan in a cluster. Each row's `⋯` menu: view, approve, suspend or restore |
+| Workspaces | Every workspace: its cluster and plan, status, running sandboxes, vCPU-hours over 30 days. Tabs for **workspaces** and **setup links**; filter by status, region, plan or owner | **New workspace**: the owner's email (and a password if the account is new), a workspace name, a cluster and a plan, in one dialog. **Create setup link**: a single-use link for a plan in a cluster. Each row's `⋯` menu: view, approve, suspend or restore |
 | Workspace | One workspace: status, its cluster and plan (limits, use, quota push errors), usage, sandboxes, sandbox keys, members | Approve, suspend, restore; assign a cluster and plan, change the plan or limits, remove it (and remove anyway if keys couldn't be revoked) |
-| Sandboxes | Every workspace's sandboxes, longest-running first | Stop, delete |
-| Snapshots | One list of every workspace's snapshots and archived sandboxes, with each row's kind, workspace and node (an archive has none); totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Filter by kind, region and workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk | Delete |
+| Sandboxes | Every workspace's sandboxes, longest-running first. Search by ID, filter by status, region or workspace | Stop, delete |
+| Snapshots | One list of every workspace's snapshots and archived sandboxes, with each row's kind, workspace and node (an archive has none); totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Search by name and filter by kind, status, region or workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk | Delete |
 | Plans | Plans with their limits, how many workspaces use each, and the default | Create, edit, delete an unused plan |
-| Audit trail | Every change made through Lewbox, newest first, with the actor, the action, the target, the workspace and the client IP | Filter by actor, workspace, action and time; load more pages |
+| Audit trail | Every change made through Lewbox, newest first, with the actor, the action, the target, the workspace and the client IP | Filter by several actors, workspaces and actions, and by a time preset or custom range; load more pages |
 | Servers | **Clusters** (status, runtime, nodes, version, last check) and **Nodes** | **Add server**: **Start a new cluster** and **Add a node** are two steps, *Configure* (access mode, DNS and storage profiles, runtime, when a sandbox stops, node role) and *Install commands* (the exact commands for those choices, with Back to change them). The machine signs in with an access token, which **Create an access token** makes without leaving the dialog. The last step waits and says when the cluster or node has connected, and the lists refresh when the dialog closes. Or a single-use join command. Register an existing cluster, remove a node or cluster |
 | Cluster | Node metrics (sandboxes, vCPU allocated, memory, disk) over 24 hours, 7 or 30 days; 30-day uptime bars for the cluster and each node; the summary; a **Settings** card (domain, DNS profile, DNS records, storage profile, when a sandbox stops); the latest checks; the nodes, with an **Outdated** badge, its reasons and `lewbox node configure` on a node behind the cluster's profiles | Run the checks, edit the settings (after a profile change, run `lewbox node configure` on every node), add or remove a node |
 | Users | Every account | Create, disable, set a password, remove |
@@ -79,6 +79,17 @@ An account that belongs to no workspace goes to **onboarding** (`/onboarding`) t
 Every page also has **Account settings** (your email, password and [access tokens](../accounts/access-tokens.md)) and the documentation, in the account menu at the bottom of the sidebar.
 
 Customers only see their workspace's region, never clusters, nodes or other workspaces. The API enforces the same rules as the pages. Lewbox refuses to remove or disable the last enabled instance admin.
+
+## Searching, sorting and filtering lists
+
+Every list in the console and the portal pages through the API. The footer shows the rows on screen, such as **Showing 21–40 of 131**, and the page links move one page at a time.
+
+- **Search**: the field before the filters matches the columns the list documents, such as a workspace name, a sandbox ID, an email or a note.
+- **Sort**: click a column header to sort by it, and click it again to reverse. Dates and sizes start newest or largest first; text starts A–Z. The sorted column is marked for screen readers.
+- **Filter**: each badge opens a menu of values. Tick one or more and choose **Apply**. One value shows its name; several show **N selected**. **Clear filters** on the right removes them all. Filters with many options, such as workspaces and accounts, also have a search field and **Load more**.
+- The list's state is in the URL, such as `?q=acme&status=active,pending&sort=-created&page=2`, so a reload, a shared link or Back shows the same rows. Changing a search, filter or sort returns to page 1.
+
+The Workspaces page filters by status, region, plan or owner, and its **Setup links** tab has its own filters. An old link to pending or suspended workspaces opens Workspaces with that status applied. The audit trail keeps its newest-first order and loads more rows at the bottom; its actor, workspace and action filters accept several values, and its time badge offers presets or a custom range.
 
 ## Browser sessions
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 	"uuid"
@@ -36,7 +35,8 @@ type Node struct {
 
 // NodeList is returned by ListNodes. Data is never null.
 type NodeList struct {
-	Data []Node `json:"data"`
+	Data  []Node `json:"data"`
+	Pages Pages  `json:"pages"`
 }
 
 // AddNodeRequest is the input to AddNode.
@@ -45,10 +45,26 @@ type AddNodeRequest struct {
 	URL  string `json:"url"`
 }
 
-// ListNodesRequest filters ListNodes. An empty Cluster means every node.
+// ListNodesRequest pages and filters ListNodes. Cluster and Role are
+// comma-separated multi-value filters; Alive is true or false.
 type ListNodesRequest struct {
+	ListQuery
 	Cluster string `json:"cluster"`
+	Role    string `json:"role"`
+	Alive   string `json:"alive"`
 }
+
+// nodeRoles are AerolVM's member roles.
+var nodeRoles = []string{"server", "worker", "ingress", "mixed"}
+
+// nodeSorts maps a public sort key to SQL written here. Nodes in no cluster
+// sort last, as they always have.
+var nodeSorts = mergeSorts(
+	sortDirections("cluster",
+		"(c.slug IS NULL) ASC, lower(c.slug) ASC, lower(n.name) ASC, n.id ASC",
+		"(c.slug IS NULL) ASC, lower(c.slug) DESC, lower(n.name) DESC, n.id DESC"),
+	sortDirections("name", "lower(n.name) ASC, n.id ASC", "lower(n.name) DESC, n.id DESC"),
+)
 
 // RemoveNodeRequest is the input to RemoveNode. Force passes through to
 // AerolVM, which otherwise refuses to delete a node that still owns sandboxes.
@@ -110,24 +126,49 @@ func (s *Service) AddNode(ctx context.Context, req AddNodeRequest) (Node, error)
 	return toNode(row), nil
 }
 
-// ListNodes returns nodes ordered by cluster slug and then name. Nodes that
-// do not belong to a cluster come last.
+// ListNodes returns nodes ordered by cluster slug and then name by default.
+// Nodes that do not belong to a cluster come last.
 func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return NodeList{}, err
 	}
-	var rows []db.Node
-	var err error
-	if strings.TrimSpace(req.Cluster) != "" {
-		var cluster db.Cluster
-		cluster, err = s.findCluster(ctx, req.Cluster)
-		if err != nil {
-			return NodeList{}, err
-		}
-		rows, err = s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
-	} else {
-		rows, err = s.queries(ctx).ListNodes(ctx)
+	q, err := parseListQuery(req.ListQuery, nodeSorts, "cluster")
+	if err != nil {
+		return NodeList{}, err
 	}
+	clustersFilter, err := parseList("cluster", req.Cluster, nil)
+	if err != nil {
+		return NodeList{}, err
+	}
+	clusterIDs, err := s.clusterIDsForFilter(ctx, clustersFilter, "cluster")
+	if err != nil {
+		return NodeList{}, err
+	}
+	roles, err := parseList("role", req.Role, nodeRoles)
+	if err != nil {
+		return NodeList{}, err
+	}
+	var alive *bool
+	switch req.Alive {
+	case "":
+	case "true":
+		v := true
+		alive = &v
+	case "false":
+		v := false
+		alive = &v
+	default:
+		return NodeList{}, badRequestField("alive", "alive must be true or false")
+	}
+	rows, total, err := s.queries(ctx).ListNodesPage(ctx, db.NodeListParams{
+		ClusterIDs: clusterIDs,
+		Roles:      roles,
+		Alive:      alive,
+		Pattern:    q.pattern,
+		Order:      q.sort,
+		Limit:      q.perPage,
+		Offset:     (q.page - 1) * q.perPage,
+	})
 	if err != nil {
 		return NodeList{}, fmt.Errorf("list nodes: %w", err)
 	}
@@ -135,26 +176,24 @@ func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList
 	if err != nil {
 		return NodeList{}, err
 	}
-	out := NodeList{Data: make([]Node, 0, len(rows))}
-	for _, r := range rows {
-		n := toNodeWithSlug(r, clusters)
-		if cluster, ok := clusters[r.ClusterID.String]; ok && r.ClusterID.Valid {
-			if err := s.applyNodeOutdated(ctx, &n, r, cluster); err != nil {
-				return NodeList{}, err
+	out := NodeList{
+		Data:  make([]Node, 0, len(rows)),
+		Pages: newPages(q.page, q.perPage, total),
+	}
+	for _, row := range rows {
+		n := toNode(row.Node)
+		if row.ClusterSlug.Valid {
+			n.Cluster = row.ClusterSlug.String
+		}
+		if row.Node.ClusterID.Valid {
+			if cluster, ok := clusters[row.Node.ClusterID.String]; ok {
+				if err := s.applyNodeOutdated(ctx, &n, row.Node, cluster); err != nil {
+					return NodeList{}, err
+				}
 			}
 		}
 		out.Data = append(out.Data, n)
 	}
-	sort.SliceStable(out.Data, func(i, j int) bool {
-		a, b := out.Data[i], out.Data[j]
-		if (a.Cluster == "") != (b.Cluster == "") {
-			return a.Cluster != ""
-		}
-		if a.Cluster != b.Cluster {
-			return a.Cluster < b.Cluster
-		}
-		return a.Name < b.Name
-	})
 	return out, nil
 }
 
@@ -344,13 +383,5 @@ func toNode(r db.Node) Node {
 		n.LastSeenAt = &last
 	}
 	n.Settings = nodeSettingsState(r)
-	return n
-}
-
-func toNodeWithSlug(r db.Node, clusters map[string]db.Cluster) Node {
-	n := toNode(r)
-	if r.ClusterID.Valid {
-		n.Cluster = clusters[r.ClusterID.String].Slug
-	}
 	return n
 }

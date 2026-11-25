@@ -61,17 +61,22 @@ describe('FleetSnapshotsPage', () => {
               sandbox_name: 'builder',
               archived_at: '2026-11-12T10:05:00Z',
             }),
-            snapshot('ckpt-a', acme, 'node-a', 20),
-            snapshot('ckpt-b', globex, 'node-b', 5, 'active', { region: 'us-east' }),
           ],
           partial_nodes: [],
+          summary: {
+            count: 1,
+            disk_gb: 10,
+            memory_mb: 1024,
+            failed: 0,
+            workspaces: 1,
+            by_node: [],
+            by_workspace: [],
+          },
         }),
     })
-    renderApp('/admin/snapshots?kind=archive&region=eu-west&workspace=globex')
+    renderApp('/admin/snapshots?kind=archive&region=eu-west&organization=globex')
 
     expect(await screen.findByText('builder')).toBeInTheDocument()
-    expect(screen.queryByText('ckpt-a')).toBeNull()
-    expect(screen.queryByText('ckpt-b')).toBeNull()
     expect(screen.getByText('10 GB')).toBeInTheDocument()
   })
 
@@ -87,6 +92,21 @@ describe('FleetSnapshotsPage', () => {
             snapshot('ckpt-c', globex, 'node-a', 5),
           ],
           partial_nodes: [],
+          summary: {
+            count: 3,
+            disk_gb: 35,
+            memory_mb: 3072,
+            failed: 1,
+            workspaces: 2,
+            by_node: [
+              { region: 'eu-west', node: 'node-a', kind: 'snapshot', count: 2, disk_gb: 15 },
+              { region: 'eu-west', node: 'node-b', kind: 'snapshot', count: 1, disk_gb: 20 },
+            ],
+            by_workspace: [
+              { slug: 'acme', name: 'Acme', count: 2, disk_gb: 30 },
+              { slug: 'globex', name: 'Globex', count: 1, disk_gb: 5 },
+            ],
+          },
         }),
       'DELETE /v0/snapshots/ckpt-c': () => json(200, snapshot('ckpt-c', globex, 'node-a', 5)),
     })
@@ -140,7 +160,22 @@ describe('FleetSnapshotsPage', () => {
     const calls = stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),
       'GET /v0/regions': () => json(200, { data: [euWest] }),
-      'GET /v0/snapshots': () => json(200, { data: [archive], partial_nodes: [] }),
+      'GET /v0/snapshots': () =>
+        json(200, {
+          data: [archive],
+          partial_nodes: [],
+          summary: {
+            count: 1,
+            disk_gb: 10,
+            memory_mb: 1024,
+            failed: 0,
+            workspaces: 1,
+            by_node: [
+              { region: 'eu-west', node: null, kind: 'archive', count: 1, disk_gb: 10 },
+            ],
+            by_workspace: [{ slug: 'globex', name: 'Globex', count: 1, disk_gb: 10 }],
+          },
+        }),
       [`DELETE /v0/archives/${archive.id}`]: () => json(200, archive),
     })
     renderApp('/admin/snapshots')
