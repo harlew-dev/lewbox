@@ -96,6 +96,9 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
 | `--archive-interval D` | `LEWBOX_ARCHIVE_INTERVAL` | `5s` | How often to archive stopped sandboxes on archive clusters and advance their pushes. `0` turns it off |
 | `--audit-retention D` | `LEWBOX_AUDIT_RETENTION` | `90d` | How long the audit trail is kept: `90d`, `12h`, or `forever`/`0` for every event |
+| `--limit-workspaces-per-hour N` | `LEWBOX_LIMIT_WORKSPACES_PER_HOUR` | `5` | How many workspaces one account may create per hour. Instance admins and local mode are exempt. `0` turns it off |
+| `--limit-sandbox-keys-per-hour N` | `LEWBOX_LIMIT_SANDBOX_KEYS_PER_HOUR` | `100` | How many sandbox keys one workspace may create per hour. `0` turns it off |
+| `--limit-admin-keys-per-hour N` | `LEWBOX_LIMIT_ADMIN_KEYS_PER_HOUR` | `100` | How many management (admin) keys one workspace may create per hour. `0` turns it off |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
 | `--trusted-proxy CIDR` | `LEWBOX_TRUSTED_PROXIES` | | Trust `X-Forwarded-For` from this proxy network for the client IP, repeatable (env: comma-separated). Behind Caddy on the same host: `127.0.0.1/32` |

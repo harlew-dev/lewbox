@@ -112,7 +112,9 @@ func TestCreateWorkspaceModes(t *testing.T) {
 }
 
 func TestCreateWorkspaceOwnershipLimit(t *testing.T) {
-	s := newTestService(t)
+	// The ownership cap is what this test covers, so the creation rate limit is
+	// off; TestWorkspaceCreateLimit covers that.
+	s := newTestServiceWith(t, WithCreateLimits(0, 0, 0))
 	createUser(t, s, "root@example.com", true)
 	createUser(t, s, "ada@example.com", false)
 	ada := userCtx(t, s, "ada@example.com")

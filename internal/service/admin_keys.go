@@ -188,6 +188,11 @@ func (s *Service) CreateAdminKey(ctx context.Context, org string, req CreateAdmi
 	if err := s.requireFreshProof(ctx, c.p, req.CurrentPassword); err != nil {
 		return NewAdminKey{}, err
 	}
+	// Charged only once the caller's identity is confirmed, so a wrong password
+	// does not spend the workspace's budget.
+	if err := s.allowAdminKeyCreate(ctx, c.org.ID); err != nil {
+		return NewAdminKey{}, err
+	}
 	token, digest, err := newAdminKeyToken()
 	if err != nil {
 		return NewAdminKey{}, err

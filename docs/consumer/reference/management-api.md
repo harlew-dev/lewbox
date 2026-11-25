@@ -38,6 +38,14 @@ Every signed-in request draws on a per-caller budget of 1,800 requests per minut
 
 Signing out and changing your password are exempt, so a stolen session cannot lock you out of recovering your account. Windows are aligned to the minute, and client IPs are counted by IPv6 /64.
 
+Creating workspaces and keys has its own hourly budget, checked before anything is created or sent to a region: 5 workspaces per account per hour, 100 sandbox keys per workspace per hour and 100 management keys per workspace per hour. Over one of them the response is `429` with a `Retry-After` header and a message naming what was limited:
+
+```json
+{"error":{"code":"rate_limited","message":"too many sandbox keys created; try again in 3233 seconds","details":{"retry_after_seconds":3233}}}
+```
+
+Windows are aligned to the hour, so `Retry-After` is the time left in the current hour. Instance admins are exempt from the workspace limit but not the key limits. Your provider can turn a limit off or change it on the orchestrator.
+
 Routes that act on a workspace take it from the `Lewbox-Organization` header (its slug or ID). A management key acts for its own workspace, so it can leave the header out; naming a different workspace gets `404`.
 
 ## Workspace and members

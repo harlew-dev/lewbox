@@ -38,7 +38,7 @@ On a terminal, the CLI prints `Error: <message>` instead, followed by any failed
 | `method_not_allowed` | 405 | A known path with a method it doesn't take |
 | `conflict` | 409 | The input is valid but the current state forbids it (last node, last admin, a region still being set up) |
 | `invalid_request` | 422 | A parsed value breaks a rule (`details.field` names the field), or a quota is reached (no field) |
-| `rate_limited` | 429 | Too many requests or sign-in attempts. `details.retry_after_seconds` (and the `Retry-After` header) says how long to wait |
+| `rate_limited` | 429 | Too many requests, sign-in attempts or creations. `details.retry_after_seconds` (and the `Retry-After` header) says how long to wait |
 | `unavailable` | 503 | A dependency is down (AerolVM, the database, S3, Cloudflare). `Retry-After` says how long to wait |
 | `internal` | 500 | A bug. The body carries a `request_id`; the orchestrator's log has the cause under it |
 | `precondition_failed` | — | CLI-only: a check on this machine failed. `details` lists the checks; it is never an HTTP response |

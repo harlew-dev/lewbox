@@ -73,6 +73,14 @@ Every authenticated request draws on a per-caller budget of 1,800 requests per m
 
 Windows are aligned to their length (the top of the minute for the per-minute budgets, the top of the hour for sign-up), so `Retry-After` says how long is left in the current window, not how long since the first attempt. A per-client budget counts an IPv6 address by its /64, so rotating addresses inside one network does not reset it.
 
+Creating something has its own aligned hourly budget, checked before anything is written or sent to a region: 5 workspaces per account, 100 sandbox keys per workspace, and 100 management (admin) keys per workspace. Instance admins and local mode are exempt from the workspace budget, not from the key budgets. Over one of them the response is `429` with the same body and a message naming what was limited:
+
+```json
+{"error":{"code":"rate_limited","message":"too many sandbox keys created; try again in 3233 seconds","details":{"retry_after_seconds":3233}}}
+```
+
+An attempt that reaches the limit check counts, even if the write then fails (a bad request and a wrong `current_password` never get that far); a refusal creates nothing. The limits are `--limit-workspaces-per-hour`, `--limit-sandbox-keys-per-hour` and `--limit-admin-keys-per-hour` (or the matching `LEWBOX_LIMIT_*` variables); `0` turns one off.
+
 ## Routes
 
 A path parameter takes an ID or a name, and is named after what it holds: `{cluster}` is a cluster slug or ID, `{node}` a node name or ID, `{user}` an account's email or ID, `{dns_profile}` and `{storage_profile}` a profile name or ID, `{member}` a membership ID, an account ID or an email, and `{region}` a cluster slug or ID.

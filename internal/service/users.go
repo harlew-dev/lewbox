@@ -424,13 +424,13 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 	// only failures (a success clears it).
 	if retry, ok, first := s.limiter.allowIP(now, clientIPFrom(ctx)); !ok {
 		if first {
-			s.auditRateLimit(ctx, "auth:per-ip")
+			s.auditRateLimit(ctx, budgetAuthPerIP)
 		}
 		return "", time.Time{}, db.User{}, loginRateLimited(retry)
 	}
 	if retry, ok, first := s.limiter.allowEmail(now, email); !ok {
 		if first {
-			s.auditRateLimit(ctx, "auth:per-email")
+			s.auditRateLimit(ctx, budgetAuthPerEmail)
 		}
 		return "", time.Time{}, db.User{}, loginRateLimited(retry)
 	}
@@ -516,7 +516,7 @@ func (s *Service) requireFreshProof(ctx context.Context, p Principal, password s
 	}
 	if retry, ok, first := s.limiter.allowEmail(s.now(), row.Email); !ok {
 		if first {
-			s.auditRateLimit(ctx, "auth:fresh-proof:per-email")
+			s.auditRateLimit(ctx, budgetFreshProofPerEmail)
 		}
 		return loginRateLimited(retry)
 	}

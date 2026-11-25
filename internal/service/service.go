@@ -55,6 +55,12 @@ type Service struct {
 	signupLimiter *loginLimiter
 	budget        *limiter
 
+	// Creation limits: workspaces per account, and sandbox and admin keys
+	// per workspace, each measured over an aligned hour.
+	workspaceCreates  *limiter
+	sandboxKeyCreates *limiter
+	adminKeyCreates   *limiter
+
 	log          *slog.Logger
 	syncInterval time.Duration
 	syncMu       sync.Mutex
@@ -115,6 +121,23 @@ func WithRequestBudget(perMinute int) Option {
 	}
 }
 
+// WithCreateLimits changes the per-hour creation budgets: workspaces per
+// account (instance admins are exempt), sandbox keys per workspace and admin
+// keys per workspace. Zero disables that budget.
+func WithCreateLimits(workspacesPerUser, sandboxKeysPerWorkspace, adminKeysPerWorkspace int) Option {
+	return func(s *Service) {
+		s.SetCreateLimits(workspacesPerUser, sandboxKeysPerWorkspace, adminKeysPerWorkspace)
+	}
+}
+
+// SetCreateLimits changes the per-hour creation budgets. Zero disables one.
+// Call it before serving.
+func (s *Service) SetCreateLimits(workspacesPerUser, sandboxKeysPerWorkspace, adminKeysPerWorkspace int) {
+	s.workspaceCreates.setLimit(workspacesPerUser)
+	s.sandboxKeyCreates.setLimit(sandboxKeysPerWorkspace)
+	s.adminKeyCreates.setLimit(adminKeysPerWorkspace)
+}
+
 // SetSyncInterval changes the interval the background sync uses for its
 // metered-gap cap. Call it before starting the loop.
 func (s *Service) SetSyncInterval(d time.Duration) {
@@ -152,6 +175,10 @@ func New(conn *sql.DB, opts ...Option) *Service {
 		budget:         newWindowLimiter(requestBudgetPerMinute, requestBudgetWindow, requestBudgetMaxKeys),
 		log:            slog.New(slog.DiscardHandler),
 		syncInterval:   15 * time.Second,
+
+		workspaceCreates:  newWindowLimiter(defaultWorkspacesPerUserPerHour, creationLimitWindow, creationLimiterMaxKeys),
+		sandboxKeyCreates: newWindowLimiter(defaultSandboxKeysPerWorkspacePerHour, creationLimitWindow, creationLimiterMaxKeys),
+		adminKeyCreates:   newWindowLimiter(defaultAdminKeysPerWorkspacePerHour, creationLimitWindow, creationLimiterMaxKeys),
 
 		snapshotTokens: make(map[snapshotKey]snapshotToken),
 		archiveTokens:  make(map[snapshotKey]snapshotToken),

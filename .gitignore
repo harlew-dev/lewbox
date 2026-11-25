@@ -7,3 +7,6 @@ release/
 
 # Local planning notes, moved out of the tracked tree
 .agents/plans/
+
+# A binary from `go build ./cmd/lewbox` at the repo root
+/lewbox

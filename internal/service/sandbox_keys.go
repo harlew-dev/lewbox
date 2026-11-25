@@ -100,6 +100,10 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return NewSandboxKey{}, fmt.Errorf("get sandbox key: %w", err)
 	}
+	// Charged before the mint, so a refusal stores nothing upstream.
+	if err := s.allowSandboxKeyCreate(ctx, c.org.ID); err != nil {
+		return NewSandboxKey{}, err
+	}
 
 	client, err := s.clusterClient(cluster)
 	if err != nil {

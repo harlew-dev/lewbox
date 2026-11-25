@@ -24,6 +24,9 @@ Flags win over environment variables, which win over saved settings, which win o
 | `LEWBOX_LISTEN` | `--listen` | `:8080` |
 | `LEWBOX_CHECK_INTERVAL` | `--check-interval` | `1m` (`0` turns checks off) |
 | `LEWBOX_AUDIT_RETENTION` | `--audit-retention` | `90d`: how long the audit trail is kept. Takes `90d`, `12h`, or `forever`/`0` to keep every event |
+| `LEWBOX_LIMIT_WORKSPACES_PER_HOUR` | `--limit-workspaces-per-hour` | `5`: workspaces one account may create per hour; instance admins are exempt. `0` turns the limit off |
+| `LEWBOX_LIMIT_SANDBOX_KEYS_PER_HOUR` | `--limit-sandbox-keys-per-hour` | `100`: sandbox keys one workspace may create per hour. `0` turns the limit off |
+| `LEWBOX_LIMIT_ADMIN_KEYS_PER_HOUR` | `--limit-admin-keys-per-hour` | `100`: management (admin) keys one workspace may create per hour. `0` turns the limit off |
 | `LEWBOX_COOKIE_SECURE` | `--cookie-secure` | `auto`. `always` forces `Secure` browser session cookies; use it behind a TLS proxy that does not set `X-Forwarded-Proto` |
 | `LEWBOX_TRUSTED_ORIGINS` | `--trusted-origin` | Extra origins the CSRF check accepts, comma-separated, such as `https://lewbox.example.com` |
 | `LEWBOX_TRUSTED_PROXIES` | `--trusted-proxy` | CIDRs of proxies whose `X-Forwarded-For` sets the client IP, comma-separated. Empty trusts no proxy |

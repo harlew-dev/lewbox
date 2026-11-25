@@ -40,6 +40,8 @@ Sign-in is rate limited in memory: 20 attempts per client IP per minute, and 5 f
 
 Every authenticated request also draws on a per-caller budget of 1,800 requests per minute. An account's sessions and access tokens share one budget, so swapping credentials does not reset it; each organization API key has its own. Signing out and changing a password are exempt, because a stolen session must not be able to spend the owner's budget and stop them recovering the account. Every window is aligned to a boundary of its length, and a per-client budget counts an IPv6 address by its /64, so neither the current time nor rotating addresses inside one network reveals or resets a budget.
 
+Each creation path also has an aligned hourly budget, checked before anything is written or sent to a region: 5 workspaces per account, 100 sandbox keys per workspace and 100 management keys per workspace. Instance admins and local mode are exempt from the workspace budget only. Change them with `--limit-workspaces-per-hour`, `--limit-sandbox-keys-per-hour` and `--limit-admin-keys-per-hour` (or `LEWBOX_LIMIT_WORKSPACES_PER_HOUR`, `LEWBOX_LIMIT_SANDBOX_KEYS_PER_HOUR`, `LEWBOX_LIMIT_ADMIN_KEYS_PER_HOUR`); `0` turns one off. Exhausting one returns `429` with `Retry-After` and a message such as "too many sandbox keys created".
+
 > [!NOTE]
 > The client IP is taken from the connection, never from `X-Forwarded-For`. Behind a reverse proxy every request appears to come from the proxy, so they all share one per-IP budget. If the proxy also rewrites `Host`, add the public origin with `--trusted-origin` (or `LEWBOX_TRUSTED_ORIGINS`) so the CSRF check accepts it. If it terminates TLS without setting `X-Forwarded-Proto: https`, use `--cookie-secure=always`.
 

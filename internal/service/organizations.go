@@ -573,6 +573,12 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 		}
 	}
 
+	// Creating a workspace is limited per account; the check is before the
+	// transaction, so a refusal writes nothing.
+	if err := s.allowWorkspaceCreate(ctx, p); err != nil {
+		return Organization{}, err
+	}
+
 	// Consume the link and write the workspace, its owner and subscription in
 	// one transaction; the statement lets only one caller consume the link.
 	var (

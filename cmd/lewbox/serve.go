@@ -38,6 +38,10 @@ type serveOptions struct {
 	trustedOrigins  []string
 	trustedProxies  []string
 	auditRetention  string
+
+	limitWorkspacesPerHour  int
+	limitSandboxKeysPerHour int
+	limitAdminKeysPerHour   int
 }
 
 func addServeFlags(cmd *cobra.Command, o *serveOptions) {
@@ -59,6 +63,12 @@ func addServeFlags(cmd *cobra.Command, o *serveOptions) {
 		"CIDR of a proxy whose X-Forwarded-For sets the client IP (repeatable; env LEWBOX_TRUSTED_PROXIES, comma-separated)")
 	cmd.Flags().StringVar(&o.auditRetention, "audit-retention", envOr("LEWBOX_AUDIT_RETENTION", "90d"),
 		"how long to keep the audit trail: 90d, 12h or forever (env LEWBOX_AUDIT_RETENTION)")
+	cmd.Flags().IntVar(&o.limitWorkspacesPerHour, "limit-workspaces-per-hour", envInt("LEWBOX_LIMIT_WORKSPACES_PER_HOUR", 5),
+		"how many workspaces one account may create per hour; instance admins are exempt; 0 disables (env LEWBOX_LIMIT_WORKSPACES_PER_HOUR)")
+	cmd.Flags().IntVar(&o.limitSandboxKeysPerHour, "limit-sandbox-keys-per-hour", envInt("LEWBOX_LIMIT_SANDBOX_KEYS_PER_HOUR", 100),
+		"how many sandbox keys one workspace may create per hour; 0 disables (env LEWBOX_LIMIT_SANDBOX_KEYS_PER_HOUR)")
+	cmd.Flags().IntVar(&o.limitAdminKeysPerHour, "limit-admin-keys-per-hour", envInt("LEWBOX_LIMIT_ADMIN_KEYS_PER_HOUR", 100),
+		"how many admin keys one workspace may create per hour; 0 disables (env LEWBOX_LIMIT_ADMIN_KEYS_PER_HOUR)")
 }
 
 // trustedProxyPrefixes parses --trusted-proxy values.
@@ -209,6 +219,16 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	}
 	log.Info("database ready", "path", a.dbPath)
 	svc.SetSyncInterval(o.syncInterval)
+	for name, n := range map[string]int{
+		"--limit-workspaces-per-hour":   o.limitWorkspacesPerHour,
+		"--limit-sandbox-keys-per-hour": o.limitSandboxKeysPerHour,
+		"--limit-admin-keys-per-hour":   o.limitAdminKeysPerHour,
+	} {
+		if n < 0 {
+			return usagef("%s must be 0 (no limit) or more, not %d", name, n)
+		}
+	}
+	svc.SetCreateLimits(o.limitWorkspacesPerHour, o.limitSandboxKeysPerHour, o.limitAdminKeysPerHour)
 	startClusterChecks(ctx, svc, o.interval, log)
 	startSync(ctx, svc, o.syncInterval, log)
 	startArchives(ctx, svc, o.archiveInterval, log)

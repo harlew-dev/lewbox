@@ -35,6 +35,44 @@ const (
 	requestBudgetMaxKeys   = 10000
 )
 
+const (
+	// Default per-hour creation budgets. A workspace, sandbox key or admin key
+	// is a row with a lasting cost, so each creation path has its own limit;
+	// the per-request budget alone would allow 1,800 in a minute. `lewbox
+	// serve` overrides them with --limit-*-per-hour; zero disables one.
+	defaultWorkspacesPerUserPerHour       = 5
+	defaultSandboxKeysPerWorkspacePerHour = 100
+	defaultAdminKeysPerWorkspacePerHour   = 100
+	creationLimitWindow                   = time.Hour
+	creationLimiterMaxKeys                = 10000
+)
+
+// Budget names used in audit events (rate_limit.refused) and in the docs.
+// Every budget follows <feature>[:<flow>]:<counted-by>.
+const (
+	budgetAPI                = "api:per-user"
+	budgetAuthPerIP          = "auth:per-ip"
+	budgetAuthPerEmail       = "auth:per-email"
+	budgetSignupPerIP        = "auth:signup:per-ip"
+	budgetFreshProofPerEmail = "auth:fresh-proof:per-email"
+	budgetWorkspaceCreate    = "workspace:per-user"
+	budgetSandboxKeyCreate   = "sandbox-key:per-workspace"
+	budgetAdminKeyCreate     = "admin-key:per-workspace"
+)
+
+// rateLimitBudgets lists every budget the service applies. The tests check
+// each name matches the shared vocabulary.
+var rateLimitBudgets = []string{
+	budgetAPI,
+	budgetAuthPerIP,
+	budgetAuthPerEmail,
+	budgetSignupPerIP,
+	budgetFreshProofPerEmail,
+	budgetWorkspaceCreate,
+	budgetSandboxKeyCreate,
+	budgetAdminKeyCreate,
+}
+
 // windowState is one key's count in the fixed window that ends at reset.
 type windowState struct {
 	count int
@@ -303,11 +341,56 @@ func (s *Service) AllowRequest(ctx context.Context) error {
 	retry, allowed, first := s.budget.allow(s.now(), key)
 	if !allowed {
 		if first {
-			s.auditRateLimit(ctx, "api:per-user")
+			s.auditRateLimit(ctx, budgetAPI)
 		}
 		return requestRateLimited(retry)
 	}
 	return nil
+}
+
+// allowFeature counts one creation against a feature's budget. A refusal is
+// recorded once per key per window and returned as the shared rate_limited
+// error before the caller writes anything or calls AerolVM.
+func (s *Service) allowFeature(ctx context.Context, l *limiter, budget, key, message string) error {
+	retry, allowed, first := l.allow(s.now(), key)
+	if allowed {
+		return nil
+	}
+	if first {
+		s.auditRateLimit(ctx, budget)
+	}
+	return rateLimitedAfter(retry, message)
+}
+
+// allowWorkspaceCreate charges one workspace creation to the account
+// (workspace:per-user). Instance admins and local mode own the instance, so
+// they are exempt.
+func (s *Service) allowWorkspaceCreate(ctx context.Context, p Principal) error {
+	if p.InstanceAdmin || p.Kind != "user" || p.UserID == "" {
+		return nil
+	}
+	return s.allowFeature(ctx, s.workspaceCreates, budgetWorkspaceCreate, "user:"+p.UserID,
+		"too many workspaces created; try again in %d seconds")
+}
+
+// allowSandboxKeyCreate charges one key mint to the workspace
+// (sandbox-key:per-workspace). Any caller counts, instance admins included.
+func (s *Service) allowSandboxKeyCreate(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return nil
+	}
+	return s.allowFeature(ctx, s.sandboxKeyCreates, budgetSandboxKeyCreate, "workspace:"+orgID,
+		"too many sandbox keys created; try again in %d seconds")
+}
+
+// allowAdminKeyCreate charges one key to the workspace
+// (admin-key:per-workspace). Any caller counts, instance admins included.
+func (s *Service) allowAdminKeyCreate(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return nil
+	}
+	return s.allowFeature(ctx, s.adminKeyCreates, budgetAdminKeyCreate, "workspace:"+orgID,
+		"too many admin keys created; try again in %d seconds")
 }
 
 // auditRateLimit records the first refusal for a budget in a window. Only the
