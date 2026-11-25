@@ -93,33 +93,77 @@ func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (User, 
 	if _, err := requireAdmin(ctx); err != nil {
 		return User{}, err
 	}
-	return s.createUser(ctx, req)
+	nu, err := prepareUser(req)
+	if err != nil {
+		return User{}, err
+	}
+	var out User
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		user, err := s.insertUser(ctx, nu)
+		if err != nil {
+			return err
+		}
+		if err := s.record(ctx, Event{
+			Name:       "user.created",
+			TargetType: "user",
+			TargetID:   user.ID,
+			TargetName: user.Email,
+		}); err != nil {
+			return err
+		}
+		out = user
+		return nil
+	})
+	return out, err
 }
 
 // createUser does the work of CreateUser without a permission check, so
 // BootstrapAdmin can call it before any account exists.
 func (s *Service) createUser(ctx context.Context, req CreateUserRequest) (User, error) {
-	email, err := normalizeEmail(req.Email)
+	nu, err := prepareUser(req)
 	if err != nil {
 		return User{}, err
 	}
+	return s.insertUser(ctx, nu)
+}
+
+// newUser is a validated account with its password already hashed.
+type newUser struct {
+	email         string
+	hash          string
+	instanceAdmin bool
+}
+
+// prepareUser validates an account and hashes its password. The hash is slow
+// on purpose, so callers run it before opening a transaction: SQLite holds
+// its one write lock for a transaction's whole life.
+func prepareUser(req CreateUserRequest) (newUser, error) {
+	email, err := normalizeEmail(req.Email)
+	if err != nil {
+		return newUser{}, err
+	}
 	if err := validatePassword(req.Password); err != nil {
-		return User{}, err
+		return newUser{}, err
 	}
 	hash, err := hashPassword(req.Password)
 	if err != nil {
-		return User{}, err
+		return newUser{}, err
 	}
-	row, err := s.q.CreateUser(ctx, db.CreateUserParams{
+	return newUser{email: email, hash: hash, instanceAdmin: req.InstanceAdmin}, nil
+}
+
+// insertUser stores a prepared account.
+func (s *Service) insertUser(ctx context.Context, nu newUser) (User, error) {
+	row, err := s.queries(ctx).CreateUser(ctx, db.CreateUserParams{
 		ID:            uuid.NewV7().String(),
-		Email:         email,
-		PasswordHash:  hash,
-		InstanceAdmin: boolInt(req.InstanceAdmin),
+		Email:         nu.email,
+		PasswordHash:  nu.hash,
+		InstanceAdmin: boolInt(nu.instanceAdmin),
 		Disabled:      0,
 		CreatedAt:     s.now(),
 	})
 	if db.IsUniqueViolation(err) {
-		return User{}, conflict("a user with email %q already exists", email)
+		return User{}, conflict("a user with email %q already exists", nu.email)
 	}
 	if err != nil {
 		return User{}, fmt.Errorf("create user: %w", err)
@@ -132,7 +176,7 @@ func (s *Service) ListUsers(ctx context.Context) (UserList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return UserList{}, err
 	}
-	rows, err := s.q.ListUsers(ctx)
+	rows, err := s.queries(ctx).ListUsers(ctx)
 	if err != nil {
 		return UserList{}, fmt.Errorf("list users: %w", err)
 	}
@@ -173,7 +217,7 @@ func (s *Service) RemoveUser(ctx context.Context, ref string) (User, error) {
 		return User{}, err
 	}
 	if row.InstanceAdmin != 0 && row.Disabled == 0 {
-		n, err := s.q.CountEnabledInstanceAdmins(ctx)
+		n, err := s.queries(ctx).CountEnabledInstanceAdmins(ctx)
 		if err != nil {
 			return User{}, fmt.Errorf("count admins: %w", err)
 		}
@@ -186,15 +230,27 @@ func (s *Service) RemoveUser(ctx context.Context, ref string) (User, error) {
 	}
 	// The statement re-checks the last-admin rule itself, so a concurrent
 	// remove or disable can't slip past the count above.
-	n, err := s.q.DeleteUser(ctx, row.ID)
-	if err != nil {
-		return User{}, fmt.Errorf("delete user: %w", err)
-	}
-	if n == 0 {
-		if _, err := s.q.GetUserByID(ctx, row.ID); err == nil {
-			return User{}, conflict("cannot remove the last enabled instance admin")
+	var n int64
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err = s.queries(ctx).DeleteUser(ctx, row.ID)
+		if err != nil {
+			return fmt.Errorf("delete user: %w", err)
 		}
-		return User{}, notFound("user %q not found", ref) // removed in between
+		if n == 0 {
+			if _, err := s.queries(ctx).GetUserByID(ctx, row.ID); err == nil {
+				return conflict("cannot remove the last enabled instance admin")
+			}
+			return notFound("user %q not found", ref) // removed in between
+		}
+		return s.record(ctx, Event{
+			Name:       "user.deleted",
+			TargetType: "user",
+			TargetID:   row.ID,
+			TargetName: row.Email,
+		})
+	})
+	if err != nil {
+		return User{}, err
 	}
 	return toUser(row), nil
 }
@@ -211,7 +267,7 @@ func (s *Service) SetUserDisabled(ctx context.Context, ref string, disabled bool
 		return User{}, err
 	}
 	if disabled && row.InstanceAdmin != 0 && row.Disabled == 0 {
-		n, err := s.q.CountEnabledInstanceAdmins(ctx)
+		n, err := s.queries(ctx).CountEnabledInstanceAdmins(ctx)
 		if err != nil {
 			return User{}, fmt.Errorf("count admins: %w", err)
 		}
@@ -224,31 +280,50 @@ func (s *Service) SetUserDisabled(ctx context.Context, ref string, disabled bool
 			return User{}, err
 		}
 	}
-	updated, err := s.q.SetUserDisabled(ctx, db.SetUserDisabledParams{
-		Disabled: boolInt(disabled),
-		ID:       row.ID,
+	var updated db.User
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).SetUserDisabled(ctx, db.SetUserDisabledParams{
+			Disabled: boolInt(disabled),
+			ID:       row.ID,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			// No row matched: either it was removed in between, or the
+			// statement's own last-admin guard held (a concurrent disable got
+			// there first).
+			if _, gerr := s.queries(ctx).GetUserByID(ctx, row.ID); gerr == nil {
+				return conflict("cannot disable the last enabled instance admin")
+			}
+			return notFound("user %q not found", ref)
+		}
+		if err != nil {
+			return fmt.Errorf("set user disabled: %w", err)
+		}
+		if disabled {
+			if err := s.queries(ctx).DeleteSessionsByUser(ctx, row.ID); err != nil {
+				return fmt.Errorf("delete sessions: %w", err)
+			}
+			if err := s.queries(ctx).RevokeAccessTokensByUser(ctx, db.RevokeAccessTokensByUserParams{
+				RevokedAt: sql.NullTime{Time: s.now(), Valid: true},
+				UserID:    row.ID,
+			}); err != nil {
+				return fmt.Errorf("revoke access tokens: %w", err)
+			}
+		}
+		name := "user.restored"
+		if disabled {
+			name = "user.suspended"
+		}
+		return s.record(ctx, Event{
+			Name:       name,
+			TargetType: "user",
+			TargetID:   row.ID,
+			TargetName: row.Email,
+			Changes:    map[string]Change{"disabled": {From: !disabled, To: disabled}},
+		})
 	})
-	if errors.Is(err, sql.ErrNoRows) {
-		// No row matched: either it was removed in between, or the statement's
-		// own last-admin guard held (a concurrent disable got there first).
-		if _, gerr := s.q.GetUserByID(ctx, row.ID); gerr == nil {
-			return User{}, conflict("cannot disable the last enabled instance admin")
-		}
-		return User{}, notFound("user %q not found", ref)
-	}
 	if err != nil {
-		return User{}, fmt.Errorf("set user disabled: %w", err)
-	}
-	if disabled {
-		if err := s.q.DeleteSessionsByUser(ctx, row.ID); err != nil {
-			return User{}, fmt.Errorf("delete sessions: %w", err)
-		}
-		if err := s.q.RevokeAccessTokensByUser(ctx, db.RevokeAccessTokensByUserParams{
-			RevokedAt: sql.NullTime{Time: s.now(), Valid: true},
-			UserID:    row.ID,
-		}); err != nil {
-			return User{}, fmt.Errorf("revoke access tokens: %w", err)
-		}
+		return User{}, err
 	}
 	return toUser(updated), nil
 }
@@ -283,19 +358,30 @@ func (s *Service) SetPassword(ctx context.Context, ref string, req SetPasswordRe
 	if err != nil {
 		return User{}, err
 	}
-	if err := s.q.SetUserPassword(ctx, db.SetUserPasswordParams{PasswordHash: hash, ID: row.ID}); err != nil {
-		return User{}, fmt.Errorf("set password: %w", err)
-	}
-	if p.Kind == "user" && p.UserID == row.ID && p.SessionID != "" {
-		err = s.q.DeleteOtherSessionsByUser(ctx, db.DeleteOtherSessionsByUserParams{
-			UserID: row.ID,
-			ID:     p.SessionID,
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		if err := s.queries(ctx).SetUserPassword(ctx, db.SetUserPasswordParams{PasswordHash: hash, ID: row.ID}); err != nil {
+			return fmt.Errorf("set password: %w", err)
+		}
+		if p.Kind == "user" && p.UserID == row.ID && p.SessionID != "" {
+			err = s.queries(ctx).DeleteOtherSessionsByUser(ctx, db.DeleteOtherSessionsByUserParams{
+				UserID: row.ID,
+				ID:     p.SessionID,
+			})
+		} else {
+			err = s.queries(ctx).DeleteSessionsByUser(ctx, row.ID)
+		}
+		if err != nil {
+			return fmt.Errorf("delete sessions: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "user.password_changed",
+			TargetType: "user",
+			TargetID:   row.ID,
+			TargetName: row.Email,
 		})
-	} else {
-		err = s.q.DeleteSessionsByUser(ctx, row.ID)
-	}
+	})
 	if err != nil {
-		return User{}, fmt.Errorf("delete sessions: %w", err)
+		return User{}, err
 	}
 	return toUser(row), nil
 }
@@ -337,11 +423,16 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 		return "", time.Time{}, db.User{}, loginRateLimited(retry)
 	}
 
-	row, err := s.q.GetUserByEmail(ctx, email)
+	row, err := s.queries(ctx).GetUserByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Burn the same work an existing account would, so timing does not
 		// reveal which emails exist.
 		_, _ = hashPassword(req.Password)
+		// Every failed attempt is recorded, known account or not, so the
+		// trail itself cannot reveal which emails exist.
+		if err := s.recordLoginFailure(ctx, nil); err != nil {
+			return "", time.Time{}, db.User{}, err
+		}
 		return "", time.Time{}, db.User{}, unauthorized("email or password is wrong")
 	}
 	if err != nil {
@@ -352,6 +443,9 @@ func (s *Service) signIn(ctx context.Context, req LoginRequest, kind string, lif
 		return "", time.Time{}, db.User{}, fmt.Errorf("verify password: %w", err)
 	}
 	if !ok || row.Disabled != 0 {
+		if err := s.recordLoginFailure(ctx, &row); err != nil {
+			return "", time.Time{}, db.User{}, err
+		}
 		return "", time.Time{}, db.User{}, unauthorized("email or password is wrong")
 	}
 	s.rehashPassword(ctx, row, req.Password)
@@ -373,7 +467,7 @@ func (s *Service) rehashPassword(ctx context.Context, row db.User, password stri
 	}
 	hash, err := hashPassword(password)
 	if err == nil {
-		_, err = s.q.RehashUserPassword(ctx, db.RehashUserPasswordParams{
+		_, err = s.queries(ctx).RehashUserPassword(ctx, db.RehashUserPasswordParams{
 			NewHash: hash,
 			ID:      row.ID,
 			OldHash: row.PasswordHash,
@@ -399,9 +493,9 @@ func (s *Service) requireFreshProof(ctx context.Context, p Principal, password s
 		return forbidden("this needs a signed-in account and its password")
 	}
 	if password == "" {
-		return invalidField("current_password", "enter your current password to confirm")
+		return s.freshProofFailed(ctx, p, invalidField("current_password", "enter your current password to confirm"))
 	}
-	row, err := s.q.GetUserByID(ctx, p.UserID)
+	row, err := s.queries(ctx).GetUserByID(ctx, p.UserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return unauthorized("session expired or invalid: lewbox login")
 	}
@@ -416,9 +510,35 @@ func (s *Service) requireFreshProof(ctx context.Context, p Principal, password s
 		return fmt.Errorf("verify password: %w", err)
 	}
 	if !ok {
-		return invalidField("current_password", "current password is wrong")
+		p.Email = row.Email
+		return s.freshProofFailed(ctx, p, invalidField("current_password", "current password is wrong"))
 	}
 	return nil
+}
+
+// freshProofFailed records a wrong or missing fresh-proof password and returns
+// cause. An attempt that cannot be audited does not proceed.
+func (s *Service) freshProofFailed(ctx context.Context, p Principal, cause error) error {
+	if err := s.record(ctx, Event{
+		Name:       "user.fresh_proof_failed",
+		TargetType: "user",
+		TargetID:   p.UserID,
+		TargetName: p.Email,
+	}); err != nil {
+		return err
+	}
+	return cause
+}
+
+// recordLoginFailure records a failed sign-in. row is nil when no account has
+// the email that was typed, so the address is not stored.
+func (s *Service) recordLoginFailure(ctx context.Context, row *db.User) error {
+	e := Event{Name: "session.login_failed", TargetType: "user"}
+	if row != nil {
+		e.TargetID = row.ID
+		e.TargetName = row.Email
+	}
+	return s.record(ctx, e)
 }
 
 // startSession creates a session of kind for an account and returns its token
@@ -429,7 +549,7 @@ func (s *Service) startSession(ctx context.Context, now time.Time, userID, kind 
 		return "", time.Time{}, err
 	}
 	expires = now.Add(lifetime)
-	if err := s.q.CreateSession(ctx, db.CreateSessionParams{
+	if err := s.queries(ctx).CreateSession(ctx, db.CreateSessionParams{
 		ID:         uuid.NewV7().String(),
 		UserID:     userID,
 		TokenHash:  digest,
@@ -459,7 +579,7 @@ func (s *Service) Logout(ctx context.Context) (LogoutResponse, error) {
 		return LogoutResponse{}, badRequest("local mode has no session")
 	}
 	if p.SessionID != "" {
-		if _, err := s.q.DeleteSession(ctx, p.SessionID); err != nil {
+		if _, err := s.queries(ctx).DeleteSession(ctx, p.SessionID); err != nil {
 			return LogoutResponse{}, fmt.Errorf("delete session: %w", err)
 		}
 	}
@@ -478,7 +598,7 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 	if p.Kind != "user" {
 		return Me{Via: "local"}, nil
 	}
-	row, err := s.q.GetUserByID(ctx, p.UserID)
+	row, err := s.queries(ctx).GetUserByID(ctx, p.UserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Me{}, unauthorized("session expired or invalid: lewbox login")
 	}
@@ -486,7 +606,7 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 		return Me{}, fmt.Errorf("get user: %w", err)
 	}
 	u := toUser(row)
-	rows, err := s.q.ListOrganizationsForUser(ctx, p.UserID)
+	rows, err := s.queries(ctx).ListOrganizationsForUser(ctx, p.UserID)
 	if err != nil {
 		return Me{}, fmt.Errorf("list organizations: %w", err)
 	}
@@ -501,7 +621,7 @@ func (s *Service) Me(ctx context.Context) (Me, error) {
 		})
 	}
 	if p.TokenID != "" {
-		row, err := s.q.GetAccessTokenByID(ctx, db.GetAccessTokenByIDParams{UserID: p.UserID, ID: p.TokenID})
+		row, err := s.queries(ctx).GetAccessTokenByID(ctx, db.GetAccessTokenByIDParams{UserID: p.UserID, ID: p.TokenID})
 		if err != nil {
 			return Me{}, fmt.Errorf("get access token: %w", err)
 		}
@@ -523,7 +643,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	if !validSessionToken(token) {
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")
 	}
-	row, err := s.q.GetSessionByTokenHash(ctx, tokenDigest(token))
+	row, err := s.queries(ctx).GetSessionByTokenHash(ctx, tokenDigest(token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")
 	}
@@ -532,18 +652,18 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	}
 	now := s.now()
 	if !now.Before(row.ExpiresAt) {
-		_, _ = s.q.DeleteSession(ctx, row.ID)
+		_, _ = s.queries(ctx).DeleteSession(ctx, row.ID)
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")
 	}
 	// Browser sessions also end after a quiet spell. last_used_at is only
 	// written once a minute, which is well inside the idle timeout.
 	if row.Kind == "web" && now.Sub(row.LastUsedAt) >= webSessionIdle {
-		_, _ = s.q.DeleteSession(ctx, row.ID)
+		_, _ = s.queries(ctx).DeleteSession(ctx, row.ID)
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")
 	}
-	user, err := s.q.GetUserByID(ctx, row.UserID)
+	user, err := s.queries(ctx).GetUserByID(ctx, row.UserID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && user.Disabled != 0) {
-		_, _ = s.q.DeleteSession(ctx, row.ID)
+		_, _ = s.queries(ctx).DeleteSession(ctx, row.ID)
 		return Principal{}, unauthorized("session expired or invalid: lewbox login")
 	}
 	if err != nil {
@@ -551,7 +671,7 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	}
 	// last_used_at is a coarse signal, so write it at most once a minute.
 	if now.Sub(row.LastUsedAt) >= time.Minute {
-		if err := s.q.TouchSession(ctx, db.TouchSessionParams{LastUsedAt: now, ID: row.ID}); err != nil {
+		if err := s.queries(ctx).TouchSession(ctx, db.TouchSessionParams{LastUsedAt: now, ID: row.ID}); err != nil {
 			return Principal{}, fmt.Errorf("touch session: %w", err)
 		}
 	}
@@ -570,7 +690,7 @@ func (s *Service) meForKey(ctx context.Context, p Principal) (Me, error) {
 	if err != nil {
 		return Me{}, err
 	}
-	row, err := s.q.GetAdminKeyByID(ctx, db.GetAdminKeyByIDParams{OrgID: p.OrgID, ID: p.KeyID})
+	row, err := s.queries(ctx).GetAdminKeyByID(ctx, db.GetAdminKeyByIDParams{OrgID: p.OrgID, ID: p.KeyID})
 	if err != nil {
 		return Me{}, keyLookupErr(err, p.KeyID)
 	}
@@ -581,7 +701,7 @@ func (s *Service) meForKey(ctx context.Context, p Principal) (Me, error) {
 // BootstrapAdmin creates the first instance admin when the users table is
 // empty. It reports whether an account was created.
 func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) (bool, error) {
-	n, err := s.q.CountUsers(ctx)
+	n, err := s.queries(ctx).CountUsers(ctx)
 	if err != nil {
 		return false, fmt.Errorf("count users: %w", err)
 	}
@@ -610,9 +730,9 @@ func (s *Service) findUser(ctx context.Context, ref string) (db.User, error) {
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetUserByID(ctx, id.String())
+		row, err = s.queries(ctx).GetUserByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetUserByEmail(ctx, strings.ToLower(ref))
+		row, err = s.queries(ctx).GetUserByEmail(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.User{}, notFound("user %q not found", ref)

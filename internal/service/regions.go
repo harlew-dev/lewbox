@@ -36,7 +36,7 @@ func (s *Service) ListRegions(ctx context.Context, org string) (RegionList, erro
 	if err != nil {
 		return RegionList{}, err
 	}
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return RegionList{}, fmt.Errorf("list clusters: %w", err)
 	}

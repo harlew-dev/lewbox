@@ -30,7 +30,7 @@ func newStorageProfileFixture(t *testing.T) (*Service, *sql.DB, *objstoretest.Fa
 	}
 	fake := objstoretest.New(t)
 	fake.AddBucket("assets")
-	s := New(db.New(conn), WithKeyring(keyring))
+	s := New(conn, WithKeyring(keyring))
 	return s, conn, fake
 }
 

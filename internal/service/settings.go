@@ -55,7 +55,7 @@ func (s *Service) GetSettings(ctx context.Context) (Settings, error) {
 // ID; the response and the rest of the service use its slug.
 func (s *Service) getSettings(ctx context.Context) (Settings, error) {
 	out := Settings{InstanceName: defaultInstanceName, Signup: signupClosed}
-	rows, err := s.q.ListSettings(ctx)
+	rows, err := s.queries(ctx).ListSettings(ctx)
 	if err != nil {
 		return Settings{}, fmt.Errorf("list settings: %w", err)
 	}
@@ -91,7 +91,7 @@ func (s *Service) getSettings(ctx context.Context) (Settings, error) {
 		}
 	}
 	if planID != "" {
-		plan, err := s.q.GetPlanByID(ctx, planID)
+		plan, err := s.queries(ctx).GetPlanByID(ctx, planID)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
@@ -112,6 +112,10 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 	}
 	if req.InstanceName == nil && req.Signup == nil && req.DefaultPlan == nil && req.DefaultRegion == nil {
 		return Settings{}, invalid("nothing to change: set instance_name, signup, default_plan or default_region")
+	}
+	before, err := s.getSettings(ctx)
+	if err != nil {
+		return Settings{}, err
 	}
 	name := ""
 	if req.InstanceName != nil {
@@ -153,35 +157,75 @@ func (s *Service) UpdateSettings(ctx context.Context, req UpdateSettingsRequest)
 			region = cluster.Slug
 		}
 	}
-	if req.InstanceName != nil {
-		if err := s.setSetting(ctx, "instance_name", name); err != nil {
-			return Settings{}, err
+	var after Settings
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		if req.InstanceName != nil {
+			if err := s.setSetting(ctx, "instance_name", name); err != nil {
+				return err
+			}
 		}
+		if req.Signup != nil {
+			if err := s.setSetting(ctx, "signup", mode); err != nil {
+				return err
+			}
+		}
+		if req.DefaultPlan != nil {
+			var value any
+			if plan.ID != "" {
+				value = plan.ID
+			}
+			if err := s.setSetting(ctx, "default_plan", value); err != nil {
+				return err
+			}
+		}
+		if req.DefaultRegion != nil {
+			var value any
+			if region != "" {
+				value = region
+			}
+			if err := s.setSetting(ctx, "default_region", value); err != nil {
+				return err
+			}
+		}
+		var err error
+		after, err = s.getSettings(ctx)
+		if err != nil {
+			return err
+		}
+		changes := settingsChanges(before, after)
+		if len(changes) == 0 {
+			return nil
+		}
+		return s.record(ctx, Event{
+			Name:       "settings.updated",
+			TargetType: "settings",
+			TargetID:   "instance",
+			TargetName: after.InstanceName,
+			Changes:    changes,
+		})
+	})
+	if err != nil {
+		return Settings{}, err
 	}
-	if req.Signup != nil {
-		if err := s.setSetting(ctx, "signup", mode); err != nil {
-			return Settings{}, err
-		}
+	return after, nil
+}
+
+// settingsChanges lists the settings an update actually changed.
+func settingsChanges(before, after Settings) map[string]Change {
+	changes := map[string]Change{}
+	if before.InstanceName != after.InstanceName {
+		changes["instance_name"] = Change{From: before.InstanceName, To: after.InstanceName}
 	}
-	if req.DefaultPlan != nil {
-		var value any
-		if plan.ID != "" {
-			value = plan.ID
-		}
-		if err := s.setSetting(ctx, "default_plan", value); err != nil {
-			return Settings{}, err
-		}
+	if before.Signup != after.Signup {
+		changes["signup"] = Change{From: before.Signup, To: after.Signup}
 	}
-	if req.DefaultRegion != nil {
-		var value any
-		if region != "" {
-			value = region
-		}
-		if err := s.setSetting(ctx, "default_region", value); err != nil {
-			return Settings{}, err
-		}
+	if optString(before.DefaultPlan) != optString(after.DefaultPlan) {
+		changes["default_plan"] = Change{From: optString(before.DefaultPlan), To: optString(after.DefaultPlan)}
 	}
-	return s.getSettings(ctx)
+	if optString(before.DefaultRegion) != optString(after.DefaultRegion) {
+		changes["default_region"] = Change{From: optString(before.DefaultRegion), To: optString(after.DefaultRegion)}
+	}
+	return changes
 }
 
 // Instance describes this instance for the sign-in page. It is public.
@@ -199,7 +243,7 @@ func (s *Service) setSetting(ctx context.Context, key string, value any) error {
 	if err != nil {
 		return fmt.Errorf("encode setting %q: %w", key, err)
 	}
-	if err := s.q.UpsertSetting(ctx, db.UpsertSettingParams{Key: key, Value: string(data)}); err != nil {
+	if err := s.queries(ctx).UpsertSetting(ctx, db.UpsertSettingParams{Key: key, Value: string(data)}); err != nil {
 		return fmt.Errorf("set setting %q: %w", key, err)
 	}
 	return nil

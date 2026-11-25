@@ -152,7 +152,7 @@ func (s *Service) ClusterHealth(ctx context.Context, ref string, days int) (Clus
 		return ClusterHealth{}, err
 	}
 	start, end := dayRange(s.now(), days)
-	samples, err := s.q.ListClusterSamples(ctx, db.ListClusterSamplesParams{
+	samples, err := s.queries(ctx).ListClusterSamples(ctx, db.ListClusterSamplesParams{
 		ClusterID: row.ID,
 		At:        start,
 		At_2:      end,
@@ -166,11 +166,11 @@ func (s *Service) ClusterHealth(ctx context.Context, ref string, days int) (Clus
 	}
 	clusterDays, clusterUptime := finishDays(counts, start)
 
-	nodes, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
+	nodes, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
 	if err != nil {
 		return ClusterHealth{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
-	nodeSamples, err := s.q.ListNodeSamples(ctx, db.ListNodeSamplesParams{
+	nodeSamples, err := s.queries(ctx).ListNodeSamples(ctx, db.ListNodeSamplesParams{
 		ClusterID: sql.NullString{String: row.ID, Valid: true},
 		At:        start,
 		At_2:      end,
@@ -229,7 +229,7 @@ func (s *Service) ClusterMetrics(ctx context.Context, ref, rng string) (ClusterM
 
 	now := s.now().UTC()
 	start := now.Add(-span).Truncate(time.Duration(bucket) * time.Second)
-	rows, err := s.q.ListNodeMetricBuckets(ctx, db.ListNodeMetricBucketsParams{
+	rows, err := s.queries(ctx).ListNodeMetricBuckets(ctx, db.ListNodeMetricBucketsParams{
 		BucketSeconds: bucket,
 		ClusterID:     sql.NullString{String: row.ID, Valid: true},
 		FromAt:        start,
@@ -256,7 +256,7 @@ func (s *Service) ClusterMetrics(ctx context.Context, ref, rng string) (ClusterM
 		})
 	}
 
-	nodes, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
+	nodes, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
 	if err != nil {
 		return ClusterMetrics{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -279,7 +279,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	}
 	now := s.now().UTC()
 
-	statusCounts, err := s.q.CountOrganizationsByStatus(ctx)
+	statusCounts, err := s.queries(ctx).CountOrganizationsByStatus(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("count organizations: %w", err)
 	}
@@ -294,7 +294,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		}
 	}
 
-	sandboxCounts, err := s.q.CountSandboxesByStatus(ctx)
+	sandboxCounts, err := s.queries(ctx).CountSandboxesByStatus(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("count sandboxes: %w", err)
 	}
@@ -308,11 +308,11 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		}
 	}
 
-	nodes, err := s.q.ListNodes(ctx)
+	nodes, err := s.queries(ctx).ListNodes(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("list nodes: %w", err)
 	}
-	latest, err := s.q.LatestNodeSamples(ctx)
+	latest, err := s.queries(ctx).LatestNodeSamples(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("latest node samples: %w", err)
 	}
@@ -341,7 +341,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	}
 	capacity.CpuReserved = round2(capacity.CpuReserved)
 
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("list clusters: %w", err)
 	}
@@ -355,7 +355,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	}
 	start, end := dayRange(now, defaultHealthDays)
 	for _, cluster := range clusters {
-		samples, err := s.q.ListClusterSamples(ctx, db.ListClusterSamplesParams{
+		samples, err := s.queries(ctx).ListClusterSamples(ctx, db.ListClusterSamplesParams{
 			ClusterID: cluster.ID,
 			At:        start,
 			At_2:      end,
@@ -379,7 +379,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 
 	endHour := now.Truncate(time.Hour)
 	startHour := endHour.Add(-(7*24 - 1) * time.Hour)
-	usage, err := s.q.ListUsageHourly(ctx, db.ListUsageHourlyParams{
+	usage, err := s.queries(ctx).ListUsageHourly(ctx, db.ListUsageHourlyParams{
 		OrgID:    "",
 		FromHour: startHour,
 		ToHour:   endHour,
@@ -396,11 +396,11 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	}
 
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	vcpus, err := s.q.SumVcpuSecondsByOrg(ctx, monthStart)
+	vcpus, err := s.queries(ctx).SumVcpuSecondsByOrg(ctx, monthStart)
 	if err != nil {
 		return Overview{}, fmt.Errorf("sum vcpu seconds: %w", err)
 	}
-	orgs, err := s.q.ListOrganizations(ctx)
+	orgs, err := s.queries(ctx).ListOrganizations(ctx)
 	if err != nil {
 		return Overview{}, fmt.Errorf("list organizations: %w", err)
 	}
@@ -442,7 +442,7 @@ func (s *Service) recordSamples(ctx context.Context, clusterID, status string, l
 			latencyMs = 0
 		}
 	}
-	if err := s.q.InsertClusterSample(ctx, db.InsertClusterSampleParams{
+	if err := s.queries(ctx).InsertClusterSample(ctx, db.InsertClusterSampleParams{
 		ClusterID: clusterID,
 		At:        now,
 		Status:    status,
@@ -455,7 +455,7 @@ func (s *Service) recordSamples(ctx context.Context, clusterID, status string, l
 	for _, member := range members {
 		byName[memberName(member)] = member
 	}
-	nodes, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: clusterID, Valid: true})
+	nodes, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: clusterID, Valid: true})
 	if err != nil {
 		return fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -482,7 +482,7 @@ func (s *Service) recordSamples(ctx context.Context, clusterID, status string, l
 			// the nodes this pass.
 			continue
 		}
-		if err := s.q.InsertNodeSample(ctx, sample); err != nil {
+		if err := s.queries(ctx).InsertNodeSample(ctx, sample); err != nil {
 			return fmt.Errorf("insert node sample %q: %w", node.Name, err)
 		}
 	}
@@ -499,18 +499,21 @@ func (s *Service) pruneOld(ctx context.Context, now time.Time) error {
 		return nil
 	}
 	cutoff := now.Add(-sampleRetention)
-	if err := s.q.DeleteClusterSamplesBefore(ctx, cutoff); err != nil {
+	if err := s.queries(ctx).DeleteClusterSamplesBefore(ctx, cutoff); err != nil {
 		return fmt.Errorf("prune cluster samples: %w", err)
 	}
-	if err := s.q.DeleteNodeSamplesBefore(ctx, cutoff); err != nil {
+	if err := s.queries(ctx).DeleteNodeSamplesBefore(ctx, cutoff); err != nil {
 		return fmt.Errorf("prune node samples: %w", err)
 	}
 	// An expired session is refused on use anyway; this only clears the rows.
-	if _, err := s.q.DeleteExpiredSessions(ctx, now); err != nil {
+	if _, err := s.queries(ctx).DeleteExpiredSessions(ctx, now); err != nil {
 		return fmt.Errorf("prune sessions: %w", err)
 	}
-	if _, err := s.q.DeleteUsageBefore(ctx, now.Add(-usageRetention)); err != nil {
+	if _, err := s.queries(ctx).DeleteUsageBefore(ctx, now.Add(-usageRetention)); err != nil {
 		return fmt.Errorf("prune usage: %w", err)
+	}
+	if err := s.pruneEvents(ctx, now); err != nil {
+		return err
 	}
 	s.lastPrune = now
 	return nil

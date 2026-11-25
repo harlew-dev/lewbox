@@ -57,7 +57,7 @@ func newLoggingServer(t *testing.T, logs *captureLogs) (*testServer, *service.Se
 	}
 	t.Cleanup(func() { conn.Close() })
 	log := slog.New(logs)
-	svc := service.New(db.New(conn))
+	svc := service.New(conn)
 	svc.SetLogger(log)
 	ctx := service.WithPrincipal(context.Background(), service.LocalPrincipal())
 	if _, err := svc.CreateUser(ctx, service.CreateUserRequest{

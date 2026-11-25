@@ -201,7 +201,7 @@ func (s *Service) orgFor(ctx context.Context, ref string, need access) (orgCalle
 	}
 
 	if p.Kind == "user" {
-		m, err := s.q.GetMembership(ctx, db.GetMembershipParams{OrgID: org.ID, UserID: p.UserID})
+		m, err := s.queries(ctx).GetMembership(ctx, db.GetMembershipParams{OrgID: org.ID, UserID: p.UserID})
 		switch {
 		case err == nil:
 			c.role = m.Role
@@ -234,9 +234,9 @@ func (s *Service) findOrganization(ctx context.Context, ref string) (db.Organiza
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetOrganizationByID(ctx, id.String())
+		row, err = s.queries(ctx).GetOrganizationByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetOrganizationBySlug(ctx, strings.ToLower(ref))
+		row, err = s.queries(ctx).GetOrganizationBySlug(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Organization{}, notFound("workspace %q not found", ref)
@@ -249,7 +249,7 @@ func (s *Service) findOrganization(ctx context.Context, ref string) (db.Organiza
 
 // memberCounts maps organization IDs to their number of members.
 func (s *Service) memberCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountMembersByOrganization(ctx)
+	rows, err := s.queries(ctx).CountMembersByOrganization(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count members: %w", err)
 	}
@@ -280,7 +280,7 @@ func (s *Service) toOrganization(ctx context.Context, row db.Organization, role 
 
 // vcpuHoursByOrg sums each organization's metered vCPUs over the last 30 days.
 func (s *Service) vcpuHoursByOrg(ctx context.Context) (map[string]float64, error) {
-	rows, err := s.q.SumVcpuSecondsByOrg(ctx, s.now().Add(-30*24*time.Hour))
+	rows, err := s.queries(ctx).SumVcpuSecondsByOrg(ctx, s.now().Add(-30*24*time.Hour))
 	if err != nil {
 		return nil, fmt.Errorf("sum vcpu seconds: %w", err)
 	}
@@ -300,7 +300,7 @@ type subscriptionIndex struct {
 }
 
 func (s *Service) subscriptionIndex(ctx context.Context) (subscriptionIndex, error) {
-	subs, err := s.q.ListAllSubscriptions(ctx)
+	subs, err := s.queries(ctx).ListAllSubscriptions(ctx)
 	if err != nil {
 		return subscriptionIndex{}, fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -432,7 +432,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 		if strings.TrimSpace(req.User) != "" {
 			return OrganizationList{}, forbidden("an admin key cannot list another account's workspaces")
 		}
-		row, err := s.q.GetOrganizationByID(ctx, p.OrgID)
+		row, err := s.queries(ctx).GetOrganizationByID(ctx, p.OrgID)
 		if err != nil {
 			return OrganizationList{}, fmt.Errorf("get organization: %w", err)
 		}
@@ -456,13 +456,13 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 	if !p.InstanceAdmin {
 		return s.organizationsOf(ctx, p.UserID, counts, subs, nil, false, keep)
 	}
-	rows, err := s.q.ListOrganizations(ctx)
+	rows, err := s.queries(ctx).ListOrganizations(ctx)
 	if err != nil {
 		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
 	}
 	roles := map[string]string{}
 	if p.Kind == "user" {
-		mine, err := s.q.ListOrganizationsForUser(ctx, p.UserID)
+		mine, err := s.queries(ctx).ListOrganizationsForUser(ctx, p.UserID)
 		if err != nil {
 			return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
 		}
@@ -479,7 +479,7 @@ func (s *Service) ListOrganizations(ctx context.Context, req ListOrganizationsRe
 }
 
 func (s *Service) organizationsOf(ctx context.Context, userID string, counts map[string]int, subs subscriptionIndex, usage map[string]float64, admin bool, keep func(Organization) bool) (OrganizationList, error) {
-	rows, err := s.q.ListOrganizationsForUser(ctx, userID)
+	rows, err := s.queries(ctx).ListOrganizationsForUser(ctx, userID)
 	if err != nil {
 		return OrganizationList{}, fmt.Errorf("list organizations: %w", err)
 	}
@@ -549,7 +549,7 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 			}
 		}
 		ownerID = p.UserID
-		owned, err := s.q.CountOwnedOrganizations(ctx, ownerID)
+		owned, err := s.queries(ctx).CountOwnedOrganizations(ctx, ownerID)
 		if err != nil {
 			return Organization{}, fmt.Errorf("count owned organizations: %w", err)
 		}
@@ -559,10 +559,6 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 	}
 
 	// A setup link allows a workspace in any mode and forces it active.
-	var (
-		link        db.SetupLink
-		linkClaimed bool
-	)
 	if setupToken != "" {
 		existing, err := s.findSetupLink(ctx, setupToken)
 		switch {
@@ -575,123 +571,126 @@ func (s *Service) CreateOrganization(ctx context.Context, req CreateOrganization
 		case existing.ClaimedBy.Valid && ownerID != "" && existing.ClaimedBy.String != ownerID:
 			return Organization{}, setupLinkInvalid()
 		}
-		// Consume before writing anything: the statement lets only one
-		// caller win.
-		now := s.now()
-		link, err = s.q.ConsumeSetupLink(ctx, db.ConsumeSetupLinkParams{
-			UsedAt:    sql.NullTime{Time: now, Valid: true},
-			UserID:    sql.NullString{String: ownerID, Valid: ownerID != ""},
-			ClaimedAt: sql.NullTime{Time: now, Valid: true},
-			TokenHash: hashSetupToken(setupToken),
-			Now:       now,
-		})
-		if errors.Is(err, sql.ErrNoRows) {
-			return Organization{}, setupLinkInvalid()
-		}
-		if err != nil {
-			return Organization{}, fmt.Errorf("consume setup link: %w", err)
-		}
-		linkClaimed = !existing.ClaimedBy.Valid
-		status = orgActive
 	}
 
-	var row db.Organization
-	// Undo every write if anything after the link or organization row fails.
-	committed := false
-	defer func() {
-		if committed {
-			return
-		}
-		cleanup := context.WithoutCancel(ctx)
-		if row.ID != "" {
-			_ = s.q.DeleteOrganization(cleanup, row.ID)
-		}
-		if link.ID != "" {
-			if linkClaimed {
-				_ = s.q.UnclaimSetupLink(cleanup, link.ID)
-			} else {
-				_ = s.q.ReleaseSetupLink(cleanup, link.ID)
-			}
-		}
-	}()
-
-	if slug == "" {
-		row, err = s.createGeneratedOrganization(ctx, name, name, status)
-		if err != nil {
-			return Organization{}, err
-		}
-	} else {
-		id := uuid.NewV7().String()
-		row, err = s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
-			ID:        id,
-			Slug:      slug,
-			Name:      name,
-			Status:    status,
-			CreatedAt: s.now(),
-			Team:      sql.NullString{String: teamForID(id), Valid: true},
-		})
-		if db.IsUniqueViolation(err) {
-			return Organization{}, conflict("an organization with slug %q already exists", slug)
-		}
-		if err != nil {
-			return Organization{}, fmt.Errorf("create organization: %w", err)
-		}
-	}
-	role := ""
-	if ownerID != "" {
-		membershipID := uuid.NewV7().String()
-		if p.InstanceAdmin {
-			_, err = s.q.CreateMembership(ctx, db.CreateMembershipParams{
-				ID:        membershipID,
-				OrgID:     row.ID,
-				UserID:    ownerID,
-				Role:      roleOwner,
-				CreatedAt: s.now(),
-			})
-		} else {
-			// The cap is in the statement, so two concurrent creates cannot
-			// both pass it.
-			_, err = s.q.CreateOwnerMembership(ctx, db.CreateOwnerMembershipParams{
-				ID:        membershipID,
-				OrgID:     row.ID,
-				UserID:    ownerID,
-				CreatedAt: s.now(),
-				MaxOwned:  maxOwnedWorkspaces,
+	// Consume the link and write the workspace, its owner and subscription in
+	// one transaction; the statement lets only one caller consume the link.
+	var (
+		row  db.Organization
+		link db.SetupLink
+		push *subscriptionPush
+		role string
+	)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		if setupToken != "" {
+			now := s.now()
+			var err error
+			link, err = s.queries(ctx).ConsumeSetupLink(ctx, db.ConsumeSetupLinkParams{
+				UsedAt:    sql.NullTime{Time: now, Valid: true},
+				UserID:    sql.NullString{String: ownerID, Valid: ownerID != ""},
+				ClaimedAt: sql.NullTime{Time: now, Valid: true},
+				TokenHash: hashSetupToken(setupToken),
+				Now:       now,
 			})
 			if errors.Is(err, sql.ErrNoRows) {
-				return Organization{}, invalid("you can own at most %d workspaces", maxOwnedWorkspaces)
+				return setupLinkInvalid()
+			}
+			if err != nil {
+				return fmt.Errorf("consume setup link: %w", err)
+			}
+			status = orgActive
+		}
+
+		var err error
+		if slug == "" {
+			row, err = s.createGeneratedOrganization(ctx, name, name, status)
+			if err != nil {
+				return err
+			}
+		} else {
+			id := uuid.NewV7().String()
+			row, err = s.queries(ctx).CreateOrganization(ctx, db.CreateOrganizationParams{
+				ID:        id,
+				Slug:      slug,
+				Name:      name,
+				Status:    status,
+				CreatedAt: s.now(),
+				Team:      sql.NullString{String: teamForID(id), Valid: true},
+			})
+			if db.IsUniqueViolation(err) {
+				return conflict("an organization with slug %q already exists", slug)
+			}
+			if err != nil {
+				return fmt.Errorf("create organization: %w", err)
 			}
 		}
-		if err != nil {
-			return Organization{}, fmt.Errorf("add owner: %w", err)
+		if ownerID != "" {
+			membershipID := uuid.NewV7().String()
+			if p.InstanceAdmin {
+				_, err = s.queries(ctx).CreateMembership(ctx, db.CreateMembershipParams{
+					ID:        membershipID,
+					OrgID:     row.ID,
+					UserID:    ownerID,
+					Role:      roleOwner,
+					CreatedAt: s.now(),
+				})
+			} else {
+				// The cap is in the statement, so two concurrent creates cannot
+				// both pass it.
+				_, err = s.queries(ctx).CreateOwnerMembership(ctx, db.CreateOwnerMembershipParams{
+					ID:        membershipID,
+					OrgID:     row.ID,
+					UserID:    ownerID,
+					CreatedAt: s.now(),
+					MaxOwned:  maxOwnedWorkspaces,
+				})
+				if errors.Is(err, sql.ErrNoRows) {
+					return invalid("you can own at most %d workspaces", maxOwnedWorkspaces)
+				}
+			}
+			if err != nil {
+				return fmt.Errorf("add owner: %w", err)
+			}
+			if p.Kind == "user" && ownerID == p.UserID {
+				role = roleOwner
+			}
 		}
-		if p.Kind == "user" && ownerID == p.UserID {
-			role = roleOwner
+		switch {
+		case link.ID != "":
+			if push, err = s.subscribeSetupLink(ctx, row, link); err != nil {
+				return err
+			}
+		case !p.InstanceAdmin:
+			if push, err = s.subscribeDefaults(ctx, row, settings); err != nil {
+				return err
+			}
 		}
+		if link.ID != "" {
+			if err := s.queries(ctx).SetSetupLinkOrg(ctx, db.SetSetupLinkOrgParams{
+				OrgID: sql.NullString{String: row.ID, Valid: true},
+				ID:    link.ID,
+			}); err != nil {
+				return fmt.Errorf("set setup link workspace: %w", err)
+			}
+		}
+		return s.record(ctx, Event{
+			Name:           "workspace.created",
+			TargetType:     "workspace",
+			TargetID:       row.ID,
+			TargetName:     row.Slug,
+			OrganizationID: row.ID,
+		})
+	})
+	if err != nil {
+		return Organization{}, err
 	}
-	switch {
-	case link.ID != "":
-		if err := s.subscribeSetupLink(ctx, row, link); err != nil {
-			return Organization{}, err
-		}
-	case !p.InstanceAdmin:
-		if err := s.subscribeDefaults(ctx, row, settings); err != nil {
-			return Organization{}, err
-		}
-	}
-	if link.ID != "" {
-		if err := s.q.SetSetupLinkOrg(ctx, db.SetSetupLinkOrgParams{
-			OrgID: sql.NullString{String: row.ID, Valid: true},
-			ID:    link.ID,
-		}); err != nil {
-			return Organization{}, fmt.Errorf("set setup link workspace: %w", err)
-		}
+	if push != nil {
+		s.pushSubscriptionQuota(ctx, row, push.cluster, push.plan, push.sub)
 	}
 	out, err := s.toOrganization(ctx, row, role, p.InstanceAdmin)
 	if err != nil {
 		return Organization{}, err
 	}
-	committed = true
 	return out, nil
 }
 
@@ -748,7 +747,7 @@ func (s *Service) createGeneratedOrganization(ctx context.Context, base, name, s
 			return db.Organization{}, fmt.Errorf("generated slug %q is not valid", slug)
 		}
 		id := uuid.NewV7().String()
-		row, cerr := s.q.CreateOrganization(ctx, db.CreateOrganizationParams{
+		row, cerr := s.queries(ctx).CreateOrganization(ctx, db.CreateOrganizationParams{
 			ID:        id,
 			Slug:      slug,
 			Name:      name,
@@ -790,62 +789,68 @@ func generatedOrgSlug(base, suffix string) string {
 	return label + "-" + suffix
 }
 
+// subscriptionPush is the quota push that follows a committed subscription,
+// kept outside the transaction so no network call holds the database.
+type subscriptionPush struct {
+	cluster db.Cluster
+	plan    db.Plan
+	sub     db.Subscription
+}
+
 // subscribeSetupLink gives a workspace the plan and region its setup link
-// names, pushing the quota before it returns.
-func (s *Service) subscribeSetupLink(ctx context.Context, org db.Organization, link db.SetupLink) error {
-	plan, err := s.q.GetPlanByID(ctx, link.PlanID)
+// names. The caller pushes the quota after the transaction commits.
+func (s *Service) subscribeSetupLink(ctx context.Context, org db.Organization, link db.SetupLink) (*subscriptionPush, error) {
+	plan, err := s.queries(ctx).GetPlanByID(ctx, link.PlanID)
 	if err != nil {
-		return fmt.Errorf("get setup link plan: %w", err)
+		return nil, fmt.Errorf("get setup link plan: %w", err)
 	}
-	cluster, err := s.q.GetClusterByID(ctx, link.ClusterID)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, link.ClusterID)
 	if err != nil {
-		return fmt.Errorf("get setup link region: %w", err)
+		return nil, fmt.Errorf("get setup link region: %w", err)
 	}
-	sub, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+	sub, err := s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
 		OrgID:     org.ID,
 		ClusterID: cluster.ID,
 		PlanID:    plan.ID,
 		CreatedAt: s.now(),
 	})
 	if err != nil {
-		return fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
+		return nil, fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
 	}
-	s.pushSubscriptionQuota(ctx, org, cluster, plan, sub)
-	return nil
+	return &subscriptionPush{cluster: cluster, plan: plan, sub: sub}, nil
 }
 
 // subscribeDefaults gives a new workspace the default plan in the default
-// region when both still exist, pushing the quota before it returns. With no
-// default plan or region, it gets none.
-func (s *Service) subscribeDefaults(ctx context.Context, org db.Organization, settings Settings) error {
+// region when both still exist. The caller pushes the quota after the
+// transaction commits. With no default plan or region, it gets none.
+func (s *Service) subscribeDefaults(ctx context.Context, org db.Organization, settings Settings) (*subscriptionPush, error) {
 	if settings.DefaultPlan == nil || settings.DefaultRegion == nil {
-		return nil
+		return nil, nil
 	}
 	plan, err := s.findPlan(ctx, *settings.DefaultPlan)
 	if err != nil {
 		if se, ok := errors.AsType[*Error](err); ok && se.Code == CodeNotFound {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
-	cluster, err := s.q.GetClusterBySlug(ctx, *settings.DefaultRegion)
+	cluster, err := s.queries(ctx).GetClusterBySlug(ctx, *settings.DefaultRegion)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("get cluster %q: %w", *settings.DefaultRegion, err)
+		return nil, fmt.Errorf("get cluster %q: %w", *settings.DefaultRegion, err)
 	}
-	sub, err := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+	sub, err := s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
 		OrgID:     org.ID,
 		ClusterID: cluster.ID,
 		PlanID:    plan.ID,
 		CreatedAt: s.now(),
 	})
 	if err != nil {
-		return fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
+		return nil, fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
 	}
-	s.pushSubscriptionQuota(ctx, org, cluster, plan, sub)
-	return nil
+	return &subscriptionPush{cluster: cluster, plan: plan, sub: sub}, nil
 }
 
 // orgName trims and checks a display name; empty means the slug.
@@ -921,25 +926,69 @@ func (s *Service) UpdateOrganization(ctx context.Context, ref string, req Update
 		}
 	}
 
-	if req.Name != nil {
-		row, err = s.q.SetOrganizationName(ctx, db.SetOrganizationNameParams{Name: name, ID: row.ID})
-		if err != nil {
-			return Organization{}, fmt.Errorf("rename organization: %w", err)
+	changes := map[string]Change{}
+	statusChange := map[string]Change{}
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		if req.Name != nil {
+			before := row
+			row, err = s.queries(ctx).SetOrganizationName(ctx, db.SetOrganizationNameParams{Name: name, ID: row.ID})
+			if err != nil {
+				return fmt.Errorf("rename organization: %w", err)
+			}
+			if before.Name != row.Name {
+				changes["name"] = Change{From: before.Name, To: row.Name}
+			}
 		}
-	}
-	if req.Status != nil {
-		reason := ""
-		if status == orgSuspended {
-			reason = statusReasonAdmin
+		if req.Status != nil {
+			before := row
+			reason := ""
+			if status == orgSuspended {
+				reason = statusReasonAdmin
+			}
+			row, err = s.queries(ctx).SetOrganizationStatus(ctx, db.SetOrganizationStatusParams{
+				Status:       status,
+				StatusReason: reason,
+				ID:           row.ID,
+			})
+			if err != nil {
+				return fmt.Errorf("set organization status: %w", err)
+			}
+			if before.Status != row.Status {
+				statusChange["status"] = Change{From: before.Status, To: row.Status}
+			}
 		}
-		row, err = s.q.SetOrganizationStatus(ctx, db.SetOrganizationStatusParams{
-			Status:       status,
-			StatusReason: reason,
-			ID:           row.ID,
-		})
-		if err != nil {
-			return Organization{}, fmt.Errorf("set organization status: %w", err)
+		if len(changes) > 0 {
+			if err := s.record(ctx, Event{
+				Name:           "workspace.updated",
+				TargetType:     "workspace",
+				TargetID:       row.ID,
+				TargetName:     row.Slug,
+				OrganizationID: row.ID,
+				Changes:        changes,
+			}); err != nil {
+				return err
+			}
 		}
+		if len(statusChange) > 0 {
+			name := "workspace.suspended"
+			if row.Status == orgActive {
+				name = "workspace.restored"
+			}
+			if err := s.record(ctx, Event{
+				Name:           name,
+				TargetType:     "workspace",
+				TargetID:       row.ID,
+				TargetName:     row.Slug,
+				OrganizationID: row.ID,
+				Changes:        statusChange,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Organization{}, err
 	}
 	if adminOnly {
 		if err := s.syncOrganizationQuotas(ctx, row, nil); err != nil {
@@ -955,7 +1004,7 @@ func (s *Service) ListMembers(ctx context.Context, org string) (MemberList, erro
 	if err != nil {
 		return MemberList{}, err
 	}
-	rows, err := s.q.ListMembers(ctx, c.org.ID)
+	rows, err := s.queries(ctx).ListMembers(ctx, c.org.ID)
 	if err != nil {
 		return MemberList{}, fmt.Errorf("list members: %w", err)
 	}
@@ -998,18 +1047,33 @@ func (s *Service) AddMember(ctx context.Context, org string, req AddMemberReques
 	if !c.p.InstanceAdmin && user.InstanceAdmin != 0 {
 		return Member{}, notFound("no account with that email")
 	}
-	row, err := s.q.CreateMembership(ctx, db.CreateMembershipParams{
-		ID:        uuid.NewV7().String(),
-		OrgID:     c.org.ID,
-		UserID:    user.ID,
-		Role:      role,
-		CreatedAt: s.now(),
+	var row db.Membership
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateMembership(ctx, db.CreateMembershipParams{
+			ID:        uuid.NewV7().String(),
+			OrgID:     c.org.ID,
+			UserID:    user.ID,
+			Role:      role,
+			CreatedAt: s.now(),
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("%s is already a member of %q", user.Email, c.org.Slug)
+		}
+		if err != nil {
+			return fmt.Errorf("add member: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "member.created",
+			TargetType:     "member",
+			TargetID:       user.ID,
+			TargetName:     user.Email,
+			OrganizationID: c.org.ID,
+			Changes:        map[string]Change{"role": {From: "", To: role}},
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return Member{}, conflict("%s is already a member of %q", user.Email, c.org.Slug)
-	}
 	if err != nil {
-		return Member{}, fmt.Errorf("add member: %w", err)
+		return Member{}, err
 	}
 	return toMember(row, user.Email), nil
 }
@@ -1043,12 +1107,27 @@ func (s *Service) SetMemberRole(ctx context.Context, org, ref string, req SetMem
 			return Member{}, err
 		}
 	}
-	updated, err := s.q.SetMembershipRole(ctx, db.SetMembershipRoleParams{Role: role, ID: m.ID})
-	if errors.Is(err, sql.ErrNoRows) {
-		return Member{}, conflict("%q needs at least one owner", c.org.Slug)
-	}
+	var updated db.Membership
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).SetMembershipRole(ctx, db.SetMembershipRoleParams{Role: role, ID: m.ID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return conflict("%q needs at least one owner", c.org.Slug)
+		}
+		if err != nil {
+			return fmt.Errorf("set role: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "member.updated",
+			TargetType:     "member",
+			TargetID:       m.UserID,
+			TargetName:     email,
+			OrganizationID: c.org.ID,
+			Changes:        map[string]Change{"role": {From: m.Role, To: role}},
+		})
+	})
 	if err != nil {
-		return Member{}, fmt.Errorf("set role: %w", err)
+		return Member{}, err
 	}
 	return toMember(updated, email), nil
 }
@@ -1080,15 +1159,28 @@ func (s *Service) RemoveMember(ctx context.Context, org, ref string) (Member, er
 	if err := s.revokeCreatedSandboxKeys(ctx, c.org.ID, m.UserID); err != nil {
 		return Member{}, err
 	}
-	n, err := s.q.DeleteMembership(ctx, m.ID)
-	if err != nil {
-		return Member{}, fmt.Errorf("remove member: %w", err)
-	}
-	if n == 0 {
-		if _, gerr := s.q.GetMembershipByID(ctx, db.GetMembershipByIDParams{OrgID: c.org.ID, ID: m.ID}); gerr == nil {
-			return Member{}, conflict("%q needs at least one owner", c.org.Slug)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteMembership(ctx, m.ID)
+		if err != nil {
+			return fmt.Errorf("remove member: %w", err)
 		}
-		return Member{}, notFound("%q is not a member of %q", ref, c.org.Slug)
+		if n == 0 {
+			if _, gerr := s.queries(ctx).GetMembershipByID(ctx, db.GetMembershipByIDParams{OrgID: c.org.ID, ID: m.ID}); gerr == nil {
+				return conflict("%q needs at least one owner", c.org.Slug)
+			}
+			return notFound("%q is not a member of %q", ref, c.org.Slug)
+		}
+		return s.record(ctx, Event{
+			Name:           "member.deleted",
+			TargetType:     "member",
+			TargetID:       m.UserID,
+			TargetName:     email,
+			OrganizationID: c.org.ID,
+			Changes:        map[string]Change{"role": {From: m.Role, To: ""}},
+		})
+	})
+	if err != nil {
+		return Member{}, err
 	}
 	return toMember(m, email), nil
 }
@@ -1100,9 +1192,9 @@ func (s *Service) findMember(ctx context.Context, org db.Organization, ref strin
 		return db.Membership{}, "", badRequest("a member's email or ID is required")
 	}
 	if id, err := uuid.Parse(ref); err == nil {
-		m, err := s.q.GetMembershipByID(ctx, db.GetMembershipByIDParams{OrgID: org.ID, ID: id.String()})
+		m, err := s.queries(ctx).GetMembershipByID(ctx, db.GetMembershipByIDParams{OrgID: org.ID, ID: id.String()})
 		if err == nil {
-			user, err := s.q.GetUserByID(ctx, m.UserID)
+			user, err := s.queries(ctx).GetUserByID(ctx, m.UserID)
 			if err != nil {
 				return db.Membership{}, "", fmt.Errorf("get user: %w", err)
 			}
@@ -1119,7 +1211,7 @@ func (s *Service) findMember(ctx context.Context, org db.Organization, ref strin
 		}
 		return db.Membership{}, "", err
 	}
-	m, err := s.q.GetMembership(ctx, db.GetMembershipParams{OrgID: org.ID, UserID: user.ID})
+	m, err := s.queries(ctx).GetMembership(ctx, db.GetMembershipParams{OrgID: org.ID, UserID: user.ID})
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Membership{}, "", notFound("%q is not a member of %q", ref, org.Slug)
 	}
@@ -1145,7 +1237,7 @@ func (s *Service) memberEmail(ctx context.Context, userID, email string, admin b
 	if admin {
 		return email, nil
 	}
-	user, err := s.q.GetUserByID(ctx, userID)
+	user, err := s.queries(ctx).GetUserByID(ctx, userID)
 	if err != nil {
 		return "", fmt.Errorf("get user: %w", err)
 	}

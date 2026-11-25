@@ -125,6 +125,22 @@ type DnsRecord struct {
 	CreatedAt time.Time
 }
 
+type Event struct {
+	ID             string
+	Name           string
+	ActorKind      string
+	ActorID        sql.NullString
+	ActorLabel     string
+	TargetType     string
+	TargetID       string
+	TargetName     string
+	OrganizationID sql.NullString
+	Changes        sql.NullString
+	Ip             sql.NullString
+	RequestID      sql.NullString
+	CreatedAt      time.Time
+}
+
 type Membership struct {
 	ID        string
 	OrgID     string

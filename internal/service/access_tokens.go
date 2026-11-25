@@ -68,7 +68,7 @@ func (s *Service) tokenOwner(ctx context.Context, p Principal, ref string) (db.U
 		if p.Kind != "user" {
 			return db.User{}, badRequest("local mode has no account of its own: name one with --user")
 		}
-		row, err := s.q.GetUserByID(ctx, p.UserID)
+		row, err := s.queries(ctx).GetUserByID(ctx, p.UserID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return db.User{}, unauthorized("session expired or invalid: lewbox login")
 		}
@@ -121,21 +121,34 @@ func (s *Service) CreateAccessToken(ctx context.Context, req CreateAccessTokenRe
 	if err != nil {
 		return NewAccessToken{}, err
 	}
-	row, err := s.q.CreateAccessToken(ctx, db.CreateAccessTokenParams{
-		ID:        uuid.NewV7().String(),
-		UserID:    owner.ID,
-		Name:      name,
-		Prefix:    token[:len(accessTokenPrefix)+8],
-		TokenHash: digest,
-		Last4:     token[len(token)-4:],
-		CreatedAt: now,
-		ExpiresAt: expires,
+	var row db.AccessToken
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateAccessToken(ctx, db.CreateAccessTokenParams{
+			ID:        uuid.NewV7().String(),
+			UserID:    owner.ID,
+			Name:      name,
+			Prefix:    token[:len(accessTokenPrefix)+8],
+			TokenHash: digest,
+			Last4:     token[len(token)-4:],
+			CreatedAt: now,
+			ExpiresAt: expires,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("%s already has an access token named %q", owner.Email, name)
+		}
+		if err != nil {
+			return fmt.Errorf("create access token: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "access_token.created",
+			TargetType: "access_token",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return NewAccessToken{}, conflict("%s already has an access token named %q", owner.Email, name)
-	}
 	if err != nil {
-		return NewAccessToken{}, fmt.Errorf("create access token: %w", err)
+		return NewAccessToken{}, err
 	}
 	return NewAccessToken{AccessToken: toAccessToken(row, now), Token: token}, nil
 }
@@ -151,7 +164,7 @@ func (s *Service) ListAccessTokens(ctx context.Context, user string) (AccessToke
 	if err != nil {
 		return AccessTokenList{}, err
 	}
-	rows, err := s.q.ListAccessTokens(ctx, owner.ID)
+	rows, err := s.queries(ctx).ListAccessTokens(ctx, owner.ID)
 	if err != nil {
 		return AccessTokenList{}, fmt.Errorf("list access tokens: %w", err)
 	}
@@ -180,9 +193,9 @@ func (s *Service) RevokeAccessToken(ctx context.Context, user, ref string) (Acce
 	}
 	var row db.AccessToken
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetAccessTokenByID(ctx, db.GetAccessTokenByIDParams{UserID: owner.ID, ID: id.String()})
+		row, err = s.queries(ctx).GetAccessTokenByID(ctx, db.GetAccessTokenByIDParams{UserID: owner.ID, ID: id.String()})
 	} else {
-		row, err = s.q.GetLiveAccessTokenByName(ctx, db.GetLiveAccessTokenByNameParams{UserID: owner.ID, Name: ref})
+		row, err = s.queries(ctx).GetLiveAccessTokenByName(ctx, db.GetLiveAccessTokenByNameParams{UserID: owner.ID, Name: ref})
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return AccessToken{}, notFound("access token %q not found", ref)
@@ -194,16 +207,27 @@ func (s *Service) RevokeAccessToken(ctx context.Context, user, ref string) (Acce
 		return AccessToken{}, conflict("access token %q is already revoked", ref)
 	}
 	now := s.now()
-	n, err := s.q.RevokeAccessToken(ctx, db.RevokeAccessTokenParams{
-		RevokedAt: sql.NullTime{Time: now, Valid: true},
-		UserID:    owner.ID,
-		ID:        row.ID,
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).RevokeAccessToken(ctx, db.RevokeAccessTokenParams{
+			RevokedAt: sql.NullTime{Time: now, Valid: true},
+			UserID:    owner.ID,
+			ID:        row.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("revoke access token: %w", err)
+		}
+		if n == 0 {
+			return conflict("access token %q is already revoked", ref)
+		}
+		return s.record(ctx, Event{
+			Name:       "access_token.revoked",
+			TargetType: "access_token",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
 	})
 	if err != nil {
-		return AccessToken{}, fmt.Errorf("revoke access token: %w", err)
-	}
-	if n == 0 {
-		return AccessToken{}, conflict("access token %q is already revoked", ref)
+		return AccessToken{}, err
 	}
 	row.RevokedAt = sql.NullTime{Time: now, Valid: true}
 	return toAccessToken(row, now), nil
@@ -218,7 +242,7 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (Pr
 	if !validKeyToken(accessTokenPrefix, token) {
 		return Principal{}, rejected
 	}
-	row, err := s.q.GetAccessTokenByHash(ctx, tokenDigest(token))
+	row, err := s.queries(ctx).GetAccessTokenByHash(ctx, tokenDigest(token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Principal{}, rejected
 	}
@@ -229,7 +253,7 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (Pr
 	if row.RevokedAt.Valid || (row.ExpiresAt.Valid && !now.Before(row.ExpiresAt.Time)) {
 		return Principal{}, rejected
 	}
-	user, err := s.q.GetUserByID(ctx, row.UserID)
+	user, err := s.queries(ctx).GetUserByID(ctx, row.UserID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && user.Disabled != 0) {
 		return Principal{}, rejected
 	}
@@ -238,7 +262,7 @@ func (s *Service) authenticateAccessToken(ctx context.Context, token string) (Pr
 	}
 	// Like sessions, last_used_at is written at most once a minute.
 	if !row.LastUsedAt.Valid || now.Sub(row.LastUsedAt.Time) >= time.Minute {
-		if err := s.q.TouchAccessToken(ctx, db.TouchAccessTokenParams{
+		if err := s.queries(ctx).TouchAccessToken(ctx, db.TouchAccessTokenParams{
 			LastUsedAt: sql.NullTime{Time: now, Valid: true},
 			ID:         row.ID,
 		}); err != nil {

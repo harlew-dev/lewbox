@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // SignupRequest is the input to Signup. SetupToken is the token of an unused
@@ -45,37 +46,49 @@ func (s *Service) Signup(ctx context.Context, req SignupRequest) (token string, 
 		return "", SessionResponse{}, signupRateLimited(retry)
 	}
 
-	user, err := s.createUser(ctx, CreateUserRequest{Email: req.Email, Password: req.Password})
+	nu, err := prepareUser(CreateUserRequest{Email: req.Email, Password: req.Password})
 	if err != nil {
-		if se, ok := errors.AsType[*Error](err); ok && se.Code == CodeConflict {
-			return "", SessionResponse{}, conflict("an account with this email already exists; sign in instead")
-		}
 		return "", SessionResponse{}, err
 	}
-
-	// Roll back on anything after this point. The cleanup must run even if
-	// the request's context was canceled.
-	committed := false
-	defer func() {
-		if committed {
-			return
-		}
-		_, _ = s.q.DeleteUser(context.WithoutCancel(ctx), user.ID)
-	}()
-
-	if setupToken != "" {
-		if _, err := s.claimSetupLink(ctx, setupToken, user.ID, now); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return "", SessionResponse{}, setupLinkInvalid()
+	var created User
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		user, err := s.insertUser(ctx, nu)
+		if err != nil {
+			if se, ok := errors.AsType[*Error](err); ok && se.Code == CodeConflict {
+				return conflict("an account with this email already exists; sign in instead")
 			}
-			return "", SessionResponse{}, fmt.Errorf("claim setup link: %w", err)
+			return err
 		}
-	}
-
-	token, expires, err := s.startSession(ctx, now, user.ID, "web", webSessionLifetime)
+		created = user
+		if setupToken != "" {
+			if _, err := s.claimSetupLink(ctx, setupToken, user.ID, now); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return setupLinkInvalid()
+				}
+				return fmt.Errorf("claim setup link: %w", err)
+			}
+		}
+		var expires time.Time
+		token, expires, err = s.startSession(ctx, now, user.ID, "web", webSessionLifetime)
+		if err != nil {
+			return err
+		}
+		if err := s.record(ctx, Event{
+			Name:       "user.created",
+			ActorKind:  "user",
+			ActorID:    user.ID,
+			ActorLabel: user.Email,
+			TargetType: "user",
+			TargetID:   user.ID,
+			TargetName: user.Email,
+		}); err != nil {
+			return err
+		}
+		resp = SessionResponse{ExpiresAt: expires, User: created}
+		return nil
+	})
 	if err != nil {
 		return "", SessionResponse{}, err
 	}
-	committed = true
-	return token, SessionResponse{ExpiresAt: expires, User: user}, nil
+	return token, resp, nil
 }

@@ -30,7 +30,7 @@ func newDNSProfileFixture(t *testing.T) (*Service, *sql.DB, *cloudflaretest.Fake
 	}
 	fake := cloudflaretest.New(t)
 	fake.Token = dnsTestToken
-	s := New(db.New(conn), WithKeyring(keyring), WithCloudflareURL(fake.URL))
+	s := New(conn, WithKeyring(keyring), WithCloudflareURL(fake.URL))
 	return s, conn, fake
 }
 

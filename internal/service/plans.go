@@ -54,7 +54,7 @@ func (s *Service) ListPlans(ctx context.Context) (PlanList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return PlanList{}, err
 	}
-	rows, err := s.q.ListPlans(ctx)
+	rows, err := s.queries(ctx).ListPlans(ctx)
 	if err != nil {
 		return PlanList{}, fmt.Errorf("list plans: %w", err)
 	}
@@ -118,20 +118,33 @@ func (s *Service) CreatePlan(ctx context.Context, req CreatePlanRequest) (Plan, 
 	if err != nil {
 		return Plan{}, err
 	}
-	row, err := s.q.CreatePlan(ctx, db.CreatePlanParams{
-		ID:           uuid.NewV7().String(),
-		Slug:         slug,
-		Name:         name,
-		MaxSandboxes: sandboxes,
-		MaxVcpus:     vcpus,
-		MaxMemoryMb:  memory,
-		CreatedAt:    s.now(),
+	var row db.Plan
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreatePlan(ctx, db.CreatePlanParams{
+			ID:           uuid.NewV7().String(),
+			Slug:         slug,
+			Name:         name,
+			MaxSandboxes: sandboxes,
+			MaxVcpus:     vcpus,
+			MaxMemoryMb:  memory,
+			CreatedAt:    s.now(),
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a plan with slug %q already exists", slug)
+		}
+		if err != nil {
+			return fmt.Errorf("create plan: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "plan.created",
+			TargetType: "plan",
+			TargetID:   row.ID,
+			TargetName: row.Slug,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return Plan{}, conflict("a plan with slug %q already exists", slug)
-	}
 	if err != nil {
-		return Plan{}, fmt.Errorf("create plan: %w", err)
+		return Plan{}, err
 	}
 	settings, err := s.getSettings(ctx)
 	if err != nil {
@@ -152,6 +165,7 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 	if err != nil {
 		return Plan{}, err
 	}
+	before := row
 	if req.Slug != nil {
 		row.Slug, err = planSlug(*req.Slug)
 		if err != nil {
@@ -182,19 +196,52 @@ func (s *Service) UpdatePlan(ctx context.Context, ref string, req UpdatePlanRequ
 			return Plan{}, err
 		}
 	}
-	updated, err := s.q.UpdatePlan(ctx, db.UpdatePlanParams{
-		Slug:         row.Slug,
-		Name:         row.Name,
-		MaxSandboxes: row.MaxSandboxes,
-		MaxVcpus:     row.MaxVcpus,
-		MaxMemoryMb:  row.MaxMemoryMb,
-		ID:           row.ID,
+	var updated db.Plan
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).UpdatePlan(ctx, db.UpdatePlanParams{
+			Slug:         row.Slug,
+			Name:         row.Name,
+			MaxSandboxes: row.MaxSandboxes,
+			MaxVcpus:     row.MaxVcpus,
+			MaxMemoryMb:  row.MaxMemoryMb,
+			ID:           row.ID,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a plan with slug %q already exists", row.Slug)
+		}
+		if err != nil {
+			return fmt.Errorf("update plan: %w", err)
+		}
+		changes := map[string]Change{}
+		if before.Slug != updated.Slug {
+			changes["slug"] = Change{From: before.Slug, To: updated.Slug}
+		}
+		if before.Name != updated.Name {
+			changes["name"] = Change{From: before.Name, To: updated.Name}
+		}
+		if before.MaxSandboxes != updated.MaxSandboxes {
+			changes["max_sandboxes"] = Change{From: nullIntValue(before.MaxSandboxes), To: nullIntValue(updated.MaxSandboxes)}
+		}
+		if before.MaxVcpus != updated.MaxVcpus {
+			changes["max_vcpus"] = Change{From: nullIntValue(before.MaxVcpus), To: nullIntValue(updated.MaxVcpus)}
+		}
+		if before.MaxMemoryMb != updated.MaxMemoryMb {
+			changes["max_memory_mb"] = Change{From: nullIntValue(before.MaxMemoryMb), To: nullIntValue(updated.MaxMemoryMb)}
+		}
+		if len(changes) == 0 {
+			return nil
+		}
+		return s.record(ctx, Event{
+			Name:       "plan.updated",
+			TargetType: "plan",
+			TargetID:   updated.ID,
+			TargetName: updated.Slug,
+			Changes:    changes,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return Plan{}, conflict("a plan with slug %q already exists", row.Slug)
-	}
 	if err != nil {
-		return Plan{}, fmt.Errorf("update plan: %w", err)
+		return Plan{}, err
 	}
 
 	if req.MaxSandboxes.Set || req.MaxVcpus.Set || req.MaxMemoryMB.Set {
@@ -224,19 +271,30 @@ func (s *Service) DeletePlan(ctx context.Context, ref string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	n, err := s.q.DeletePlan(ctx, row.ID)
-	if err != nil {
-		return Plan{}, fmt.Errorf("delete plan: %w", err)
-	}
-	if n == 0 {
-		counts, err := s.planSubscriptionCounts(ctx)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeletePlan(ctx, row.ID)
 		if err != nil {
-			return Plan{}, err
+			return fmt.Errorf("delete plan: %w", err)
 		}
-		if count := counts[row.ID]; count > 0 {
-			return Plan{}, conflict("plan %q is used by %d subscription(s); move them to another plan first", row.Slug, count)
+		if n == 0 {
+			counts, err := s.planSubscriptionCounts(ctx)
+			if err != nil {
+				return err
+			}
+			if count := counts[row.ID]; count > 0 {
+				return conflict("plan %q is used by %d subscription(s); move them to another plan first", row.Slug, count)
+			}
+			return conflict("plan %q is the default plan; choose another default first", row.Slug)
 		}
-		return Plan{}, conflict("plan %q is the default plan; choose another default first", row.Slug)
+		return s.record(ctx, Event{
+			Name:       "plan.deleted",
+			TargetType: "plan",
+			TargetID:   row.ID,
+			TargetName: row.Slug,
+		})
+	})
+	if err != nil {
+		return Plan{}, err
 	}
 	return toPlan(row, 0, false), nil
 }
@@ -252,9 +310,9 @@ func (s *Service) findPlan(ctx context.Context, ref string) (db.Plan, error) {
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetPlanByID(ctx, id.String())
+		row, err = s.queries(ctx).GetPlanByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetPlanBySlug(ctx, strings.ToLower(ref))
+		row, err = s.queries(ctx).GetPlanBySlug(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Plan{}, notFound("plan %q not found", ref)
@@ -267,7 +325,7 @@ func (s *Service) findPlan(ctx context.Context, ref string) (db.Plan, error) {
 
 // planRows maps plan IDs to rows, for turning subscriptions into responses.
 func (s *Service) planRows(ctx context.Context) (map[string]db.Plan, error) {
-	rows, err := s.q.ListPlans(ctx)
+	rows, err := s.queries(ctx).ListPlans(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
@@ -280,7 +338,7 @@ func (s *Service) planRows(ctx context.Context) (map[string]db.Plan, error) {
 
 // planSubscriptionCounts maps plan IDs to how many subscriptions use them.
 func (s *Service) planSubscriptionCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountSubscriptionsByPlan(ctx)
+	rows, err := s.queries(ctx).CountSubscriptionsByPlan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count subscriptions by plan: %w", err)
 	}

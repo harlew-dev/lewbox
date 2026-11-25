@@ -105,7 +105,7 @@ func (s *Service) ListStorageProfiles(ctx context.Context) (StorageProfileList, 
 	if _, err := requireAdmin(ctx); err != nil {
 		return StorageProfileList{}, err
 	}
-	rows, err := s.q.ListStorageProfiles(ctx)
+	rows, err := s.queries(ctx).ListStorageProfiles(ctx)
 	if err != nil {
 		return StorageProfileList{}, fmt.Errorf("list storage profiles: %w", err)
 	}
@@ -192,7 +192,7 @@ func (s *Service) CreateStorageProfile(ctx context.Context, req CreateStoragePro
 		return StorageProfile{}, err
 	}
 	now := s.now()
-	row, err := s.q.CreateStorageProfile(ctx, db.CreateStorageProfileParams{
+	row, err := s.queries(ctx).CreateStorageProfile(ctx, db.CreateStorageProfileParams{
 		ID:           uuid.NewV7().String(),
 		Name:         name,
 		Provider:     provider,
@@ -289,7 +289,7 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 	// Moving the bucket would strand the data of every archive that already
 	// points at it, so those must be deleted first.
 	if endpoint != row.Endpoint || bucket != row.Bucket || prefix != row.Prefix {
-		n, err := s.q.CountLiveArchivesByStorageProfile(ctx, sql.NullString{String: row.ID, Valid: true})
+		n, err := s.queries(ctx).CountLiveArchivesByStorageProfile(ctx, sql.NullString{String: row.ID, Valid: true})
 		if err != nil {
 			return StorageProfile{}, fmt.Errorf("count archives by storage profile: %w", err)
 		}
@@ -346,7 +346,7 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 	row.AccessKeyID = accessKey
 	row.UpdatedAt = now
 
-	updated, err := s.q.UpdateStorageProfile(ctx, db.UpdateStorageProfileParams{
+	updated, err := s.queries(ctx).UpdateStorageProfile(ctx, db.UpdateStorageProfileParams{
 		Name:         row.Name,
 		Endpoint:     row.Endpoint,
 		Region:       row.Region,
@@ -386,7 +386,7 @@ func (s *Service) DeleteStorageProfile(ctx context.Context, ref string) (Storage
 	if err != nil {
 		return StorageProfile{}, err
 	}
-	n, err := s.q.DeleteStorageProfile(ctx, row.ID)
+	n, err := s.queries(ctx).DeleteStorageProfile(ctx, row.ID)
 	if err != nil {
 		return StorageProfile{}, fmt.Errorf("delete storage profile: %w", err)
 	}
@@ -422,7 +422,7 @@ func (s *Service) TestStorageProfile(ctx context.Context, ref string) (StoragePr
 	} else {
 		row.TestError = ""
 	}
-	if err := s.q.RecordStorageProfileTest(ctx, db.RecordStorageProfileTestParams{
+	if err := s.queries(ctx).RecordStorageProfileTest(ctx, db.RecordStorageProfileTestParams{
 		TestedAt:  row.TestedAt,
 		TestError: row.TestError,
 		ID:        row.ID,
@@ -607,9 +607,9 @@ func (s *Service) findStorageProfile(ctx context.Context, ref string) (db.Storag
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetStorageProfileByID(ctx, id.String())
+		row, err = s.queries(ctx).GetStorageProfileByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetStorageProfileByName(ctx, strings.ToLower(ref))
+		row, err = s.queries(ctx).GetStorageProfileByName(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.StorageProfile{}, notFound("storage profile %q not found", ref)
@@ -622,7 +622,7 @@ func (s *Service) findStorageProfile(ctx context.Context, ref string) (db.Storag
 
 // storageProfileClusterCounts maps profile IDs to how many clusters use them.
 func (s *Service) storageProfileClusterCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountStorageProfileClusters(ctx)
+	rows, err := s.queries(ctx).CountStorageProfileClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count clusters by storage profile: %w", err)
 	}

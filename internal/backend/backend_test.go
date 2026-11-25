@@ -59,7 +59,7 @@ func newHarness(t *testing.T, opts ...service.Option) *harness {
 		service.WithKeyring(keyring),
 		service.WithAerolVMOptions(aerolvm.WithRetry(0)),
 	}, opts...)
-	svc := service.New(db.New(conn), svcOpts...)
+	svc := service.New(conn, svcOpts...)
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 

@@ -32,7 +32,7 @@ func newTestServiceWith(t *testing.T, opts ...Option) *Service {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	return New(db.New(conn), opts...)
+	return New(conn, opts...)
 }
 
 func localCtx() context.Context {

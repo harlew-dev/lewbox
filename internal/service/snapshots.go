@@ -181,7 +181,7 @@ func (s *Service) listArchiveSnapshots(ctx context.Context, org *db.Organization
 	if cluster != nil {
 		clusterID = cluster.ID
 	}
-	rows, err := s.q.ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: clusterID})
+	rows, err := s.queries(ctx).ListArchives(ctx, db.ListArchivesParams{OrgID: orgID, ClusterID: clusterID})
 	if err != nil {
 		return nil, fmt.Errorf("list archives: %w", err)
 	}
@@ -316,7 +316,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 // snapshotTargets lists the workspaces and regions the caller may read. With
 // no organization chosen, an instance admin sees every workspace.
 func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, region string) ([]snapshotTarget, error) {
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -328,7 +328,7 @@ func (s *Service) snapshotTargets(ctx context.Context, org *db.Organization, reg
 	if org != nil {
 		orgs = append(orgs, *org)
 	} else {
-		orgs, err = s.q.ListOrganizations(ctx)
+		orgs, err = s.queries(ctx).ListOrganizations(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list organizations: %w", err)
 		}
@@ -364,7 +364,7 @@ type snapshotNode struct {
 // snapshotNodes lists the addresses snapshots can live at, from the members
 // Lewbox mirrored.
 func (s *Service) snapshotNodes(ctx context.Context, cluster db.Cluster) ([]snapshotNode, error) {
-	rows, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("list cluster nodes: %w", err)
 	}

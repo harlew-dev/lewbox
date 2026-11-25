@@ -28,6 +28,8 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderUsers(w, data.Data, now)
 	case *service.UserList:
 		return renderUsers(w, data.Data, now)
+	case service.EventList:
+		return renderEvents(w, data, now)
 	case service.ClusterDetail:
 		return renderClusterDetail(w, data, now)
 	case *service.ClusterDetail:
@@ -130,6 +132,32 @@ func renderUsers(w io.Writer, users []service.User, now time.Time) error {
 			u.Email, yesNo(u.InstanceAdmin), yesNo(u.Disabled), relativeTime(u.CreatedAt, now))
 	}
 	return tw.Flush()
+}
+
+// renderEvents prints the audit trail, newest first, and the cursor for the
+// next page when there is one.
+func renderEvents(w io.Writer, list service.EventList, now time.Time) error {
+	tw := newTable(w)
+	fmt.Fprintln(tw, "TIME\tACTOR\tACTION\tTARGET\tWORKSPACE\tIP")
+	for _, e := range list.Data {
+		target := e.TargetType
+		switch {
+		case e.TargetName != "":
+			target += " " + e.TargetName
+		case e.TargetID != "":
+			target += " " + e.TargetID
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			relativeTime(e.CreatedAt, now), dash(e.ActorLabel), e.Name, target,
+			dash(e.OrganizationID), dash(e.IP))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if list.Next != nil {
+		fmt.Fprintf(w, "\nnext: %s\n", *list.Next)
+	}
+	return nil
 }
 
 // renderClusterDetail prints the cluster fields, its checks and its nodes.

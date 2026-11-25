@@ -102,7 +102,7 @@ func (s *Service) ClusterNodeSettings(ctx context.Context, ref string) (NodeSett
 	}
 
 	if row.StorageProfileID.Valid {
-		profile, err := s.q.GetStorageProfileByID(ctx, row.StorageProfileID.String)
+		profile, err := s.queries(ctx).GetStorageProfileByID(ctx, row.StorageProfileID.String)
 		if err != nil {
 			return NodeSettings{}, fmt.Errorf("get storage profile: %w", err)
 		}
@@ -124,7 +124,7 @@ func (s *Service) ClusterNodeSettings(ctx context.Context, ref string) (NodeSett
 	}
 
 	if row.DnsProfileID.Valid && row.Domain != "" {
-		profile, err := s.q.GetDNSProfileByID(ctx, row.DnsProfileID.String)
+		profile, err := s.queries(ctx).GetDNSProfileByID(ctx, row.DnsProfileID.String)
 		if err != nil {
 			return NodeSettings{}, fmt.Errorf("get DNS profile: %w", err)
 		}
@@ -173,7 +173,7 @@ func (s *Service) ReportNodeSettings(ctx context.Context, ref string, req Report
 		}
 		retention = sql.NullString{String: value, Valid: true}
 	}
-	updated, err := s.q.ReportNodeSettings(ctx, db.ReportNodeSettingsParams{
+	updated, err := s.queries(ctx).ReportNodeSettings(ctx, db.ReportNodeSettingsParams{
 		SettingsAppliedAt:        sql.NullTime{Time: s.now(), Valid: true},
 		SettingsStorageProfileID: storageID,
 		SettingsStorageVersion:   storageVersion,
@@ -254,7 +254,7 @@ func (s *Service) applyNodeOutdated(ctx context.Context, n *Node, r db.Node, clu
 	var storageVersion int64
 	hasStorage := false
 	if cluster.StorageProfileID.Valid {
-		row, err := s.q.GetStorageProfileByID(ctx, cluster.StorageProfileID.String)
+		row, err := s.queries(ctx).GetStorageProfileByID(ctx, cluster.StorageProfileID.String)
 		switch {
 		case err == nil:
 			hasStorage = true
@@ -293,7 +293,7 @@ func (s *Service) applyNodeOutdated(ctx context.Context, n *Node, r db.Node, clu
 	var dnsVersion int64
 	hasDNS := false
 	if cluster.DnsProfileID.Valid {
-		row, err := s.q.GetDNSProfileByID(ctx, cluster.DnsProfileID.String)
+		row, err := s.queries(ctx).GetDNSProfileByID(ctx, cluster.DnsProfileID.String)
 		switch {
 		case err == nil:
 			hasDNS = true
@@ -330,7 +330,7 @@ func (s *Service) storageProfileLabel(ctx context.Context, id sql.NullString) (s
 	if !id.Valid {
 		return "", nil
 	}
-	row, err := s.q.GetStorageProfileByID(ctx, id.String)
+	row, err := s.queries(ctx).GetStorageProfileByID(ctx, id.String)
 	if err == nil {
 		return row.Name, nil
 	}
@@ -346,7 +346,7 @@ func (s *Service) dnsProfileLabel(ctx context.Context, id sql.NullString) (strin
 	if !id.Valid {
 		return "", nil
 	}
-	row, err := s.q.GetDNSProfileByID(ctx, id.String)
+	row, err := s.queries(ctx).GetDNSProfileByID(ctx, id.String)
 	if err == nil {
 		return row.Name, nil
 	}
@@ -360,7 +360,7 @@ func (s *Service) dnsProfileLabel(ctx context.Context, id sql.NullString) (strin
 // cluster's profiles. It is omitted when the cluster has no storage profile
 // and no node has reported storage settings.
 func (s *Service) nodeSettingsCheck(ctx context.Context, cluster db.Cluster) (Check, error) {
-	rows, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	if err != nil {
 		return Check{}, fmt.Errorf("list cluster nodes: %w", err)
 	}

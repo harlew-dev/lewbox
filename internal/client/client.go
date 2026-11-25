@@ -117,6 +117,33 @@ func (c *Client) ListUsers(ctx context.Context) (service.UserList, error) {
 	return out, err
 }
 
+// ListEvents returns one cursor page of the audit trail.
+func (c *Client) ListEvents(ctx context.Context, req service.ListEventsRequest) (service.EventList, error) {
+	query := url.Values{}
+	for name, value := range map[string]string{
+		"before":       req.Before,
+		"actor":        req.Actor,
+		"organization": req.Organization,
+		"action":       req.Action,
+		"from":         req.From,
+		"to":           req.To,
+	} {
+		if strings.TrimSpace(value) != "" {
+			query.Set(name, value)
+		}
+	}
+	if req.Limit > 0 {
+		query.Set("limit", strconv.Itoa(req.Limit))
+	}
+	path := "/v0/events"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out service.EventList
+	err := c.do(ctx, http.MethodGet, path, nil, &out, defaultTimeout)
+	return out, err
+}
+
 // GetUser returns an account by ID or email.
 func (c *Client) GetUser(ctx context.Context, ref string) (service.User, error) {
 	var out service.User

@@ -755,6 +755,57 @@ export function getUser(userRef: string): Promise<User> {
   return request<User>(`/v0/users/${ref(userRef)}`)
 }
 
+export interface EventChange {
+  from: unknown
+  to: unknown
+}
+
+// One row of the audit trail: who changed what, when and from where.
+export interface AuditEvent {
+  id: string
+  name: string
+  actor_kind: string
+  actor_id?: string
+  actor_label: string
+  target_type: string
+  target_id: string
+  target_name?: string
+  organization_id?: string
+  changes?: Record<string, EventChange>
+  ip?: string
+  request_id?: string
+  created_at: string
+}
+
+export interface EventPage {
+  data: AuditEvent[]
+  next: string | null
+}
+
+export interface EventFilters {
+  before?: string
+  actor?: string
+  organization?: string
+  action?: string
+  from?: string
+  to?: string
+  limit?: number
+}
+
+export function listEvents(filters: EventFilters = {}): Promise<EventPage> {
+  return request<EventPage>(
+    `/v0/events${query({
+      before: filters.before,
+      actor: filters.actor,
+      organization: filters.organization,
+      action: filters.action,
+      from: filters.from,
+      to: filters.to,
+      limit: filters.limit,
+    })}`,
+  )
+}
+
 export function addCluster(input: {
   slug: string
   name: string

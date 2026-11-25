@@ -102,6 +102,16 @@ Instance admins only.
 | `GET /v0/settings` | admin | `{instance_name, signup, default_plan, default_region}` |
 | `PATCH /v0/settings` | admin | `{instance_name, signup, default_plan, default_region}`; only the fields set change. `signup` is `open`, `approval` or `closed`; `default_plan` and `default_region` are a plan and cluster slug, or `none` to clear them |
 
+### Audit trail
+
+Instance admins only. One row per state change, newest first, cursor-paged.
+
+| Route | Who | |
+|---|---|---|
+| `GET /v0/events` | admin | `{data: [Event], next}`. Filters: `actor` (account ID or email), `organization` (workspace ID or slug), `action` (an event name such as `plan.updated`), `from` and `to` (RFC 3339; `to` is exclusive), `limit` (default 50, max 200), `before` (the `next` value of the previous page). An unknown filter value matches nothing; a cursor from another scope, or a pruned one, is `400` |
+
+An Event has `id`, `name`, `actor_kind` (`user`, `access_token`, `admin_key`, `local`, `system` or `anonymous`), `actor_id`, `actor_label`, `target_type`, `target_id`, `target_name`, `organization_id`, `changes` (`{field: {from, to}}` for an update), `ip`, `request_id` and `created_at`.
+
 ### Setup links
 
 Instance admins create and revoke them; only the token's hash is stored, so `token` appears only in the create response. The public page's lookup takes the token in the body, so it never reaches a URL or a proxy log.

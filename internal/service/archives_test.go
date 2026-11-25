@@ -43,7 +43,7 @@ func newArchiveFixture(t *testing.T) *archiveFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(db.New(conn),
+	s := New(conn,
 		WithKeyring(keyring),
 		WithAerolVMOptions(aerolvm.WithRetry(0)),
 		WithClock(func() time.Time { return clock.at }),

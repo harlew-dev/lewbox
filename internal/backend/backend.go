@@ -27,6 +27,8 @@ type Backend interface {
 	SetUserDisabled(ctx context.Context, ref string, disabled bool) (service.User, error)
 	SetPassword(ctx context.Context, ref string, req service.SetPasswordRequest) (service.User, error)
 
+	ListEvents(ctx context.Context, req service.ListEventsRequest) (service.EventList, error)
+
 	AddCluster(ctx context.Context, req service.AddClusterRequest) (service.ClusterDetail, error)
 	ListClusters(ctx context.Context) (service.ClusterList, error)
 	GetCluster(ctx context.Context, ref string) (service.ClusterDetail, error)
@@ -168,6 +170,11 @@ func (l Local) ListUsers(ctx context.Context) (service.UserList, error) {
 // GetUser returns an account by ID or email.
 func (l Local) GetUser(ctx context.Context, ref string) (service.User, error) {
 	return l.Svc.GetUser(l.withPrincipal(ctx), ref)
+}
+
+// ListEvents returns one cursor page of the audit trail.
+func (l Local) ListEvents(ctx context.Context, req service.ListEventsRequest) (service.EventList, error) {
+	return l.Svc.ListEvents(l.withPrincipal(ctx), req)
 }
 
 // RemoveUser removes an account.

@@ -149,11 +149,13 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 		regions  = Regions{s}
 		settings = Settings{s}
 		overview = Overview{s}
+		events   = Events{s}
 	)
 	mux.HandleFunc("GET "+Prefix+"/regions", regions.Index)
 	mux.HandleFunc("GET "+Prefix+"/settings", settings.Show)
 	mux.HandleFunc("PATCH "+Prefix+"/settings", settings.Update)
 	mux.HandleFunc("GET "+Prefix+"/overview", overview.Show)
+	mux.HandleFunc("GET "+Prefix+"/events", events.Index)
 
 	// Plans and the two profile kinds.
 	var (

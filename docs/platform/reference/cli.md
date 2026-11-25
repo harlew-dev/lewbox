@@ -95,6 +95,7 @@ Runs the orchestrator in the foreground. The same as `lewbox orchestrator serve`
 | `--check-interval D` | `LEWBOX_CHECK_INTERVAL` | `1m` | How often to check every cluster. `0` turns it off |
 | `--sync-interval D` | `LEWBOX_SYNC_INTERVAL` | `15s` | How often to mirror sandboxes, meter usage and push quotas. `0` turns it off; also caps the gap charged after an outage at twice this value |
 | `--archive-interval D` | `LEWBOX_ARCHIVE_INTERVAL` | `5s` | How often to archive stopped sandboxes on archive clusters and advance their pushes. `0` turns it off |
+| `--audit-retention D` | `LEWBOX_AUDIT_RETENTION` | `90d` | How long the audit trail is kept: `90d`, `12h`, or `forever`/`0` for every event |
 | `--cookie-secure MODE` | `LEWBOX_COOKIE_SECURE` | `auto` | `auto` or `always`. `always` marks browser session cookies `Secure`, for a TLS proxy that does not set `X-Forwarded-Proto` |
 | `--trusted-origin ORIGIN` | `LEWBOX_TRUSTED_ORIGINS` | | Extra origin the CSRF check accepts, repeatable (env: comma-separated) |
 | `--trusted-proxy CIDR` | `LEWBOX_TRUSTED_PROXIES` | | Trust `X-Forwarded-For` from this proxy network for the client IP, repeatable (env: comma-separated). Behind Caddy on the same host: `127.0.0.1/32` |
@@ -429,6 +430,10 @@ Changes a plan. `unlimited` clears a limit; `--max-memory` takes `4096`, `4096MB
 ### `lewbox plan delete ID|SLUG`
 
 Deletes a plan no subscription uses and that is not the default. Asks to confirm.
+
+### `lewbox events [--actor ID|EMAIL] [--workspace ID|SLUG] [--action NAME] [--from TIME] [--to TIME] [--limit N] [--before ID]`
+
+The audit trail, newest first: every state change made through Lewbox, with who made it, the public ID or name of what changed, the workspace when there is one, the client IP and the changed fields. Instance admins only. `--action` is an event name such as `plan.updated`; `--from` and `--to` are RFC 3339 times (`to` is exclusive). `--limit` defaults to 50, at most 200. Page on with `--before` set to the `next` value the previous page printed (JSON) or showed as `next:` (text). See [Audit trail](../operations/audit-trail.md).
 
 ### `lewbox dns-profile list` · `lewbox dns-profile show ID|NAME`
 

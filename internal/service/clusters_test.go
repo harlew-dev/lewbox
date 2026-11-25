@@ -36,7 +36,7 @@ func newClusterService(t *testing.T, extra ...Option) *Service {
 		WithAerolVMOptions(aerolvm.WithRetry(0)),
 	}
 	opts = append(opts, extra...)
-	return New(db.New(conn), opts...)
+	return New(conn, opts...)
 }
 
 func newClusterFake(t *testing.T, members ...aerolvm.Member) *aerolvmtest.Server {

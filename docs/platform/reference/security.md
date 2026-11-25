@@ -18,6 +18,12 @@ description: What Lewbox stores, how secrets are protected, and what to watch fo
 
 Anyone with both the database and the keyring controls every registered cluster. Keep them, and their backups, as private as the clusters themselves.
 
+## Audit trail
+
+Every state change the audit trail covers writes one row to the `events` table in the same transaction as the change. A row holds the actor's account ID or key ID plus the email or key name at the time, the action name, the target's public ID or name, the workspace, the changed fields, the client IP and the server's request ID. Passwords, hashes, session and access tokens, API keys, setup-link tokens, profile secrets and join tokens are never recorded. A failed sign-in records the attempt; the email typed for an address with no account is not stored.
+
+Only instance admins can read the trail, through `GET /v0/events`, `lewbox events` or **Audit trail** in the console. It is kept 90 days by default; set `--audit-retention` (or `LEWBOX_AUDIT_RETENTION`) to a duration, or `forever`. IP addresses are not truncated before deletion yet — see [Audit trail](../operations/audit-trail.md#known-gap).
+
 ## Signing in
 
 - The orchestrator speaks plain HTTP. Put TLS in front of it ([Run in production](../setup/run-in-production.md#put-tls-in-front)).

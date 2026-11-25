@@ -60,6 +60,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | | |
 |---|---|
 | [Update](operations/update.md) | Update the CLI and AerolVM on a machine |
+| [Audit trail](operations/audit-trail.md) | Every change, who made it, and how long it is kept |
 | [Turn on the firewall](operations/firewall.md) | ufw with exactly the ports a node needs |
 | [Data map](operations/data-map.md) | What personal data Lewbox stores, for how long, and how to export or delete it |
 | [Incident response](operations/incident-response.md) | Detect, contain, rotate secrets, restore from backup and notify |

@@ -23,6 +23,7 @@ Flags win over environment variables, which win over saved settings, which win o
 | `LEWBOX_PORT` | `--port` | `8080` |
 | `LEWBOX_LISTEN` | `--listen` | `:8080` |
 | `LEWBOX_CHECK_INTERVAL` | `--check-interval` | `1m` (`0` turns checks off) |
+| `LEWBOX_AUDIT_RETENTION` | `--audit-retention` | `90d`: how long the audit trail is kept. Takes `90d`, `12h`, or `forever`/`0` to keep every event |
 | `LEWBOX_COOKIE_SECURE` | `--cookie-secure` | `auto`. `always` forces `Secure` browser session cookies; use it behind a TLS proxy that does not set `X-Forwarded-Proto` |
 | `LEWBOX_TRUSTED_ORIGINS` | `--trusted-origin` | Extra origins the CSRF check accepts, comma-separated, such as `https://lewbox.example.com` |
 | `LEWBOX_TRUSTED_PROXIES` | `--trusted-proxy` | CIDRs of proxies whose `X-Forwarded-For` sets the client IP, comma-separated. Empty trusts no proxy |

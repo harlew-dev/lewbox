@@ -37,6 +37,7 @@ type serveOptions struct {
 	cookieSecure    string
 	trustedOrigins  []string
 	trustedProxies  []string
+	auditRetention  string
 }
 
 func addServeFlags(cmd *cobra.Command, o *serveOptions) {
@@ -56,6 +57,8 @@ func addServeFlags(cmd *cobra.Command, o *serveOptions) {
 		"extra origin allowed by the CSRF check (repeatable; env LEWBOX_TRUSTED_ORIGINS, comma-separated)")
 	cmd.Flags().StringSliceVar(&o.trustedProxies, "trusted-proxy", envList("LEWBOX_TRUSTED_PROXIES"),
 		"CIDR of a proxy whose X-Forwarded-For sets the client IP (repeatable; env LEWBOX_TRUSTED_PROXIES, comma-separated)")
+	cmd.Flags().StringVar(&o.auditRetention, "audit-retention", envOr("LEWBOX_AUDIT_RETENTION", "90d"),
+		"how long to keep the audit trail: 90d, 12h or forever (env LEWBOX_AUDIT_RETENTION)")
 }
 
 // trustedProxyPrefixes parses --trusted-proxy values.
@@ -69,6 +72,27 @@ func (o *serveOptions) trustedProxyPrefixes() ([]netip.Prefix, error) {
 		out = append(out, prefix.Masked())
 	}
 	return out, nil
+}
+
+// parseAuditRetention reads --audit-retention: a Go duration (12h), a whole
+// number of days (90d), or forever/0 to keep every event.
+func parseAuditRetention(raw string) (time.Duration, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "forever", "keep", "none", "0":
+		return 0, nil
+	}
+	if days, err := strconv.Atoi(strings.TrimSuffix(s, "d")); err == nil && strings.HasSuffix(s, "d") {
+		if days < 0 {
+			return 0, usagef("--audit-retention must not be negative")
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, usagef("--audit-retention must be a duration such as 90d or 12h, or forever")
+	}
+	return d, nil
 }
 
 // secureCookies turns --cookie-secure into a router option.
@@ -165,6 +189,10 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	if err != nil {
 		return err
 	}
+	retention, err := parseAuditRetention(o.auditRetention)
+	if err != nil {
+		return err
+	}
 	// Every server log line is scrubbed, including the background loops'.
 	log := logsafe.WrapLogger(slog.New(slog.NewJSONHandler(a.stderr, nil)))
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -174,6 +202,7 @@ func (a *app) runServe(cmd *cobra.Command, o *serveOptions) error {
 	if err != nil {
 		return err
 	}
+	a.svc.SetAuditRetention(retention)
 	svc.SetLogger(log)
 	if err := bootstrapAdmin(ctx, svc, log); err != nil {
 		return err

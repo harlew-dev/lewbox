@@ -43,7 +43,7 @@ func (s *Service) ListSubscriptions(ctx context.Context, org string) (Subscripti
 	if err != nil {
 		return SubscriptionList{}, err
 	}
-	subs, err := s.q.ListSubscriptions(ctx, c.org.ID)
+	subs, err := s.queries(ctx).ListSubscriptions(ctx, c.org.ID)
 	if err != nil {
 		return SubscriptionList{}, fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -106,7 +106,7 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 		return Subscription{}, err
 	}
 
-	existing, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	existing, err := s.queries(ctx).GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	switch {
 	case err == nil:
 		if !req.MaxSandboxes.Set {
@@ -118,7 +118,7 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 		if !req.MaxMemoryMB.Set {
 			memory = existing.MaxMemoryMb
 		}
-		existing, err = s.q.UpdateSubscription(ctx, db.UpdateSubscriptionParams{
+		existing, err = s.queries(ctx).UpdateSubscription(ctx, db.UpdateSubscriptionParams{
 			PlanID:       plan.ID,
 			MaxSandboxes: sandboxes,
 			MaxVcpus:     vcpus,
@@ -130,7 +130,7 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 			return Subscription{}, fmt.Errorf("update subscription: %w", err)
 		}
 	case errors.Is(err, sql.ErrNoRows):
-		existing, err = s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+		existing, err = s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
 			OrgID:        c.org.ID,
 			ClusterID:    cluster.ID,
 			PlanID:       plan.ID,
@@ -157,7 +157,7 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 // checkOneRegion refuses a subscription outside the workspace's current
 // region. The unique index is the real guard; this is the readable error.
 func (s *Service) checkOneRegion(ctx context.Context, org db.Organization, clusterID string) error {
-	subs, err := s.q.ListSubscriptions(ctx, org.ID)
+	subs, err := s.queries(ctx).ListSubscriptions(ctx, org.ID)
 	if err != nil {
 		return fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -171,7 +171,7 @@ func (s *Service) checkOneRegion(ctx context.Context, org db.Organization, clust
 
 // regionConflict names the region a workspace is already in.
 func (s *Service) regionConflict(ctx context.Context, org db.Organization, clusterID string) error {
-	subs, err := s.q.ListSubscriptions(ctx, org.ID)
+	subs, err := s.queries(ctx).ListSubscriptions(ctx, org.ID)
 	if err != nil {
 		return fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -179,7 +179,7 @@ func (s *Service) regionConflict(ctx context.Context, org db.Organization, clust
 		if sub.ClusterID == clusterID {
 			continue
 		}
-		other, err := s.q.GetClusterByID(ctx, sub.ClusterID)
+		other, err := s.queries(ctx).GetClusterByID(ctx, sub.ClusterID)
 		if err != nil {
 			return fmt.Errorf("get cluster: %w", err)
 		}
@@ -204,14 +204,14 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	sub, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	sub, err := s.queries(ctx).GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
 	}
 	if err != nil {
 		return Subscription{}, fmt.Errorf("get subscription: %w", err)
 	}
-	plan, err := s.q.GetPlanByID(ctx, sub.PlanID)
+	plan, err := s.queries(ctx).GetPlanByID(ctx, sub.PlanID)
 	if err != nil {
 		return Subscription{}, fmt.Errorf("get plan: %w", err)
 	}
@@ -219,7 +219,7 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 
 	// Remove the row first, so no new key can be minted while its keys are
 	// being revoked.
-	n, err := s.q.DeleteSubscription(ctx, db.DeleteSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	n, err := s.queries(ctx).DeleteSubscription(ctx, db.DeleteSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if err != nil {
 		return Subscription{}, fmt.Errorf("delete subscription: %w", err)
 	}
@@ -227,7 +227,7 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
 	}
 	if err := s.revokeSubscriptionKeys(ctx, c.org, cluster, force); err != nil {
-		if _, rerr := s.q.CreateSubscription(ctx, db.CreateSubscriptionParams{
+		if _, rerr := s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
 			OrgID:        sub.OrgID,
 			ClusterID:    sub.ClusterID,
 			PlanID:       sub.PlanID,
@@ -242,7 +242,7 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	}
 
 	now := s.now()
-	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	state, err := s.queries(ctx).GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Subscription{}, fmt.Errorf("get quota state: %w", err)
 	}
@@ -266,7 +266,7 @@ func (s *Service) subscriptionAdmin(ctx context.Context, org string) (orgCaller,
 // revokeSubscriptionKeys revokes an organization's live sandbox keys on one
 // cluster, failing closed unless force is set.
 func (s *Service) revokeSubscriptionKeys(ctx context.Context, org db.Organization, cluster db.Cluster, force bool) error {
-	keys, err := s.q.ListLiveSandboxKeysByOrg(ctx, org.ID)
+	keys, err := s.queries(ctx).ListLiveSandboxKeysByOrg(ctx, org.ID)
 	if err != nil {
 		if !force {
 			return sandboxKeysNotRevoked(0, cluster.Slug)
@@ -296,7 +296,7 @@ func (s *Service) revokeSubscriptionKeys(ctx context.Context, org db.Organizatio
 // Errors are logged and recorded in quota_state.
 func (s *Service) pushSubscriptionQuota(ctx context.Context, org db.Organization, cluster db.Cluster, plan db.Plan, sub db.Subscription) {
 	quota, remove := subscriptionQuota(org.Status, true, effectiveLimits(plan, sub.MaxSandboxes, sub.MaxVcpus, sub.MaxMemoryMb))
-	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: org.ID, ClusterID: cluster.ID})
+	state, err := s.queries(ctx).GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: org.ID, ClusterID: cluster.ID})
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		s.log.Warn("get quota state failed", "cluster", cluster.Slug, "organization", org.Slug, "err", err)
 		return
@@ -307,11 +307,11 @@ func (s *Service) pushSubscriptionQuota(ctx context.Context, org db.Organization
 // subscriptionDesiredQuota is the quota_state value the subscription calls for
 // now: what a successful push must have stored before a key can be minted.
 func (s *Service) subscriptionDesiredQuota(ctx context.Context, org db.Organization, cluster db.Cluster) (string, error) {
-	sub, err := s.q.GetSubscription(ctx, db.GetSubscriptionParams{OrgID: org.ID, ClusterID: cluster.ID})
+	sub, err := s.queries(ctx).GetSubscription(ctx, db.GetSubscriptionParams{OrgID: org.ID, ClusterID: cluster.ID})
 	if err != nil {
 		return "", err
 	}
-	plan, err := s.q.GetPlanByID(ctx, sub.PlanID)
+	plan, err := s.queries(ctx).GetPlanByID(ctx, sub.PlanID)
 	if err != nil {
 		return "", err
 	}
@@ -340,7 +340,7 @@ func toSubscription(sub db.Subscription, plan db.Plan, cluster db.Cluster, admin
 
 // subscriptionsByCluster maps cluster IDs to an organization's subscriptions.
 func (s *Service) subscriptionsByCluster(ctx context.Context, orgID string) (map[string]db.Subscription, error) {
-	subs, err := s.q.ListSubscriptions(ctx, orgID)
+	subs, err := s.queries(ctx).ListSubscriptions(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("list subscriptions: %w", err)
 	}

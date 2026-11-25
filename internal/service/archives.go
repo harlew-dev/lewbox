@@ -97,7 +97,7 @@ func (s *Service) RestoreArchive(ctx context.Context, id string, req RegionScope
 	if err != nil {
 		return RestoredArchive{}, err
 	}
-	updated, err := s.q.GetArchiveByID(ctx, row.ID)
+	updated, err := s.queries(ctx).GetArchiveByID(ctx, row.ID)
 	if err != nil {
 		return RestoredArchive{}, fmt.Errorf("get restored archive: %w", err)
 	}
@@ -148,7 +148,7 @@ func (s *Service) findArchive(ctx context.Context, id string, req RegionScope, n
 		}
 		scope = &c.org
 	}
-	row, err := s.q.GetArchiveByID(ctx, parsed.String())
+	row, err := s.queries(ctx).GetArchiveByID(ctx, parsed.String())
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, notFound("archive %q not found", id)
 	}
@@ -158,11 +158,11 @@ func (s *Service) findArchive(ctx context.Context, id string, req RegionScope, n
 	if scope != nil && row.OrgID != scope.ID {
 		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, notFound("archive %q not found", id)
 	}
-	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID)
 	if err != nil {
 		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, fmt.Errorf("get archive organization: %w", err)
 	}
-	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, row.ClusterID)
 	if err != nil {
 		return db.Archive{}, db.Cluster{}, db.Organization{}, Principal{}, fmt.Errorf("get archive cluster: %w", err)
 	}
@@ -187,7 +187,7 @@ func (s *Service) ArchivePass(ctx context.Context) error {
 	if err := s.discoverArchives(ctx, now); err != nil {
 		return err
 	}
-	rows, err := s.q.ListDueArchives(ctx, sql.NullTime{Time: now, Valid: true})
+	rows, err := s.queries(ctx).ListDueArchives(ctx, sql.NullTime{Time: now, Valid: true})
 	if err != nil {
 		return fmt.Errorf("list due archives: %w", err)
 	}
@@ -198,7 +198,7 @@ func (s *Service) ArchivePass(ctx context.Context) error {
 	for _, row := range rows {
 		cluster, ok := clusters[row.ClusterID]
 		if !ok {
-			cluster, err = s.q.GetClusterByID(ctx, row.ClusterID)
+			cluster, err = s.queries(ctx).GetClusterByID(ctx, row.ClusterID)
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}
@@ -250,13 +250,13 @@ func (s *Service) ArchivePass(ctx context.Context) error {
 // on an archive cluster that has no live archive. The insert itself refuses
 // a duplicate, so two passes cannot archive one sandbox twice.
 func (s *Service) discoverArchives(ctx context.Context, now time.Time) error {
-	candidates, err := s.q.ListArchivableSandboxes(ctx)
+	candidates, err := s.queries(ctx).ListArchivableSandboxes(ctx)
 	if err != nil {
 		return fmt.Errorf("list archivable sandboxes: %w", err)
 	}
 	for _, candidate := range candidates {
 		id := uuid.NewV7().String()
-		inserted, err := s.q.InsertArchive(ctx, db.InsertArchiveParams{
+		inserted, err := s.queries(ctx).InsertArchive(ctx, db.InsertArchiveParams{
 			ArchiveID:    id,
 			SnapshotName: archiveSnapshotName(candidate.ArchiveSnapshotName, candidate.SandboxID, candidate.Name),
 			CreatedAt:    now,
@@ -280,7 +280,7 @@ func (s *Service) advanceArchive(ctx context.Context, cluster db.Cluster, row db
 	ctx, cancel := context.WithTimeout(ctx, archiveStepTimeout)
 	defer cancel()
 
-	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID)
 	if err != nil {
 		return fmt.Errorf("get archive organization: %w", err)
 	}
@@ -305,7 +305,7 @@ func (s *Service) advanceArchive(ctx context.Context, cluster db.Cluster, row db
 		// again after another archivePushTimeout.
 		if !row.PushingSince.Valid {
 			now := s.now()
-			if err := s.q.RestartArchivePush(ctx, db.RestartArchivePushParams{
+			if err := s.queries(ctx).RestartArchivePush(ctx, db.RestartArchivePushParams{
 				PushingSince: sql.NullTime{Time: now, Valid: true},
 				ID:           row.ID,
 			}); err != nil {
@@ -356,7 +356,7 @@ func (s *Service) archivePending(ctx context.Context, cluster db.Cluster, row db
 		return fmt.Errorf("encode archive tags: %w", err)
 	}
 	now := s.now()
-	if err := s.q.MarkArchivePushing(ctx, db.MarkArchivePushingParams{
+	if err := s.queries(ctx).MarkArchivePushing(ctx, db.MarkArchivePushingParams{
 		SandboxName:  sandbox.Name,
 		Image:        sandbox.Image,
 		Runtime:      sandbox.Runtime,
@@ -380,7 +380,7 @@ func (s *Service) archivePushing(ctx context.Context, cluster db.Cluster, row db
 		if isStatus(err, http.StatusNotFound) {
 			// The snapshot was never taken, or the node lost it: take it
 			// again.
-			if err := s.q.RetryArchive(ctx, row.ID); err != nil {
+			if err := s.queries(ctx).RetryArchive(ctx, row.ID); err != nil {
 				return fmt.Errorf("retry archive: %w", err)
 			}
 			s.logChange(cluster, row, archivePending)
@@ -436,7 +436,7 @@ func (s *Service) finishArchive(ctx context.Context, cluster db.Cluster, row db.
 	}
 
 	now := s.now()
-	if err := s.q.ArchivePushed(ctx, db.ArchivePushedParams{
+	if err := s.queries(ctx).ArchivePushed(ctx, db.ArchivePushedParams{
 		RegistryRef: registryRef,
 		ArchivedAt:  sql.NullTime{Time: now, Valid: true},
 		ID:          row.ID,
@@ -451,7 +451,7 @@ func (s *Service) finishArchive(ctx context.Context, cluster db.Cluster, row db.
 // running longer than archivePushTimeout.
 func (s *Service) waitForPush(ctx context.Context, cluster db.Cluster, row db.Archive, pushError string) error {
 	if row.PushingSince.Valid && s.now().Sub(row.PushingSince.Time) > archivePushTimeout {
-		if err := s.q.FailArchive(ctx, db.FailArchiveParams{
+		if err := s.queries(ctx).FailArchive(ctx, db.FailArchiveParams{
 			NextAttemptAt: sql.NullTime{Time: s.now().Add(archiveRetryDelay), Valid: true},
 			Error:         pushError,
 			ID:            row.ID,
@@ -465,7 +465,7 @@ func (s *Service) waitForPush(ctx context.Context, cluster db.Cluster, row db.Ar
 		// The push is still running: no row update, it is due next pass.
 		return nil
 	}
-	if err := s.q.DeferArchive(ctx, db.DeferArchiveParams{
+	if err := s.queries(ctx).DeferArchive(ctx, db.DeferArchiveParams{
 		Error:         pushError,
 		NextAttemptAt: row.NextAttemptAt,
 		ID:            row.ID,
@@ -478,7 +478,7 @@ func (s *Service) waitForPush(ctx context.Context, cluster db.Cluster, row db.Ar
 // deferArchive leaves the status alone, records why and holds the row back
 // for a minute.
 func (s *Service) deferArchive(ctx context.Context, cluster db.Cluster, row db.Archive, message string) error {
-	if err := s.q.DeferArchive(ctx, db.DeferArchiveParams{
+	if err := s.queries(ctx).DeferArchive(ctx, db.DeferArchiveParams{
 		Error:         message,
 		NextAttemptAt: sql.NullTime{Time: s.now().Add(archiveDeferDelay), Valid: true},
 		ID:            row.ID,
@@ -490,7 +490,7 @@ func (s *Service) deferArchive(ctx context.Context, cluster db.Cluster, row db.A
 
 // cancelArchive gives up on one sandbox.
 func (s *Service) cancelArchive(ctx context.Context, cluster db.Cluster, row db.Archive, reason string) error {
-	if err := s.q.CancelArchive(ctx, db.CancelArchiveParams{Error: reason, ID: row.ID}); err != nil {
+	if err := s.queries(ctx).CancelArchive(ctx, db.CancelArchiveParams{Error: reason, ID: row.ID}); err != nil {
 		return fmt.Errorf("cancel archive: %w", err)
 	}
 	s.logChange(cluster, row, archiveCancelled)
@@ -512,11 +512,11 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 	if row.RegistryRef == "" {
 		return aerolvm.Sandbox{}, conflict("archive %q has no registry ref", row.SandboxID)
 	}
-	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, row.ClusterID)
 	if err != nil {
 		return aerolvm.Sandbox{}, fmt.Errorf("get archive cluster: %w", err)
 	}
-	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID)
 	if err != nil {
 		return aerolvm.Sandbox{}, fmt.Errorf("get archive organization: %w", err)
 	}
@@ -562,7 +562,7 @@ func (s *Service) restoreArchive(ctx context.Context, row db.Archive) (aerolvm.S
 
 	now := s.now()
 	// The sandbox exists now: record it even if the caller went away.
-	if err := s.q.RecordArchiveRestore(context.WithoutCancel(ctx), db.RecordArchiveRestoreParams{
+	if err := s.queries(ctx).RecordArchiveRestore(context.WithoutCancel(ctx), db.RecordArchiveRestoreParams{
 		LastRestoredSandboxID: sandbox.ID,
 		LastRestoredAt:        sql.NullTime{Time: now, Valid: true},
 		ID:                    row.ID,
@@ -580,11 +580,11 @@ func (s *Service) deleteArchive(ctx context.Context, row db.Archive) error {
 	default:
 		return conflict("archive %q is %s and cannot be deleted", row.SandboxID, row.Status)
 	}
-	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, row.ClusterID)
 	if err != nil {
 		return fmt.Errorf("get archive cluster: %w", err)
 	}
-	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID)
 	if err != nil {
 		return fmt.Errorf("get archive organization: %w", err)
 	}
@@ -604,7 +604,7 @@ func (s *Service) deleteArchive(ctx context.Context, row db.Archive) error {
 		}
 	}
 	now := s.now()
-	if err := s.q.MarkArchiveDeleted(ctx, db.MarkArchiveDeletedParams{
+	if err := s.queries(ctx).MarkArchiveDeleted(ctx, db.MarkArchiveDeletedParams{
 		DeletedAt: sql.NullTime{Time: now, Valid: true},
 		ID:        row.ID,
 	}); err != nil {
@@ -629,7 +629,7 @@ func (s *Service) deleteArchiveFromBucket(ctx context.Context, cluster db.Cluste
 	if !cluster.StorageProfileID.Valid || cluster.StorageProfileID.String == "" {
 		return fmt.Errorf("cluster %q has no storage profile", cluster.Slug)
 	}
-	profile, err := s.q.GetStorageProfileByID(ctx, cluster.StorageProfileID.String)
+	profile, err := s.queries(ctx).GetStorageProfileByID(ctx, cluster.StorageProfileID.String)
 	if err != nil {
 		return fmt.Errorf("get cluster storage profile: %w", err)
 	}

@@ -15,6 +15,7 @@ import { WorkspaceDetailPage } from './pages/admin/workspace-detail'
 import { WorkspacesPage } from './pages/admin/workspaces'
 import { OverviewPage } from './pages/admin/overview'
 import { PlansPage } from './pages/admin/plans'
+import { EventsPage } from './pages/admin/events'
 import { FleetSandboxesPage } from './pages/admin/sandboxes'
 import { FleetSnapshotsPage } from './pages/admin/snapshots'
 import { AdminSettingsPage } from './pages/admin/settings'
@@ -182,6 +183,7 @@ export function App() {
           <Route path="sandboxes" element={<FleetSandboxesPage />} />
           <Route path="snapshots" element={<FleetSnapshotsPage />} />
           <Route path="plans" element={<PlansPage />} />
+          <Route path="events" element={<EventsPage />} />
           <Route path="servers" element={<ServersPage />} />
           <Route path="servers/clusters/:ref" element={<ClusterDetailPage />} />
           <Route path="users" element={<UsersPage />} />

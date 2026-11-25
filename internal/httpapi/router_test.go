@@ -40,7 +40,7 @@ func newTestServer(t *testing.T, opts ...service.Option) *testServer {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	svc := service.New(db.New(conn), opts...)
+	svc := service.New(conn, opts...)
 	ctx := service.WithPrincipal(context.Background(), service.LocalPrincipal())
 	if _, err := svc.CreateUser(ctx, service.CreateUserRequest{
 		Email:         adminEmail,
@@ -61,7 +61,7 @@ func newTestServerWithOptions(t *testing.T, routerOpts []httpapi.RouterOption, o
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	svc := service.New(db.New(conn), opts...)
+	svc := service.New(conn, opts...)
 	ctx := service.WithPrincipal(context.Background(), service.LocalPrincipal())
 	if _, err := svc.CreateUser(ctx, service.CreateUserRequest{
 		Email:         adminEmail,

@@ -82,7 +82,7 @@ func (s *Service) AddNode(ctx context.Context, req AddNodeRequest) (Node, error)
 		return Node{}, err
 	}
 
-	row, err := s.q.CreateNode(ctx, db.CreateNodeParams{
+	row, err := s.queries(ctx).CreateNode(ctx, db.CreateNodeParams{
 		ID:        uuid.NewV7().String(),
 		Name:      name,
 		URL:       nodeURL,
@@ -111,9 +111,9 @@ func (s *Service) ListNodes(ctx context.Context, req ListNodesRequest) (NodeList
 		if err != nil {
 			return NodeList{}, err
 		}
-		rows, err = s.q.ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+		rows, err = s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	} else {
-		rows, err = s.q.ListNodes(ctx)
+		rows, err = s.queries(ctx).ListNodes(ctx)
 	}
 	if err != nil {
 		return NodeList{}, fmt.Errorf("list nodes: %w", err)
@@ -176,7 +176,7 @@ func (s *Service) RemoveNode(ctx context.Context, ref string, req RemoveNodeRequ
 			return Node{}, err
 		}
 	}
-	n, err := s.q.DeleteNode(ctx, row.ID)
+	n, err := s.queries(ctx).DeleteNode(ctx, row.ID)
 	if err != nil {
 		return Node{}, fmt.Errorf("delete node: %w", err)
 	}
@@ -187,11 +187,11 @@ func (s *Service) RemoveNode(ctx context.Context, ref string, req RemoveNodeRequ
 }
 
 func (s *Service) removeClusterNode(ctx context.Context, row db.Node, req RemoveNodeRequest) error {
-	cluster, err := s.q.GetClusterByID(ctx, row.ClusterID.String)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, row.ClusterID.String)
 	if err != nil {
 		return fmt.Errorf("get cluster: %w", err)
 	}
-	siblings, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+	siblings, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	if err != nil {
 		return fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -246,9 +246,9 @@ func (s *Service) findNode(ctx context.Context, ref string) (db.Node, error) {
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetNodeByID(ctx, id.String())
+		row, err = s.queries(ctx).GetNodeByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetNodeByName(ctx, ref)
+		row, err = s.queries(ctx).GetNodeByName(ctx, ref)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Node{}, notFound("node %q not found", ref)
@@ -264,7 +264,7 @@ func (s *Service) decorateNode(ctx context.Context, r db.Node) (Node, error) {
 	if !r.ClusterID.Valid {
 		return n, nil
 	}
-	cluster, err := s.q.GetClusterByID(ctx, r.ClusterID.String)
+	cluster, err := s.queries(ctx).GetClusterByID(ctx, r.ClusterID.String)
 	if err != nil {
 		return Node{}, fmt.Errorf("get cluster: %w", err)
 	}

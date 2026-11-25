@@ -45,7 +45,7 @@ The console and the CLI share accounts, so a password change in either place aff
 
 ## Console pages (`/admin`, instance admins)
 
-The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sandboxes, Snapshots, Servers) and **Manage** (Plans, Settings). Home is the Overview page.
+The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sandboxes, Snapshots, Servers) and **Manage** (Plans, Audit trail, Settings). Home is the Overview page.
 
 | Page | Shows | Actions |
 |---|---|---|
@@ -55,6 +55,7 @@ The sidebar lists Home, Workspaces and Users, then two groups: **Compute** (Sand
 | Sandboxes | Every workspace's sandboxes, longest-running first | Stop, delete |
 | Snapshots | One list of every workspace's snapshots and archived sandboxes, with each row's kind, workspace and node (an archive has none); totals of snapshots, disk and memory, and failed uploads; disk by node and by workspace. Filter by kind, region and workspace. AerolVM reports no snapshot size, so the totals add up each snapshot's sandbox disk and memory, not bytes on disk | Delete |
 | Plans | Plans with their limits, how many workspaces use each, and the default | Create, edit, delete an unused plan |
+| Audit trail | Every change made through Lewbox, newest first, with the actor, the action, the target, the workspace and the client IP | Filter by actor, workspace, action and time; load more pages |
 | Servers | **Clusters** (status, runtime, nodes, version, last check) and **Nodes** | **Add server**: **Start a new cluster** and **Add a node** are two steps, *Configure* (access mode, DNS and storage profiles, runtime, when a sandbox stops, node role) and *Install commands* (the exact commands for those choices, with Back to change them). The machine signs in with an access token, which **Create an access token** makes without leaving the dialog. The last step waits and says when the cluster or node has connected, and the lists refresh when the dialog closes. Or a single-use join command. Register an existing cluster, remove a node or cluster |
 | Cluster | Node metrics (sandboxes, vCPU allocated, memory, disk) over 24 hours, 7 or 30 days; 30-day uptime bars for the cluster and each node; the summary; a **Settings** card (domain, DNS profile, DNS records, storage profile, when a sandbox stops); the latest checks; the nodes, with an **Outdated** badge, its reasons and `lewbox node configure` on a node behind the cluster's profiles | Run the checks, edit the settings (after a profile change, run `lewbox node configure` on every node), add or remove a node |
 | Users | Every account | Create, disable, set a password, remove |

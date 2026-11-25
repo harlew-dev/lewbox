@@ -23,7 +23,7 @@ func TestHealthFailsWhenDatabaseIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(db.New(conn))
+	s := New(conn)
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}

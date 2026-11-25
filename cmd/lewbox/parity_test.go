@@ -60,7 +60,7 @@ func newEnvWith(t *testing.T, opts ...service.Option) *env {
 		t.Fatal(err)
 	}
 	opts = append([]service.Option{service.WithKeyring(keyring)}, opts...)
-	srv := httptest.NewServer(httpapi.NewRouter(service.New(db.New(conn), opts...), slog.New(slog.DiscardHandler)))
+	srv := httptest.NewServer(httpapi.NewRouter(service.New(conn, opts...), slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 	e := &env{t: t, dbPath: path, srv: srv}
 
@@ -206,6 +206,29 @@ func (e *env) sameError(args []string, method, path, body string, wantStatus int
 	if errOut != got {
 		e.t.Fatalf("lewbox %v and %s %s errors differ:\ncli:  %s\nhttp: %s", args, method, path, errOut, got)
 	}
+}
+
+func TestEvents(t *testing.T) {
+	e := newEnv(t)
+
+	if _, errOut, code := e.cli("plan", "create", "starter", "--name", "Starter"); code != 0 {
+		t.Fatalf("plan create: exit %d: %s", code, errOut)
+	}
+	out := e.same([]string{"events", "--action", "plan.created"}, "GET", "/v0/events?action=plan.created", "", 200)
+	var list service.EventList
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].Name != "plan.created" || list.Data[0].TargetName != "starter" {
+		t.Fatalf("events = %+v", list.Data)
+	}
+	if list.Data[0].ActorKind != "local" {
+		t.Errorf("actor = %+v", list.Data[0])
+	}
+
+	// Limits and the workspace filter round-trip through the CLI too.
+	e.same([]string{"events", "--limit", "1"}, "GET", "/v0/events?limit=1", "", 200)
+	e.same([]string{"events", "--workspace", "missing"}, "GET", "/v0/events?organization=missing", "", 200)
 }
 
 func TestHealth(t *testing.T) {
@@ -788,7 +811,7 @@ func TestSandboxesAndUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(db.New(conn), service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
+	svc := service.New(conn, service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
 	if err := svc.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +969,7 @@ func TestArchives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(db.New(conn), service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
+	svc := service.New(conn, service.WithKeyring(keyring), service.WithAerolVMOptions(aerolvm.WithRetry(0)))
 	if err := svc.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}

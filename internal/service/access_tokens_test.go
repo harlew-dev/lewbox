@@ -195,7 +195,7 @@ func TestAccessTokenFollowsAdminFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	s := New(db.New(conn))
+	s := New(conn)
 	ops, err := s.CreateUser(localCtx(), CreateUserRequest{Email: "ops@example.com", Password: testPassword, InstanceAdmin: true})
 	if err != nil {
 		t.Fatal(err)

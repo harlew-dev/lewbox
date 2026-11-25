@@ -226,7 +226,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		return ClusterDetail{}, err
 	}
 
-	if _, err := s.q.GetClusterBySlug(ctx, slug); err == nil {
+	if _, err := s.queries(ctx).GetClusterBySlug(ctx, slug); err == nil {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return ClusterDetail{}, fmt.Errorf("get cluster: %w", err)
@@ -250,7 +250,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		return ClusterDetail{}, err
 	}
 	now := s.now()
-	row, err := s.q.CreateCluster(ctx, db.CreateClusterParams{
+	row, err := s.queries(ctx).CreateCluster(ctx, db.CreateClusterParams{
 		ID:                    uuid.NewV7().String(),
 		Slug:                  slug,
 		Name:                  name,
@@ -313,7 +313,7 @@ func (s *Service) ListClusters(ctx context.Context) (ClusterList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return ClusterList{}, err
 	}
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return ClusterList{}, fmt.Errorf("list clusters: %w", err)
 	}
@@ -441,7 +441,7 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 		}
 	}
 
-	updated, err := s.q.UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
+	updated, err := s.queries(ctx).UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
 		Domain:                domain,
 		DnsProfileID:          profileID,
 		DnsRecords:            records,
@@ -489,7 +489,7 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 	// An unreachable cluster can't say which nodes are up, so stop claiming
 	// they are.
 	if healthFailed(checks) {
-		if err := s.q.MarkClusterNodesDown(ctx, sql.NullString{String: row.ID, Valid: true}); err != nil {
+		if err := s.queries(ctx).MarkClusterNodesDown(ctx, sql.NullString{String: row.ID, Valid: true}); err != nil {
 			return ClusterDetail{}, fmt.Errorf("mark nodes down: %w", err)
 		}
 	}
@@ -543,11 +543,11 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if err != nil {
 		return Cluster{}, err
 	}
-	nodes, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
+	nodes, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
 	if err != nil {
 		return Cluster{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
-	keys, err := s.q.ListLiveSandboxKeysByCluster(ctx, row.ID)
+	keys, err := s.queries(ctx).ListLiveSandboxKeysByCluster(ctx, row.ID)
 	if err != nil {
 		if !force {
 			return Cluster{}, sandboxKeysNotRevoked(0, row.Slug)
@@ -580,7 +580,7 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if err != nil {
 		return Cluster{}, err
 	}
-	n, err := s.q.DeleteCluster(ctx, row.ID)
+	n, err := s.queries(ctx).DeleteCluster(ctx, row.ID)
 	if err != nil {
 		return Cluster{}, fmt.Errorf("delete cluster: %w", err)
 	}
@@ -612,7 +612,7 @@ func (s *Service) revokeKeys(ctx context.Context, cluster db.Cluster, keys []db.
 			continue
 		}
 		// The token is dead upstream, so the portal must stop showing it live.
-		if _, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
+		if _, err := s.queries(ctx).RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
 			RevokedAt: sql.NullTime{Time: s.now(), Valid: true},
 			OrgID:     key.OrgID,
 			ID:        key.ID,
@@ -730,7 +730,7 @@ func shellQuote(s string) string {
 // the orchestrator's background loop and returns a joined error.
 func (s *Service) CheckAllClusters(ctx context.Context) error {
 	ctx = WithPrincipal(ctx, LocalPrincipal())
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return fmt.Errorf("list clusters: %w", err)
 	}
@@ -1033,13 +1033,13 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 		}
 		seen[name] = true
 
-		existing, err := s.q.GetNodeByName(ctx, name)
+		existing, err := s.queries(ctx).GetNodeByName(ctx, name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("get node: %w", err)
 		}
 		if err == nil && existing.ClusterID.Valid && existing.ClusterID.String != cluster.ID {
 			slug := existing.ClusterID.String
-			if other, err := s.q.GetClusterByID(ctx, existing.ClusterID.String); err == nil {
+			if other, err := s.queries(ctx).GetClusterByID(ctx, existing.ClusterID.String); err == nil {
 				slug = other.Slug
 			}
 			conflicts = append(conflicts, Check{
@@ -1066,7 +1066,7 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 		if m.Alive {
 			lastSeen = sql.NullTime{Time: now, Valid: true}
 		}
-		_, err = s.q.UpsertClusterNode(ctx, db.UpsertClusterNodeParams{
+		_, err = s.queries(ctx).UpsertClusterNode(ctx, db.UpsertClusterNodeParams{
 			ID:         id,
 			Name:       name,
 			URL:        url,
@@ -1082,7 +1082,7 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 		}
 	}
 
-	rows, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -1090,7 +1090,7 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 		if seen[row.Name] {
 			continue
 		}
-		if _, err := s.q.DeleteNode(ctx, row.ID); err != nil {
+		if _, err := s.queries(ctx).DeleteNode(ctx, row.ID); err != nil {
 			return nil, fmt.Errorf("delete node %q: %w", row.Name, err)
 		}
 	}
@@ -1098,7 +1098,7 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 }
 
 func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, error) {
-	row, err := s.q.GetClusterByID(ctx, id)
+	row, err := s.queries(ctx).GetClusterByID(ctx, id)
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("get cluster: %w", err)
 	}
@@ -1111,7 +1111,7 @@ func (s *Service) clusterDetail(ctx context.Context, id string) (ClusterDetail, 
 	if checks == nil {
 		checks = make([]Check, 0)
 	}
-	rows, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
 	if err != nil {
 		return ClusterDetail{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -1145,9 +1145,9 @@ func (s *Service) findCluster(ctx context.Context, ref string) (db.Cluster, erro
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetClusterByID(ctx, id.String())
+		row, err = s.queries(ctx).GetClusterByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetClusterBySlug(ctx, ref)
+		row, err = s.queries(ctx).GetClusterBySlug(ctx, ref)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Cluster{}, notFound("cluster %q not found", ref)
@@ -1171,7 +1171,7 @@ func (s *Service) resolveClusterRow(ctx context.Context, ref string) (db.Cluster
 	}
 
 	if id, err := uuid.Parse(ref); err == nil {
-		if row, err := s.q.GetClusterByID(ctx, id.String()); err == nil {
+		if row, err := s.queries(ctx).GetClusterByID(ctx, id.String()); err == nil {
 			return row, nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return db.Cluster{}, fmt.Errorf("get cluster: %w", err)
@@ -1179,11 +1179,11 @@ func (s *Service) resolveClusterRow(ctx context.Context, ref string) (db.Cluster
 		return s.clusterOfNode(ctx, id.String())
 	}
 
-	cluster, clusterErr := s.q.GetClusterBySlug(ctx, ref)
+	cluster, clusterErr := s.queries(ctx).GetClusterBySlug(ctx, ref)
 	if clusterErr != nil && !errors.Is(clusterErr, sql.ErrNoRows) {
 		return db.Cluster{}, fmt.Errorf("get cluster: %w", clusterErr)
 	}
-	node, nodeErr := s.q.GetNodeByName(ctx, ref)
+	node, nodeErr := s.queries(ctx).GetNodeByName(ctx, ref)
 	if nodeErr != nil && !errors.Is(nodeErr, sql.ErrNoRows) {
 		return db.Cluster{}, fmt.Errorf("get node: %w", nodeErr)
 	}
@@ -1191,7 +1191,7 @@ func (s *Service) resolveClusterRow(ctx context.Context, ref string) (db.Cluster
 	clusterFound := clusterErr == nil
 	nodeFound := nodeErr == nil && node.ClusterID.Valid
 	if clusterFound && nodeFound && node.ClusterID.String != cluster.ID {
-		nodeCluster, err := s.q.GetClusterByID(ctx, node.ClusterID.String)
+		nodeCluster, err := s.queries(ctx).GetClusterByID(ctx, node.ClusterID.String)
 		if err != nil {
 			return db.Cluster{}, fmt.Errorf("get cluster: %w", err)
 		}
@@ -1215,7 +1215,7 @@ func (s *Service) clusterOfNode(ctx context.Context, ref string) (db.Cluster, er
 	if !node.ClusterID.Valid {
 		return db.Cluster{}, notFound("node %q is not in a cluster", ref)
 	}
-	row, err := s.q.GetClusterByID(ctx, node.ClusterID.String)
+	row, err := s.queries(ctx).GetClusterByID(ctx, node.ClusterID.String)
 	if err != nil {
 		return db.Cluster{}, fmt.Errorf("get cluster: %w", err)
 	}
@@ -1223,7 +1223,7 @@ func (s *Service) clusterOfNode(ctx context.Context, ref string) (db.Cluster, er
 }
 
 func (s *Service) clusterWithCount(ctx context.Context, row db.Cluster) (Cluster, error) {
-	rows, err := s.q.ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: row.ID, Valid: true})
 	if err != nil {
 		return Cluster{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
@@ -1279,7 +1279,7 @@ func (s *Service) quotaClient(row db.Cluster, retry time.Duration) (*aerolvm.Cli
 }
 
 func (s *Service) nodeCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountNodesByCluster(ctx)
+	rows, err := s.queries(ctx).CountNodesByCluster(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count nodes: %w", err)
 	}
@@ -1293,7 +1293,7 @@ func (s *Service) nodeCounts(ctx context.Context) (map[string]int, error) {
 }
 
 func (s *Service) storeCheck(ctx context.Context, id, status, detail, version string, checks []Check) error {
-	if err := s.q.UpdateClusterCheck(ctx, db.UpdateClusterCheckParams{
+	if err := s.queries(ctx).UpdateClusterCheck(ctx, db.UpdateClusterCheckParams{
 		Status:       status,
 		StatusDetail: detail,
 		Version:      version,
@@ -1495,7 +1495,7 @@ func (s *Service) dnsProfileName(ctx context.Context, id sql.NullString) (*strin
 	if !id.Valid {
 		return nil, nil
 	}
-	row, err := s.q.GetDNSProfileByID(ctx, id.String)
+	row, err := s.queries(ctx).GetDNSProfileByID(ctx, id.String)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1507,7 +1507,7 @@ func (s *Service) dnsProfileName(ctx context.Context, id sql.NullString) (*strin
 
 // dnsProfileNames maps profile IDs to names.
 func (s *Service) dnsProfileNames(ctx context.Context) (map[string]string, error) {
-	rows, err := s.q.ListDNSProfiles(ctx)
+	rows, err := s.queries(ctx).ListDNSProfiles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list DNS profiles: %w", err)
 	}
@@ -1535,7 +1535,7 @@ func (s *Service) storageProfileName(ctx context.Context, id sql.NullString) (*s
 	if !id.Valid {
 		return nil, nil
 	}
-	row, err := s.q.GetStorageProfileByID(ctx, id.String)
+	row, err := s.queries(ctx).GetStorageProfileByID(ctx, id.String)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1547,7 +1547,7 @@ func (s *Service) storageProfileName(ctx context.Context, id sql.NullString) (*s
 
 // storageProfileNames maps storage profile IDs to names.
 func (s *Service) storageProfileNames(ctx context.Context) (map[string]string, error) {
-	rows, err := s.q.ListStorageProfiles(ctx)
+	rows, err := s.queries(ctx).ListStorageProfiles(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list storage profiles: %w", err)
 	}

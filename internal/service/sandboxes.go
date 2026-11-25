@@ -98,7 +98,7 @@ func (s *Service) regionFilter(ctx context.Context, org *db.Organization, ref st
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -139,7 +139,7 @@ func (s *Service) ListSandboxes(ctx context.Context, req ListSandboxesRequest) (
 		clusterID = cluster.ID
 	}
 	status := strings.ToLower(strings.TrimSpace(req.Status))
-	rows, err := s.q.ListSandboxes(ctx, db.ListSandboxesParams{
+	rows, err := s.queries(ctx).ListSandboxes(ctx, db.ListSandboxesParams{
 		OrgID:     orgID,
 		ClusterID: clusterID,
 		Status:    status,
@@ -185,7 +185,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 	if err != nil {
 		return Sandbox{}, err
 	}
-	rows, err := s.q.ListSandboxesByID(ctx, id)
+	rows, err := s.queries(ctx).ListSandboxesByID(ctx, id)
 	if err != nil {
 		return Sandbox{}, fmt.Errorf("get sandbox: %w", err)
 	}
@@ -226,7 +226,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 		if err := client.DeleteSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.q.MarkSandboxGone(callCtx, db.MarkSandboxGoneParams{
+		if err := s.queries(ctx).MarkSandboxGone(callCtx, db.MarkSandboxGoneParams{
 			GoneAt:    sql.NullTime{Time: s.now(), Valid: true},
 			ClusterID: home.ID,
 			ID:        id,
@@ -238,7 +238,7 @@ func (s *Service) sandboxAction(ctx context.Context, id string, req RegionScope,
 		if err := client.StopSandbox(callCtx, id); err != nil {
 			return Sandbox{}, s.regionUnavailable(ctx, home.Slug, err)
 		}
-		if err := s.q.UpdateSandboxStatus(callCtx, db.UpdateSandboxStatusParams{
+		if err := s.queries(ctx).UpdateSandboxStatus(callCtx, db.UpdateSandboxStatusParams{
 			Status:    "stopped",
 			ClusterID: home.ID,
 			ID:        id,

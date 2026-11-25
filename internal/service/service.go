@@ -6,6 +6,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"sync"
 	"time"
@@ -38,8 +39,12 @@ func lifecycleContext(ctx context.Context) (context.Context, context.CancelFunc)
 
 // Service is the shared implementation behind the HTTP API and the CLI.
 type Service struct {
-	q   *db.Queries
-	now func() time.Time
+	q        *db.Queries
+	database *sql.DB
+	now      func() time.Time
+
+	// auditRetention is how long events are kept; zero keeps them forever.
+	auditRetention time.Duration
 
 	keyring        *secrets.Keyring
 	aerolvmOptions []aerolvm.Option
@@ -117,6 +122,11 @@ func (s *Service) SetSyncInterval(d time.Duration) {
 	}
 }
 
+// SetAuditRetention changes how long events are kept. Zero keeps them forever.
+func (s *Service) SetAuditRetention(d time.Duration) {
+	s.auditRetention = d
+}
+
 // SetLogger gives a running service the server's logger.
 func (s *Service) SetLogger(log *slog.Logger) {
 	if log != nil {
@@ -124,16 +134,23 @@ func (s *Service) SetLogger(log *slog.Logger) {
 	}
 }
 
-// New returns a Service backed by q.
-func New(q *db.Queries, opts ...Option) *Service {
+// WithAuditRetention sets how long events are kept. Zero keeps them forever.
+func WithAuditRetention(d time.Duration) Option {
+	return func(s *Service) { s.auditRetention = d }
+}
+
+// New returns a Service backed by conn.
+func New(conn *sql.DB, opts ...Option) *Service {
 	s := &Service{
-		q:             q,
-		now:           func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
-		limiter:       newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
-		signupLimiter: newLimiter(signupIPAttemptsPerHour, 0, signupIPWindow),
-		budget:        newWindowLimiter(requestBudgetPerMinute, requestBudgetWindow, requestBudgetMaxKeys),
-		log:           slog.New(slog.DiscardHandler),
-		syncInterval:  15 * time.Second,
+		q:              db.New(conn),
+		database:       conn,
+		now:            func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) },
+		auditRetention: defaultAuditRetention,
+		limiter:        newLoginLimiter(defaultIPAttemptsPerMinute, defaultEmailFailuresPerMinute),
+		signupLimiter:  newLimiter(signupIPAttemptsPerHour, 0, signupIPWindow),
+		budget:         newWindowLimiter(requestBudgetPerMinute, requestBudgetWindow, requestBudgetMaxKeys),
+		log:            slog.New(slog.DiscardHandler),
+		syncInterval:   15 * time.Second,
 
 		snapshotTokens: make(map[snapshotKey]snapshotToken),
 		archiveTokens:  make(map[snapshotKey]snapshotToken),
@@ -157,7 +174,7 @@ type HealthResponse struct {
 func (s *Service) Health(ctx context.Context) (HealthResponse, error) {
 	pingCtx, cancel := context.WithTimeout(ctx, healthPingTimeout)
 	defer cancel()
-	if _, err := s.q.Ping(pingCtx); err != nil {
+	if _, err := s.queries(ctx).Ping(pingCtx); err != nil {
 		return HealthResponse{OK: false}, unavailable("database not reachable")
 	}
 	return HealthResponse{OK: true}, nil

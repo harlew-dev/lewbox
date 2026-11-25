@@ -16,8 +16,9 @@ type Principal struct {
 
 	// Set for "key" principals: the admin key and the one organization it
 	// acts for.
-	KeyID string
-	OrgID string
+	KeyID   string
+	KeyName string
+	OrgID   string
 }
 
 // LocalPrincipal is the caller for local mode: whoever can open the database

@@ -38,7 +38,7 @@ type desiredDNSRecord struct {
 // profile, or when records are off and there are none to remove, so the
 // caller can leave such clusters alone.
 func (s *Service) reconcileDNSRecords(ctx context.Context, cluster db.Cluster, members []aerolvm.Member) Check {
-	rows, err := s.q.ListDNSRecordsByCluster(ctx, cluster.ID)
+	rows, err := s.queries(ctx).ListDNSRecordsByCluster(ctx, cluster.ID)
 	if err != nil {
 		return Check{Name: dnsRecordsCheck, Detail: fmt.Sprintf("list the cluster's DNS records: %v", err)}
 	}
@@ -51,7 +51,7 @@ func (s *Service) reconcileDNSRecords(ctx context.Context, cluster db.Cluster, m
 		}
 		return Check{}
 	}
-	profile, err := s.q.GetDNSProfileByID(ctx, cluster.DnsProfileID.String)
+	profile, err := s.queries(ctx).GetDNSProfileByID(ctx, cluster.DnsProfileID.String)
 	if err != nil {
 		return Check{Name: dnsRecordsCheck, Detail: fmt.Sprintf("get DNS profile: %v", err)}
 	}
@@ -100,7 +100,7 @@ func (s *Service) reconcileDNSRecords(ctx context.Context, cluster db.Cluster, m
 			blocked[key] = true
 			continue
 		}
-		if _, err := s.q.DeleteDNSRecord(ctx, row.ID); err != nil {
+		if _, err := s.queries(ctx).DeleteDNSRecord(ctx, row.ID); err != nil {
 			failures = append(failures, fmt.Sprintf("forget %s %s: %v", row.Type, row.Name, err))
 			blocked[key] = true
 		}
@@ -116,7 +116,7 @@ func (s *Service) reconcileDNSRecords(ctx context.Context, cluster db.Cluster, m
 			failures = append(failures, err.Error())
 			continue
 		}
-		if _, err := s.q.CreateDNSRecord(ctx, db.CreateDNSRecordParams{
+		if _, err := s.queries(ctx).CreateDNSRecord(ctx, db.CreateDNSRecordParams{
 			ID:        uuid.NewV7().String(),
 			ClusterID: cluster.ID,
 			ProfileID: profile.ID,
@@ -150,7 +150,7 @@ func (s *Service) reconcileDNSRecords(ctx context.Context, cluster db.Cluster, m
 // removeDNSRecords deletes every record Lewbox keeps for a cluster. It is
 // best effort: Cloudflare must never block a cluster's removal.
 func (s *Service) removeDNSRecords(ctx context.Context, cluster db.Cluster) {
-	rows, err := s.q.ListDNSRecordsByCluster(ctx, cluster.ID)
+	rows, err := s.queries(ctx).ListDNSRecordsByCluster(ctx, cluster.ID)
 	if err != nil {
 		s.log.Warn("list DNS records failed", "cluster", cluster.Slug, "err", err)
 		return
@@ -171,7 +171,7 @@ func (s *Service) removeDNSRecords(ctx context.Context, cluster db.Cluster) {
 			s.log.Warn("delete DNS record failed", "cluster", cluster.Slug, "name", row.Name, "err", err)
 			continue
 		}
-		if _, err := s.q.DeleteDNSRecord(ctx, row.ID); err != nil {
+		if _, err := s.queries(ctx).DeleteDNSRecord(ctx, row.ID); err != nil {
 			s.log.Warn("forget DNS record failed", "cluster", cluster.Slug, "name", row.Name, "err", err)
 		}
 	}
@@ -213,7 +213,7 @@ func (s *Service) dnsClientFor(ctx context.Context, clients map[string]*cloudfla
 	if client, ok := clients[profileID]; ok {
 		return client, nil
 	}
-	row, err := s.q.GetDNSProfileByID(ctx, profileID)
+	row, err := s.queries(ctx).GetDNSProfileByID(ctx, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get DNS profile: %w", err)
 	}

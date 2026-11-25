@@ -88,14 +88,14 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return NewSandboxKey{}, fmt.Errorf("subscription quota: %w", err)
 	}
-	state, err := s.q.GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	state, err := s.queries(ctx).GetQuotaState(ctx, db.GetQuotaStateParams{OrgID: c.org.ID, ClusterID: cluster.ID})
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return NewSandboxKey{}, fmt.Errorf("get quota state: %w", err)
 	}
 	if errors.Is(err, sql.ErrNoRows) || state.Error != "" || state.Quota != desired {
 		return NewSandboxKey{}, conflict("region %q is still being set up for your workspace; try again in a few seconds", cluster.Slug)
 	}
-	if _, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
+	if _, err := s.queries(ctx).GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: name}); err == nil {
 		return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return NewSandboxKey{}, fmt.Errorf("get sandbox key: %w", err)
@@ -131,16 +131,30 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 	if c.p.Kind == "user" {
 		createdBy = sql.NullString{String: c.p.UserID, Valid: true}
 	}
-	row, err := s.q.CreateSandboxKey(ctx, db.CreateSandboxKeyParams{
-		ID:         keyID,
-		OrgID:      c.org.ID,
-		ClusterID:  cluster.ID,
-		Name:       name,
-		UpstreamID: token.ID,
-		Last4:      last4(token.Token),
-		CreatedBy:  createdBy,
-		CreatedAt:  now,
-		ExpiresAt:  expires,
+	var row db.SandboxKey
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateSandboxKey(ctx, db.CreateSandboxKeyParams{
+			ID:         keyID,
+			OrgID:      c.org.ID,
+			ClusterID:  cluster.ID,
+			Name:       name,
+			UpstreamID: token.ID,
+			Last4:      last4(token.Token),
+			CreatedBy:  createdBy,
+			CreatedAt:  now,
+			ExpiresAt:  expires,
+		})
+		if err != nil {
+			return err
+		}
+		return s.record(ctx, Event{
+			Name:           "sandbox_key.created",
+			TargetType:     "sandbox_key",
+			TargetID:       row.ID,
+			TargetName:     row.Name,
+			OrganizationID: c.org.ID,
+		})
 	})
 	if err != nil {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
@@ -148,6 +162,10 @@ func (s *Service) CreateSandboxKey(ctx context.Context, org string, req CreateSa
 		cancel()
 		if db.IsUniqueViolation(err) {
 			return NewSandboxKey{}, conflict("%q already has a sandbox key named %q", c.org.Slug, name)
+		}
+		var se *Error
+		if errors.As(err, &se) {
+			return NewSandboxKey{}, se
 		}
 		return NewSandboxKey{}, fmt.Errorf("create sandbox key: %w", err)
 	}
@@ -179,7 +197,7 @@ func (s *Service) ListSandboxKeys(ctx context.Context, org string) (SandboxKeyLi
 	if err != nil {
 		return SandboxKeyList{}, err
 	}
-	rows, err := s.q.ListSandboxKeys(ctx, c.org.ID)
+	rows, err := s.queries(ctx).ListSandboxKeys(ctx, c.org.ID)
 	if err != nil {
 		return SandboxKeyList{}, fmt.Errorf("list sandbox keys: %w", err)
 	}
@@ -211,13 +229,13 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 	var email sql.NullString
 	var createdByAdmin bool
 	if id, perr := uuid.Parse(ref); perr == nil {
-		r, err := s.q.GetSandboxKeyByID(ctx, db.GetSandboxKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
+		r, err := s.queries(ctx).GetSandboxKeyByID(ctx, db.GetSandboxKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
 		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
 		}
 	} else {
-		r, err := s.q.GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: ref})
+		r, err := s.queries(ctx).GetLiveSandboxKeyByName(ctx, db.GetLiveSandboxKeyByNameParams{OrgID: c.org.ID, Name: ref})
 		row, email, createdByAdmin = r.SandboxKey, r.CreatedByEmail, r.CreatedByAdmin != 0
 		if err := sandboxKeyLookupErr(err, ref); err != nil {
 			return SandboxKey{}, err
@@ -246,16 +264,28 @@ func (s *Service) RevokeSandboxKey(ctx context.Context, org, ref string) (Sandbo
 		return SandboxKey{}, s.regionUnavailable(ctx, cluster.Slug, revokeErr)
 	}
 	now := s.now()
-	n, err := s.q.RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
-		RevokedAt: sql.NullTime{Time: now, Valid: true},
-		OrgID:     c.org.ID,
-		ID:        row.ID,
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).RevokeSandboxKey(ctx, db.RevokeSandboxKeyParams{
+			RevokedAt: sql.NullTime{Time: now, Valid: true},
+			OrgID:     c.org.ID,
+			ID:        row.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("revoke sandbox key: %w", err)
+		}
+		if n == 0 {
+			return conflict("sandbox key %q is already revoked", ref)
+		}
+		return s.record(ctx, Event{
+			Name:           "sandbox_key.revoked",
+			TargetType:     "sandbox_key",
+			TargetID:       row.ID,
+			TargetName:     row.Name,
+			OrganizationID: c.org.ID,
+		})
 	})
 	if err != nil {
-		return SandboxKey{}, fmt.Errorf("revoke sandbox key: %w", err)
-	}
-	if n == 0 {
-		return SandboxKey{}, conflict("sandbox key %q is already revoked", ref)
+		return SandboxKey{}, err
 	}
 	row.RevokedAt = sql.NullTime{Time: now, Valid: true}
 	return toSandboxKey(row, email.String, createdByAdmin, cluster, now, c.p.InstanceAdmin), nil
@@ -301,7 +331,7 @@ func upstreamLifetime(d time.Duration) string {
 // sandboxRegion finds the cluster behind ref, which must be one the
 // organization is subscribed to. An empty ref means its region.
 func (s *Service) sandboxRegion(ctx context.Context, orgID, ref string) (db.Cluster, error) {
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return db.Cluster{}, fmt.Errorf("list clusters: %w", err)
 	}
@@ -346,7 +376,7 @@ func regionReady(status string) bool {
 
 // clustersByID maps cluster IDs to rows, for rendering the region of a key.
 func (s *Service) clustersByID(ctx context.Context) (map[string]db.Cluster, error) {
-	rows, err := s.q.ListClusters(ctx)
+	rows, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -399,7 +429,7 @@ func (s *Service) sandboxTokenErr(ctx context.Context, slug string, requested ti
 // one workspace (orgID non-empty) or in every workspace. It fails closed: a
 // failed revoke refuses the caller's change with 502.
 func (s *Service) revokeCreatedSandboxKeys(ctx context.Context, orgID, userID string) error {
-	keys, err := s.q.ListLiveSandboxKeysByCreator(ctx, db.ListLiveSandboxKeysByCreatorParams{
+	keys, err := s.queries(ctx).ListLiveSandboxKeysByCreator(ctx, db.ListLiveSandboxKeysByCreatorParams{
 		CreatedBy: sql.NullString{String: userID, Valid: true},
 		OrgID:     orgID,
 	})

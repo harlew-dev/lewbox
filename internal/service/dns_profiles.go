@@ -93,7 +93,7 @@ func (s *Service) ListDNSProfiles(ctx context.Context) (DNSProfileList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return DNSProfileList{}, err
 	}
-	rows, err := s.q.ListDNSProfiles(ctx)
+	rows, err := s.queries(ctx).ListDNSProfiles(ctx)
 	if err != nil {
 		return DNSProfileList{}, fmt.Errorf("list DNS profiles: %w", err)
 	}
@@ -161,7 +161,7 @@ func (s *Service) CreateDNSProfile(ctx context.Context, req CreateDNSProfileRequ
 		return DNSProfile{}, err
 	}
 	now := s.now()
-	row, err := s.q.CreateDNSProfile(ctx, db.CreateDNSProfileParams{
+	row, err := s.queries(ctx).CreateDNSProfile(ctx, db.CreateDNSProfileParams{
 		ID:          uuid.NewV7().String(),
 		Name:        name,
 		Provider:    provider,
@@ -254,7 +254,7 @@ func (s *Service) UpdateDNSProfile(ctx context.Context, ref string, req UpdateDN
 	}
 	row.UpdatedAt = now
 
-	updated, err := s.q.UpdateDNSProfile(ctx, db.UpdateDNSProfileParams{
+	updated, err := s.queries(ctx).UpdateDNSProfile(ctx, db.UpdateDNSProfileParams{
 		Name:        row.Name,
 		Zone:        row.Zone,
 		ZoneID:      row.ZoneID,
@@ -291,7 +291,7 @@ func (s *Service) DeleteDNSProfile(ctx context.Context, ref string) (DNSProfile,
 	if err != nil {
 		return DNSProfile{}, err
 	}
-	n, err := s.q.DeleteDNSProfile(ctx, row.ID)
+	n, err := s.queries(ctx).DeleteDNSProfile(ctx, row.ID)
 	if err != nil {
 		return DNSProfile{}, fmt.Errorf("delete DNS profile: %w", err)
 	}
@@ -331,7 +331,7 @@ func (s *Service) TestDNSProfile(ctx context.Context, ref string) (DNSProfile, e
 		row.TestError = ""
 	}
 	row.TestedAt = testedAt
-	if err := s.q.RecordDNSProfileTest(ctx, db.RecordDNSProfileTestParams{
+	if err := s.queries(ctx).RecordDNSProfileTest(ctx, db.RecordDNSProfileTestParams{
 		TestedAt:  row.TestedAt,
 		TestError: row.TestError,
 		ZoneID:    row.ZoneID,
@@ -459,9 +459,9 @@ func (s *Service) findDNSProfile(ctx context.Context, ref string) (db.DnsProfile
 		err error
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		row, err = s.q.GetDNSProfileByID(ctx, id.String())
+		row, err = s.queries(ctx).GetDNSProfileByID(ctx, id.String())
 	} else {
-		row, err = s.q.GetDNSProfileByName(ctx, strings.ToLower(ref))
+		row, err = s.queries(ctx).GetDNSProfileByName(ctx, strings.ToLower(ref))
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.DnsProfile{}, notFound("DNS profile %q not found", ref)
@@ -474,7 +474,7 @@ func (s *Service) findDNSProfile(ctx context.Context, ref string) (db.DnsProfile
 
 // dnsProfileClusterCounts maps profile IDs to how many clusters use them.
 func (s *Service) dnsProfileClusterCounts(ctx context.Context) (map[string]int, error) {
-	rows, err := s.q.CountDNSProfileClusters(ctx)
+	rows, err := s.queries(ctx).CountDNSProfileClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count clusters by DNS profile: %w", err)
 	}

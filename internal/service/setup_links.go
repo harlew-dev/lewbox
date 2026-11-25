@@ -126,18 +126,31 @@ func (s *Service) CreateSetupLink(ctx context.Context, req CreateSetupLinkReques
 	if p.Kind == "user" {
 		createdBy = sql.NullString{String: p.UserID, Valid: true}
 	}
-	row, err := s.q.CreateSetupLink(ctx, db.CreateSetupLinkParams{
-		ID:        uuid.NewV7().String(),
-		TokenHash: hash,
-		PlanID:    plan.ID,
-		ClusterID: cluster.ID,
-		Note:      note,
-		CreatedBy: createdBy,
-		CreatedAt: now,
-		ExpiresAt: now.Add(time.Duration(hours) * time.Hour),
+	var row db.SetupLink
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateSetupLink(ctx, db.CreateSetupLinkParams{
+			ID:        uuid.NewV7().String(),
+			TokenHash: hash,
+			PlanID:    plan.ID,
+			ClusterID: cluster.ID,
+			Note:      note,
+			CreatedBy: createdBy,
+			CreatedAt: now,
+			ExpiresAt: now.Add(time.Duration(hours) * time.Hour),
+		})
+		if err != nil {
+			return fmt.Errorf("create setup link: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "setup_link.created",
+			TargetType: "setup_link",
+			TargetID:   row.ID,
+			TargetName: note,
+		})
 	})
 	if err != nil {
-		return SetupLink{}, fmt.Errorf("create setup link: %w", err)
+		return SetupLink{}, err
 	}
 	out, err := s.setupLinkResponse(ctx, row)
 	if err != nil {
@@ -153,7 +166,7 @@ func (s *Service) ListSetupLinks(ctx context.Context) (SetupLinkList, error) {
 	if _, err := requireAdmin(ctx); err != nil {
 		return SetupLinkList{}, err
 	}
-	rows, err := s.q.ListSetupLinks(ctx)
+	rows, err := s.queries(ctx).ListSetupLinks(ctx)
 	if err != nil {
 		return SetupLinkList{}, fmt.Errorf("list setup links: %w", err)
 	}
@@ -178,7 +191,7 @@ func (s *Service) RevokeSetupLink(ctx context.Context, id string) (SetupLink, er
 	if id == "" {
 		return SetupLink{}, badRequest("a setup link ID is required")
 	}
-	row, err := s.q.GetSetupLinkByID(ctx, id)
+	row, err := s.queries(ctx).GetSetupLinkByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SetupLink{}, notFound("setup link %q not found", id)
 	}
@@ -189,12 +202,23 @@ func (s *Service) RevokeSetupLink(ctx context.Context, id string) (SetupLink, er
 	if err != nil {
 		return SetupLink{}, err
 	}
-	n, err := s.q.DeleteSetupLink(ctx, id)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteSetupLink(ctx, id)
+		if err != nil {
+			return fmt.Errorf("delete setup link: %w", err)
+		}
+		if n == 0 {
+			return conflict("setup link %q has already been used", id)
+		}
+		return s.record(ctx, Event{
+			Name:       "setup_link.revoked",
+			TargetType: "setup_link",
+			TargetID:   row.ID,
+			TargetName: row.Note,
+		})
+	})
 	if err != nil {
-		return SetupLink{}, fmt.Errorf("delete setup link: %w", err)
-	}
-	if n == 0 {
-		return SetupLink{}, conflict("setup link %q has already been used", id)
+		return SetupLink{}, err
 	}
 	return out, nil
 }
@@ -252,7 +276,7 @@ func (s *Service) setupLinkResponse(ctx context.Context, row db.SetupLink) (Setu
 		ExpiresAt: row.ExpiresAt.UTC(),
 	}
 	if row.ClaimedBy.Valid {
-		user, err := s.q.GetUserByID(ctx, row.ClaimedBy.String)
+		user, err := s.queries(ctx).GetUserByID(ctx, row.ClaimedBy.String)
 		switch {
 		case err == nil:
 			email := user.Email
@@ -263,7 +287,7 @@ func (s *Service) setupLinkResponse(ctx context.Context, row db.SetupLink) (Setu
 		}
 	}
 	if row.OrgID.Valid {
-		org, err := s.q.GetOrganizationByID(ctx, row.OrgID.String)
+		org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID.String)
 		switch {
 		case err == nil:
 			out.Workspace = &SetupLinkWorkspace{Slug: org.Slug, Name: org.Name}
@@ -300,7 +324,7 @@ func (s *Service) findSetupLink(ctx context.Context, token string) (db.SetupLink
 	if token == "" {
 		return db.SetupLink{}, sql.ErrNoRows
 	}
-	row, err := s.q.GetSetupLinkByTokenHash(ctx, hashSetupToken(token))
+	row, err := s.queries(ctx).GetSetupLinkByTokenHash(ctx, hashSetupToken(token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.SetupLink{}, sql.ErrNoRows
 	}
@@ -313,7 +337,7 @@ func (s *Service) findSetupLink(ctx context.Context, token string) (db.SetupLink
 // claimSetupLink claims an unclaimed, unused, unexpired link for a new
 // account. No row means the claim failed.
 func (s *Service) claimSetupLink(ctx context.Context, token, userID string, now time.Time) (db.SetupLink, error) {
-	return s.q.ClaimSetupLink(ctx, db.ClaimSetupLinkParams{
+	return s.queries(ctx).ClaimSetupLink(ctx, db.ClaimSetupLinkParams{
 		UserID:    sql.NullString{String: userID, Valid: true},
 		ClaimedAt: sql.NullTime{Time: now, Valid: true},
 		TokenHash: hashSetupToken(token),

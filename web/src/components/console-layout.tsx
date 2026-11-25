@@ -6,6 +6,7 @@ import {
   HomeIcon,
   RectangleStackIcon,
   CameraIcon,
+  ClipboardDocumentListIcon,
   ServerStackIcon,
   UserCircleIcon,
   UsersIcon,
@@ -49,6 +50,7 @@ export function ConsoleLayout({ children }: { children: ReactNode }) {
       heading: 'Manage',
       items: [
         { href: '/admin/plans', label: 'Plans', icon: RectangleStackIcon },
+        { href: '/admin/events', label: 'Audit trail', icon: ClipboardDocumentListIcon },
         { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
       ],
     },

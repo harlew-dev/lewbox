@@ -196,22 +196,36 @@ func (s *Service) CreateAdminKey(ctx context.Context, org string, req CreateAdmi
 	if c.p.Kind == "user" {
 		createdBy = sql.NullString{String: c.p.UserID, Valid: true}
 	}
-	row, err := s.q.CreateAdminKey(ctx, db.CreateAdminKeyParams{
-		ID:        uuid.NewV7().String(),
-		OrgID:     c.org.ID,
-		Name:      name,
-		Prefix:    token[:len(adminKeyPrefix)+8],
-		KeyHash:   digest,
-		Last4:     token[len(token)-4:],
-		CreatedBy: createdBy,
-		CreatedAt: now,
-		ExpiresAt: expires,
+	var row db.AdminKey
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateAdminKey(ctx, db.CreateAdminKeyParams{
+			ID:        uuid.NewV7().String(),
+			OrgID:     c.org.ID,
+			Name:      name,
+			Prefix:    token[:len(adminKeyPrefix)+8],
+			KeyHash:   digest,
+			Last4:     token[len(token)-4:],
+			CreatedBy: createdBy,
+			CreatedAt: now,
+			ExpiresAt: expires,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("%q already has a key named %q", c.org.Slug, name)
+		}
+		if err != nil {
+			return fmt.Errorf("create admin key: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "admin_key.created",
+			TargetType:     "admin_key",
+			TargetID:       row.ID,
+			TargetName:     row.Name,
+			OrganizationID: c.org.ID,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return NewAdminKey{}, conflict("%q already has a key named %q", c.org.Slug, name)
-	}
 	if err != nil {
-		return NewAdminKey{}, fmt.Errorf("create admin key: %w", err)
+		return NewAdminKey{}, err
 	}
 	return NewAdminKey{AdminKey: toAdminKey(row, c.p.Email, now), Token: token}, nil
 }
@@ -223,7 +237,7 @@ func (s *Service) ListAdminKeys(ctx context.Context, org string) (AdminKeyList, 
 	if err != nil {
 		return AdminKeyList{}, err
 	}
-	rows, err := s.q.ListAdminKeys(ctx, c.org.ID)
+	rows, err := s.queries(ctx).ListAdminKeys(ctx, c.org.ID)
 	if err != nil {
 		return AdminKeyList{}, fmt.Errorf("list admin keys: %w", err)
 	}
@@ -251,14 +265,14 @@ func (s *Service) RevokeAdminKey(ctx context.Context, org, ref string) (AdminKey
 		email sql.NullString
 	)
 	if id, perr := uuid.Parse(ref); perr == nil {
-		r, err := s.q.GetAdminKeyByID(ctx, db.GetAdminKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
+		r, err := s.queries(ctx).GetAdminKeyByID(ctx, db.GetAdminKeyByIDParams{OrgID: c.org.ID, ID: id.String()})
 		row, email = r.AdminKey, r.CreatedByEmail
 		err = keyLookupErr(err, ref)
 		if err != nil {
 			return AdminKey{}, err
 		}
 	} else {
-		r, err := s.q.GetLiveAdminKeyByName(ctx, db.GetLiveAdminKeyByNameParams{OrgID: c.org.ID, Name: ref})
+		r, err := s.queries(ctx).GetLiveAdminKeyByName(ctx, db.GetLiveAdminKeyByNameParams{OrgID: c.org.ID, Name: ref})
 		row, email = r.AdminKey, r.CreatedByEmail
 		err = keyLookupErr(err, ref)
 		if err != nil {
@@ -269,16 +283,28 @@ func (s *Service) RevokeAdminKey(ctx context.Context, org, ref string) (AdminKey
 		return AdminKey{}, conflict("key %q is already revoked", ref)
 	}
 	now := s.now()
-	n, err := s.q.RevokeAdminKey(ctx, db.RevokeAdminKeyParams{
-		RevokedAt: sql.NullTime{Time: now, Valid: true},
-		OrgID:     c.org.ID,
-		ID:        row.ID,
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).RevokeAdminKey(ctx, db.RevokeAdminKeyParams{
+			RevokedAt: sql.NullTime{Time: now, Valid: true},
+			OrgID:     c.org.ID,
+			ID:        row.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("revoke admin key: %w", err)
+		}
+		if n == 0 {
+			return conflict("key %q is already revoked", ref)
+		}
+		return s.record(ctx, Event{
+			Name:           "admin_key.revoked",
+			TargetType:     "admin_key",
+			TargetID:       row.ID,
+			TargetName:     row.Name,
+			OrganizationID: c.org.ID,
+		})
 	})
 	if err != nil {
-		return AdminKey{}, fmt.Errorf("revoke admin key: %w", err)
-	}
-	if n == 0 {
-		return AdminKey{}, conflict("key %q is already revoked", ref)
+		return AdminKey{}, err
 	}
 	row.RevokedAt = sql.NullTime{Time: now, Valid: true}
 	return toAdminKey(row, email.String, now), nil
@@ -301,7 +327,7 @@ func (s *Service) authenticateAdminKey(ctx context.Context, token string) (Princ
 	if !validAdminKeyToken(token) {
 		return Principal{}, rejected
 	}
-	row, err := s.q.GetAdminKeyByHash(ctx, tokenDigest(token))
+	row, err := s.queries(ctx).GetAdminKeyByHash(ctx, tokenDigest(token))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Principal{}, rejected
 	}
@@ -312,7 +338,7 @@ func (s *Service) authenticateAdminKey(ctx context.Context, token string) (Princ
 	if row.RevokedAt.Valid || (row.ExpiresAt.Valid && !now.Before(row.ExpiresAt.Time)) {
 		return Principal{}, rejected
 	}
-	org, err := s.q.GetOrganizationByID(ctx, row.OrgID)
+	org, err := s.queries(ctx).GetOrganizationByID(ctx, row.OrgID)
 	if err != nil {
 		return Principal{}, fmt.Errorf("get organization: %w", err)
 	}
@@ -321,14 +347,14 @@ func (s *Service) authenticateAdminKey(ctx context.Context, token string) (Princ
 	}
 	// Like sessions, last_used_at is written at most once a minute.
 	if !row.LastUsedAt.Valid || now.Sub(row.LastUsedAt.Time) >= time.Minute {
-		if err := s.q.TouchAdminKey(ctx, db.TouchAdminKeyParams{
+		if err := s.queries(ctx).TouchAdminKey(ctx, db.TouchAdminKeyParams{
 			LastUsedAt: sql.NullTime{Time: now, Valid: true},
 			ID:         row.ID,
 		}); err != nil {
 			return Principal{}, fmt.Errorf("touch admin key: %w", err)
 		}
 	}
-	return Principal{Kind: "key", KeyID: row.ID, OrgID: row.OrgID}, nil
+	return Principal{Kind: "key", KeyID: row.ID, KeyName: row.Name, OrgID: row.OrgID}, nil
 }
 
 func toAdminKey(r db.AdminKey, createdBy string, now time.Time) AdminKey {

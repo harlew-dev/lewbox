@@ -93,7 +93,7 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	if org != nil {
 		orgID = org.ID
 	}
-	rows, err := s.q.ListUsageHourly(ctx, db.ListUsageHourlyParams{
+	rows, err := s.queries(ctx).ListUsageHourly(ctx, db.ListUsageHourlyParams{
 		OrgID:    orgID,
 		FromHour: start,
 		ToHour:   end.Add(step),
@@ -101,7 +101,7 @@ func (s *Service) Usage(ctx context.Context, req UsageRequest) (Usage, error) {
 	if err != nil {
 		return Usage{}, fmt.Errorf("list usage: %w", err)
 	}
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return Usage{}, fmt.Errorf("list clusters: %w", err)
 	}
@@ -219,7 +219,7 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 	if err != nil {
 		return LimitsReport{}, err
 	}
-	rows, err := s.q.SumSandboxesByOrg(ctx, sql.NullString{String: c.org.ID, Valid: true})
+	rows, err := s.queries(ctx).SumSandboxesByOrg(ctx, sql.NullString{String: c.org.ID, Valid: true})
 	if err != nil {
 		return LimitsReport{}, fmt.Errorf("sum sandboxes: %w", err)
 	}
@@ -227,7 +227,7 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 	for _, row := range rows {
 		usedByCluster[row.ClusterID] = LimitsUsed{Sandboxes: row.Sandboxes, Vcpus: row.Vcpus, MemoryMB: row.MemoryMb}
 	}
-	states, err := s.q.ListQuotaStates(ctx, c.org.ID)
+	states, err := s.queries(ctx).ListQuotaStates(ctx, c.org.ID)
 	if err != nil {
 		return LimitsReport{}, fmt.Errorf("list quota state: %w", err)
 	}
@@ -235,7 +235,7 @@ func (s *Service) Limits(ctx context.Context, orgRef string) (LimitsReport, erro
 	for _, state := range states {
 		stateByCluster[state.ClusterID] = state
 	}
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return LimitsReport{}, fmt.Errorf("list clusters: %w", err)
 	}

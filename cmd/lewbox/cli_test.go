@@ -51,7 +51,7 @@ func TestLoginWhoamiNodeListLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(db.New(conn), service.WithKeyring(keyring))
+	svc := service.New(conn, service.WithKeyring(keyring))
 	srv := httptest.NewServer(httpapi.NewRouter(svc, slog.New(slog.DiscardHandler)))
 	t.Cleanup(srv.Close)
 

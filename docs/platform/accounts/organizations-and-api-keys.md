@@ -80,7 +80,7 @@ Instance admins can suspend an organization (`lewbox org suspend acme`, or **Sus
 
 ## Not yet
 
-Inviting someone by email, and the audit log of member and key changes, come with email support. Until then, create the account and add it as a member.
+Inviting someone by email comes with email support. Until then, create the account and add it as a member. Member and key changes are in the [audit trail](../operations/audit-trail.md).
 
 ## Next
 

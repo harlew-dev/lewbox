@@ -29,7 +29,9 @@ func withRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := newRequestID()
 		w.Header().Set(requestIDHeader, id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey{}, id)))
+		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
+		ctx = service.WithRequestID(ctx, id)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -251,6 +253,7 @@ var queryAllowLists = map[string][]string{
 	"GET " + Prefix + "/clusters/{cluster}/health":       {"days"},
 	"GET " + Prefix + "/clusters/{cluster}/metrics":      {"range"},
 	"GET " + Prefix + "/clusters/resolve":                {"cluster"},
+	"GET " + Prefix + "/events":                          {"before", "actor", "organization", "action", "from", "to", "limit"},
 	"GET " + Prefix + "/nodes":                           {"cluster"},
 	"DELETE " + Prefix + "/nodes/{node}":                 {"force"},
 	"GET " + Prefix + "/organizations":                   {"user", "status"},

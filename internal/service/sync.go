@@ -39,11 +39,11 @@ func (s *Service) Sync(ctx context.Context) error {
 	defer s.syncMu.Unlock()
 
 	now := s.now()
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return fmt.Errorf("list clusters: %w", err)
 	}
-	orgs, err := s.q.ListOrganizations(ctx)
+	orgs, err := s.queries(ctx).ListOrganizations(ctx)
 	if err != nil {
 		return fmt.Errorf("list organizations: %w", err)
 	}
@@ -159,7 +159,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 			createdAt = now
 		}
 		seen[sandbox.ID] = true
-		if err := s.q.UpsertSandbox(ctx, db.UpsertSandboxParams{
+		if err := s.queries(ctx).UpsertSandbox(ctx, db.UpsertSandboxParams{
 			ClusterID:    row.ID,
 			ID:           sandbox.ID,
 			OrgID:        orgID,
@@ -186,7 +186,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 	}
 
 	if !partial {
-		if err := s.q.MarkSandboxesGone(ctx, db.MarkSandboxesGoneParams{
+		if err := s.queries(ctx).MarkSandboxesGone(ctx, db.MarkSandboxesGoneParams{
 			GoneAt:     sql.NullTime{Time: now, Valid: true},
 			ClusterID:  row.ID,
 			LastSeenAt: now,
@@ -207,7 +207,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 	}
 	hour := now.Truncate(time.Hour)
 	for orgID, count := range running {
-		if err := s.q.UpsertUsageHourly(ctx, db.UpsertUsageHourlyParams{
+		if err := s.queries(ctx).UpsertUsageHourly(ctx, db.UpsertUsageHourlyParams{
 			OrgID:           orgID,
 			ClusterID:       row.ID,
 			Hour:            hour,
@@ -220,7 +220,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 		}
 	}
 
-	if err := s.q.SetClusterSynced(ctx, db.SetClusterSyncedParams{
+	if err := s.queries(ctx).SetClusterSynced(ctx, db.SetClusterSyncedParams{
 		SyncedAt: sql.NullTime{Time: now, Valid: true},
 		ID:       row.ID,
 	}); err != nil {
@@ -230,7 +230,7 @@ func (s *Service) syncCluster(ctx context.Context, row db.Cluster, orgByTeam map
 }
 
 func (s *Service) recordSyncError(ctx context.Context, id string, err error) {
-	if uerr := s.q.SetClusterSyncError(ctx, db.SetClusterSyncErrorParams{
+	if uerr := s.queries(ctx).SetClusterSyncError(ctx, db.SetClusterSyncErrorParams{
 		SyncError: err.Error(),
 		ID:        id,
 	}); uerr != nil {
@@ -245,7 +245,7 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 	if !org.Team.Valid || org.Team.String == "" {
 		return nil
 	}
-	clusters, err := s.q.ListClusters(ctx)
+	clusters, err := s.queries(ctx).ListClusters(ctx)
 	if err != nil {
 		return fmt.Errorf("list clusters: %w", err)
 	}
@@ -257,7 +257,7 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 	if err != nil {
 		return err
 	}
-	rows, err := s.q.SumSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
+	rows, err := s.queries(ctx).SumSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
 	if err != nil {
 		return fmt.Errorf("sum sandboxes: %w", err)
 	}
@@ -265,7 +265,7 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 	for _, row := range rows {
 		used[row.ClusterID] = true
 	}
-	keys, err := s.q.ListLiveSandboxKeysByOrg(ctx, org.ID)
+	keys, err := s.queries(ctx).ListLiveSandboxKeysByOrg(ctx, org.ID)
 	if err != nil {
 		return fmt.Errorf("list sandbox keys: %w", err)
 	}
@@ -273,7 +273,7 @@ func (s *Service) syncOrganizationQuotas(ctx context.Context, org db.Organizatio
 	for _, key := range keys {
 		keyed[key.ClusterID] = true
 	}
-	states, err := s.q.ListQuotaStates(ctx, org.ID)
+	states, err := s.queries(ctx).ListQuotaStates(ctx, org.ID)
 	if err != nil {
 		return fmt.Errorf("list quota state: %w", err)
 	}
@@ -395,7 +395,7 @@ func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db
 		errText = err.Error()
 		s.log.Warn("push quota failed", "cluster", cluster.Slug, "organization", org.Slug, "err", err)
 	}
-	if uerr := s.q.UpsertQuotaState(ctx, db.UpsertQuotaStateParams{
+	if uerr := s.queries(ctx).UpsertQuotaState(ctx, db.UpsertQuotaStateParams{
 		OrgID:     org.ID,
 		ClusterID: cluster.ID,
 		Quota:     desired,
@@ -409,7 +409,7 @@ func (s *Service) pushQuota(ctx context.Context, org db.Organization, cluster db
 // stopSandboxes stops an organization's running sandboxes, restricted to
 // only's clusters when it is not nil.
 func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only map[string]bool) {
-	rows, err := s.q.ListStartedSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
+	rows, err := s.queries(ctx).ListStartedSandboxesByOrg(ctx, sql.NullString{String: org.ID, Valid: true})
 	if err != nil {
 		s.log.Warn("list started sandboxes failed", "organization", org.Slug, "err", err)
 		return
@@ -418,7 +418,7 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 		if only != nil && !only[row.Sandbox.ClusterID] {
 			continue
 		}
-		cluster, err := s.q.GetClusterBySlug(ctx, row.ClusterSlug)
+		cluster, err := s.queries(ctx).GetClusterBySlug(ctx, row.ClusterSlug)
 		if err != nil {
 			s.log.Warn("find sandbox cluster failed", "sandbox", row.Sandbox.ID, "err", err)
 			continue
@@ -433,7 +433,7 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 			s.log.Warn("stop sandbox failed", "sandbox", row.Sandbox.ID, "err", err)
 			continue
 		}
-		if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+		if err := s.queries(ctx).UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
 			Status:    "stopped",
 			ClusterID: row.Sandbox.ClusterID,
 			ID:        row.Sandbox.ID,
@@ -445,7 +445,7 @@ func (s *Service) stopSandboxes(ctx context.Context, org db.Organization, only m
 
 // syncPlanQuotas pushes the new limits to every subscription on a plan.
 func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
-	subs, err := s.q.ListSubscriptionsByPlan(ctx, planID)
+	subs, err := s.queries(ctx).ListSubscriptionsByPlan(ctx, planID)
 	if err != nil {
 		return fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -456,7 +456,7 @@ func (s *Service) syncPlanQuotas(ctx context.Context, planID string) error {
 			continue
 		}
 		seen[sub.OrgID] = true
-		org, err := s.q.GetOrganizationByID(ctx, sub.OrgID)
+		org, err := s.queries(ctx).GetOrganizationByID(ctx, sub.OrgID)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("get organization %q: %w", sub.OrgID, err))
 			continue
