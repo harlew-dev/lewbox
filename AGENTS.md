@@ -21,6 +21,7 @@ Generic "how I build apps" skills live in `.agents/skills/` (committed, unlike t
 | `dev-environment` | The Makefile, env files, compose, the dev server, running tests or e2e locally, CI |
 | `production-hardening` | An endpoint that creates rows or checks a secret; logging, metrics, alerts, admin features, config and secrets, a release or first deploy, an incident |
 | `project-structure` | Creating a file, package, module, component, page or endpoint; adding a dependency; deciding where code goes |
+| `release` | Cutting, tagging or publishing a Lewbox release (`/release` in Claude Code, via the `.claude/skills/release` symlink). Every release follows it; never publish by hand |
 | `resource-naming` | Before adding or renaming a route, handler, page, client method, permission, event or rate limit |
 | `security-defaults` | Before adding or changing an endpoint, an auth flow, a permission, a token or secret, a cookie, a redirect, a log line, a template or a config variable |
 | `testing` | Writing or reviewing tests; adding an endpoint, page, table, permission, event or rate limit; before saying "done" |

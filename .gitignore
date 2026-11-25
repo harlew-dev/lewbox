@@ -4,7 +4,7 @@ web/playwright-report/
 web/test-results/
 web/dist/*
 !web/dist/.gitkeep
-release/
+/release/
 *.tsbuildinfo
 
 # Local planning notes, moved out of the tracked tree
