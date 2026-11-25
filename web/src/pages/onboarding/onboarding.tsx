@@ -12,10 +12,10 @@ import {
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import * as api from '../../lib/api'
-import { ApiError } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useInstance } from '../../lib/instance'
 import { useOrganizations } from '../../lib/organizations'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { Spinner } from '../../components/loading'
@@ -43,19 +43,19 @@ export function OnboardingPage() {
   const created = useRef(false)
   const [name, setName] = useState('')
 
-  const info = useLoad(
-    () => (token ? api.setupLinkInfo(token) : Promise.resolve(null)),
-    [token],
+  const info = useLoad<api.SetupLinkInfo | null>(
+    token ? `setup-link:${token}` : null,
+    () => api.setupLinkInfo(token),
   )
 
   // A link can expire or be used between opening the page and creating the
   // workspace. Drop it, so the form neither promises a plan nor sends it.
   useEffect(() => {
-    if (token && info.failure instanceof ApiError && info.failure.status === 404) {
+    if (token && info.missing) {
       setStaleToken(true)
       setToken('')
     }
-  }, [token, info.failure])
+  }, [token, info.missing])
 
   const create = useAction(
     () =>
@@ -73,10 +73,10 @@ export function OnboardingPage() {
     created.current = true
     await reloadOrganizations()
     select(result.value.slug)
-    navigate('/onboarding/getting-started', { replace: true })
+    navigate(routes.gettingStarted(), { replace: true })
   }
 
-  if (organizations.length > 0 && !created.current) return <Navigate to="/" replace />
+  if (organizations.length > 0 && !created.current) return <Navigate to={routes.home()} replace />
 
   if (!instance.loaded) {
     return (

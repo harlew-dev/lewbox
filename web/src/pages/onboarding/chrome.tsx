@@ -16,6 +16,7 @@ import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { BrandLogo } from '../../components/brand-logo'
 import { useAuth } from '../../lib/auth'
+import { routes } from '../../lib/routes'
 
 // Where onboarding says who is signed in and offers a way out, without the
 // account's workspace-only settings.
@@ -29,7 +30,7 @@ function SignedInMenu() {
     setBusy(true)
     try {
       await signOut()
-      navigate('/login', { replace: true })
+      navigate(routes.login(), { replace: true })
     } finally {
       setBusy(false)
     }
@@ -69,7 +70,7 @@ export function OnboardingChrome({
     <CenteredLayout>
       <div className={`grid w-full ${width} grid-cols-1 gap-8`}>
         <div className="flex items-center justify-between gap-4">
-          <BrandLogo href="/" />
+          <BrandLogo href={routes.home()} />
           <SignedInMenu />
         </div>
         {children}

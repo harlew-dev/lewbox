@@ -46,6 +46,12 @@ The console never holds a token. `POST /v0/auth/session` sets an `HttpOnly` cook
 
 A `401` from an ordinary request dispatches `lewbox:unauthorized`. `AuthProvider` listens for it, clears the user, and `RequireAuth` sends the browser to `/login` with a `next` parameter. The sign-in, sign-up, sign-out and `/v0/profile` calls opt out of that redirect. `AuthProvider` also keeps the account's organizations from `/v0/profile`; `reloadOrganizations()` refreshes them after joining, leaving or renaming one.
 
+## Page URLs, data and list state
+
+Every page URL is built by `src/lib/routes.ts` (`routes.admin.workspace(slug)`, `routes.docs(path)`), never by string concatenation in a component. Add the builder there when you add a page. The route registry itself stays in `src/app.tsx`.
+
+Reads go through `useLoad(key, loader)`: the key includes everything the loader reads (the workspace, an ID, a filter) and the signed-in user is added by the hook. Answers are cached per key, so a revisit shows the last answer at once and revalidates it; a new key keeps the previous answer on screen (dimmed with `aria-busy`) until the next one arrives. The result also has `loading`, `refreshing`, `stale`, `missing` (404), `error`, `reload()` and `refresh()`. `every` takes milliseconds or `(data) => milliseconds`, so poll only while something is pending. List filters live in the URL through `src/lib/query-params.ts`, with defaults omitted.
+
 ## Two sides: portal and console
 
 The app has two sides, routed in `src/app.tsx` (`src/main.tsx` only mounts it):
@@ -87,11 +93,11 @@ Both routes are outside `RequireAuth`, so the books are public. They use the lib
 
 ## Add a page
 
-1. Add the route in `src/app.tsx`: inside the `Portal` route for a customer page, inside the `/admin` route for a console page. Public pages (like the docs) go outside `RequireAuth`. Import the page directly: pages are in the entry bundle, so moving between them never waits for a download, and a page draws its header straight away while only its data shows a placeholder. Keep a page's `PageHeader`, tabs and section headings outside its loading state, as `src/pages/portal/keys.tsx` does. The documentation is the one page loaded on demand (`React.lazy` in `src/app.tsx`), because its markdown renderer is large.
+1. Add the route in `src/app.tsx`: inside the `Portal` route for a customer page, inside the `/admin` route for a console page. Public pages (like the docs) go outside `RequireAuth`. Add its URL builder to `src/lib/routes.ts` and use that everywhere. Import the page directly: pages are in the entry bundle, so moving between them never waits for a download, and a page draws its header straight away while only its data shows a placeholder. Keep a page's `PageHeader`, tabs and section headings outside its loading state, as `src/pages/portal/keys.tsx` does. The documentation is the one page loaded on demand (`React.lazy` in `src/app.tsx`), because its markdown renderer is large.
 2. Add a sidebar item in `src/components/portal-layout.tsx` or `src/components/console-layout.tsx`. Both fill in `AppShell` (`src/components/app-shell.tsx`), which holds the logo, Docs and the account menu.
    Build the page from `@harlew-dev/ui` components (`PageHeader`, `Table`, `Stat`, `ErrorNotice onRetry`, charts from `@harlew-dev/ui/chart`, …). If a piece is missing, add it to the library and re-vendor it (below) rather than writing a component in this app: `src/components/` only holds Lewbox's own wiring (layouts filled in, the account menu, status badges, the sandbox and key tables, the key expiry picker, limit meters, the usage chart).
 3. Add a typed function to `src/lib/api.ts`. It is the only module that talks to the API; return the existing interfaces or add one beside them. Routes that act on one organization take it as `org`, which `request` sends as the `Lewbox-Organization` header; sandboxes and usage also send it as `?org=`.
-4. Use `useLoad` for reads (`every` refreshes in the background; `refresh()` reloads without the loading state) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts.
+4. Use `useLoad(key, loader)` for reads (`every` polls in the background only while something is pending; `refresh()` reloads without dropping the data) and `useAction` from `@harlew-dev/ui` for changes. They handle loading, errors and toasts. Keep list filters in the URL with `src/lib/query-params.ts`.
 5. Add a test next to the page. `src/test/render.tsx` has `stubAPI` (a routed `fetch` stub that records each call, including its `Lewbox-Organization` header; it answers `/v0/profile` with the given user and organizations and `/v0/instance` with a closed instance), `renderAt` (the app's providers around your routes) and `renderApp` (the whole app at a path). `src/pages/portal/keys.test.tsx` uses them. `src/lib/api.test.ts` covers the client itself.
 6. If the page is documentation, add it to the right book's `README.md` (`docs/consumer/` or `docs/platform/`) so it appears in that nav, and link it with a relative `.md` path.
 
@@ -101,7 +107,7 @@ Both routes are outside `RequireAuth`, so the books are public. They use the lib
 make test
 ```
 
-This runs `gofmt`, `go vet`, the Go tests under the race detector, the web typecheck (`tsc --noEmit`) and the Vitest suite. `make check` runs only the static checks (`gofmt`, `go vet`, the typecheck). The web tests run in jsdom with Testing Library; test files sit next to the code as `*.test.ts` or `*.test.tsx`. `make test` installs dependencies first and does not need a production console build.
+This runs `gofmt`, `go vet`, the Go tests under the race detector, the web typecheck (`tsc --noEmit`), ESLint and the Vitest suite. `make check` runs only the static checks (`gofmt`, `go vet`, the typecheck, ESLint). ESLint enforces the boundaries this page describes: `fetch` only in `src/lib/api.ts`, page paths only from `src/lib/routes.ts`, and the React hooks rules. The web tests run in jsdom with Testing Library; test files sit next to the code as `*.test.ts` or `*.test.tsx`. `make test` installs dependencies first and does not need a production console build.
 
 ## Update the component library
 

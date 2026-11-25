@@ -42,13 +42,14 @@ import { daysAgo, formatLimit, formatMemory, formatNumber } from '../../lib/form
 import { invalidLimitReason, limitText, parseLimit, validLimits } from '../../lib/limits'
 import { orgPermissions } from '../../lib/organizations'
 import { useRegions, type Regions } from '../../lib/regions'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { MembersSection } from '../organizations/members'
 import { OrgStatusBadge } from '../organizations/roles'
 import { SuspendDialog } from './suspend-dialog'
 
-const back = { href: '/admin/workspaces', label: 'Workspaces' }
+const back = { href: routes.admin.workspaces(), label: 'Workspaces' }
 
 const tabs = [
   { id: 'overview', label: 'Overview' },
@@ -62,7 +63,7 @@ export function WorkspaceDetailPage() {
   const navigate = useNavigate()
   const refreshPending = useRefreshPending()
   const [searchParams] = useSearchParams()
-  const workspace = useLoad(() => api.getOrganization(slug), [slug])
+  const workspace = useLoad(`organization:${slug}`, () => api.getOrganization(slug))
   const org = workspace.data
   useDocumentTitle(org?.name ?? 'Workspace')
   const [dialog, setDialog] = useState<'suspend' | 'member' | null>(null)
@@ -96,12 +97,12 @@ export function WorkspaceDetailPage() {
       </>
     )
   }
-  if (workspace.failure instanceof api.ApiError && workspace.failure.status === 404) {
+  if (workspace.missing) {
     return (
       <EmptyState
         title="Workspace not found"
         description={`There is no workspace ${slug}.`}
-        action={<Button href="/admin/workspaces">All workspaces</Button>}
+        action={<Button href={routes.admin.workspaces()}>All workspaces</Button>}
       />
     )
   }
@@ -153,7 +154,7 @@ export function WorkspaceDetailPage() {
             can={can}
             addOpen={dialog === 'member'}
             onAddClose={() => setDialog(null)}
-            onLeft={() => navigate('/admin/workspaces')}
+            onLeft={() => navigate(routes.admin.workspaces())}
           />
         </>
       )}
@@ -164,7 +165,10 @@ export function WorkspaceDetailPage() {
 }
 
 function WorkspaceOverview({ org, onChanged }: { org: api.Organization; onChanged: () => void }) {
-  const usage = useLoad(() => api.getUsage({ org: org.slug, from: daysAgo(30), granularity: 'day' }), [org.slug])
+  const usage = useLoad(
+    `usage:${org.slug}:30`,
+    () => api.getUsage({ org: org.slug, from: daysAgo(30), granularity: 'day' }),
+  )
   const regions = useRegions()
   return (
     <>
@@ -179,8 +183,8 @@ type Editing = { subscription: api.Subscription | null } | null
 
 // The workspace's one cluster and plan, with what it uses there now.
 function RegionPlans({ org, regions, onChanged }: { org: api.Organization; regions: Regions; onChanged: () => void }) {
-  const subscriptions = useLoad(() => api.listSubscriptions(org.slug), [org.slug])
-  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+  const subscriptions = useLoad(`subscriptions:${org.slug}`, () => api.listSubscriptions(org.slug))
+  const limits = useLoad(`limits:${org.slug}`, () => api.getLimits(org.slug))
   const [editing, setEditing] = useState<Editing>(null)
   const [removing, setRemoving] = useState<api.Subscription | null>(null)
   const list = subscriptions.data?.data ?? []
@@ -331,7 +335,7 @@ function SubscriptionForm({
   onClose: () => void
   onSaved: () => void
 }) {
-  const plans = useLoad(() => api.listPlans(), [])
+  const plans = useLoad('plans', () => api.listPlans())
   const [region, setRegion] = useState(subscription?.region.slug ?? regions[0]?.slug ?? '')
   const [plan, setPlan] = useState(subscription?.plan.slug ?? '')
   const [sandboxes, setSandboxes] = useState(limitText(subscription?.overrides?.sandboxes))
@@ -435,7 +439,11 @@ function SubscriptionForm({
 }
 
 function WorkspaceSandboxes({ org }: { org: api.Organization }) {
-  const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug], { every: 10_000 })
+  const sandboxes = useLoad(
+    `sandboxes:${org.slug}:all`,
+    () => api.listSandboxes({ org: org.slug }),
+    { every: (data) => (data?.data.some((sandbox) => sandbox.status === 'creating') ? 10_000 : 0) },
+  )
   const regions = useRegions()
   const list = sandboxes.data?.data ?? []
   if (sandboxes.loading && !sandboxes.data) return <ListSkeleton label="Loading sandboxes" rows={3} />
@@ -445,7 +453,7 @@ function WorkspaceSandboxes({ org }: { org: api.Organization }) {
 }
 
 function WorkspaceKeys({ org }: { org: api.Organization }) {
-  const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
+  const keys = useLoad(`sandbox-keys:${org.slug}`, () => api.listSandboxKeys(org.slug))
   const list = keys.data?.data ?? []
   if (keys.loading && !keys.data) return <ListSkeleton label="Loading API keys" rows={3} />
   if (keys.error.message) return <ErrorNotice error={keys.error} onRetry={keys.reload} />

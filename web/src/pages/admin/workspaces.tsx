@@ -34,6 +34,7 @@ import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
 import { formatDate, formatNumber } from '../../lib/format'
 import { orgInitials } from '../../lib/organizations'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { useRefreshPending } from '../../components/console-layout'
@@ -65,17 +66,18 @@ export function WorkspacesPage() {
   const [suspend, setSuspend] = useState<api.Organization | null>(null)
   const [revoke, setRevoke] = useState<api.SetupLink | null>(null)
   const refreshPending = useRefreshPending()
-  const workspaces = useLoad(
-    () =>
-      tab === 'setup'
-        ? Promise.resolve(null)
-        : api.listOrganizations({ status: tab === 'all' ? undefined : tab }),
-    [tab],
+  const status: api.OrgStatus | undefined = tab === 'pending' || tab === 'suspended' ? tab : undefined
+  const workspaces = useLoad<api.OrganizationList | null>(
+    tab === 'setup' ? null : `organizations:${tab === 'all' ? 'all' : tab}`,
+    () => api.listOrganizations({ status }),
   )
-  const links = useLoad(() => (tab === 'setup' ? api.listSetupLinks() : Promise.resolve(null)), [tab])
-  const running = useLoad(
-    () => (tab === 'setup' ? Promise.resolve(null) : api.listSandboxes({ status: 'started' })),
-    [tab],
+  const links = useLoad<{ data: api.SetupLink[] } | null>(
+    tab === 'setup' ? 'setup-links' : null,
+    () => api.listSetupLinks(),
+  )
+  const running = useLoad<{ data: api.Sandbox[] } | null>(
+    tab === 'setup' ? null : 'sandboxes:started',
+    () => api.listSandboxes({ status: 'started' }),
   )
   const list = workspaces.data?.data ?? []
   const linkList = links.data?.data ?? []
@@ -152,7 +154,7 @@ export function WorkspacesPage() {
                   <TableCell className="text-zinc-500 dark:text-zinc-400">{link.claimed_by ?? '—'}</TableCell>
                   <TableCell>
                     {link.workspace ? (
-                      <Link href={`/admin/workspaces/${encodeURIComponent(link.workspace.slug)}`}>
+                      <Link href={routes.admin.workspace(link.workspace.slug)}>
                         {link.workspace.name}
                       </Link>
                     ) : (
@@ -207,7 +209,7 @@ export function WorkspacesPage() {
             {list.map((org) => (
               <TableRow
                 key={org.id}
-                href={`/admin/workspaces/${encodeURIComponent(org.slug)}`}
+                href={routes.admin.workspace(org.slug)}
                 title={`Open ${org.name}`}
               >
                 <TableCell>
@@ -235,7 +237,7 @@ export function WorkspacesPage() {
                         <EllipsisHorizontalIcon />
                       </DropdownButton>
                       <DropdownMenu anchor="bottom end">
-                        <DropdownItem href={`/admin/workspaces/${encodeURIComponent(org.slug)}`}>
+                        <DropdownItem href={routes.admin.workspace(org.slug)}>
                           <EyeIcon data-slot="icon" />
                           View
                         </DropdownItem>

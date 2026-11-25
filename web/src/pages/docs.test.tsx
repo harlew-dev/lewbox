@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { AuthProvider } from '../lib/auth'
 import { DocsPage, PlatformDocsPage } from './docs'
 
 beforeEach(() => {
@@ -38,11 +39,13 @@ beforeEach(() => {
 describe('DocsPage', () => {
   it('renders headings with ids, alerts without the marker, and a table of contents', async () => {
     render(
-      <MemoryRouter initialEntries={['/docs/guide']}>
-        <Routes>
-          <Route path="/docs/*" element={<DocsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <AuthProvider>
+        <MemoryRouter initialEntries={['/docs/guide']}>
+          <Routes>
+            <Route path="/docs/*" element={<DocsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
     )
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Guide' })).toBeInTheDocument()
@@ -61,13 +64,15 @@ describe('DocsPage', () => {
   // second render (StrictMode, or any parent update) shifted or blanked them.
   it('keeps heading ids stable across re-renders', async () => {
     const tree = () => (
-      <StrictMode>
-        <MemoryRouter initialEntries={['/docs/guide']}>
-          <Routes>
-            <Route path="/docs/*" element={<DocsPage />} />
-          </Routes>
-        </MemoryRouter>
-      </StrictMode>
+      <AuthProvider>
+        <StrictMode>
+          <MemoryRouter initialEntries={['/docs/guide']}>
+            <Routes>
+              <Route path="/docs/*" element={<DocsPage />} />
+            </Routes>
+          </MemoryRouter>
+        </StrictMode>
+      </AuthProvider>
     )
     const { rerender } = render(tree())
     await screen.findByRole('heading', { level: 1, name: 'Guide' })
@@ -97,11 +102,13 @@ describe('DocsPage', () => {
       }),
     )
     render(
-      <MemoryRouter initialEntries={['/platform/guide']}>
-        <Routes>
-          <Route path="/platform/*" element={<PlatformDocsPage />} />
-        </Routes>
-      </MemoryRouter>,
+      <AuthProvider>
+        <MemoryRouter initialEntries={['/platform/guide']}>
+          <Routes>
+            <Route path="/platform/*" element={<PlatformDocsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
     )
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Platform guide' })).toBeInTheDocument()

@@ -32,9 +32,9 @@ import { EllipsisHorizontalIcon, TrashIcon } from '@heroicons/react/16/solid'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { AliveBadge, StatusBadge } from '../../components/status'
-import { ApiError } from '../../lib/api'
 import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { AddNodeDialog } from './add-node-dialog'
@@ -43,7 +43,7 @@ import { ClusterMetrics, ClusterUptime } from './cluster-health'
 import { RemoveNodeDialog } from './remove-node-dialog'
 import { NodeActions } from './servers'
 
-const back = { href: '/admin/servers', label: 'Servers' }
+const back = { href: routes.admin.servers(), label: 'Servers' }
 
 export function ClusterDetailPage() {
   const { ref = '' } = useParams()
@@ -54,9 +54,9 @@ export function ClusterDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [configureNote, setConfigureNote] = useState(false)
   const [removeNode, setRemoveNode] = useState<api.Node | null>(null)
-  const { data, error, failure, loading, reload, refresh } = useLoad(
+  const { data, error, loading, missing, reload, refresh } = useLoad(
+    `cluster:${ref}`,
     () => api.getCluster(ref),
-    [ref],
   )
   const detail = updated ?? data
 
@@ -110,7 +110,7 @@ export function ClusterDetailPage() {
       }}
       onConfirmed={() => {
         toast.success('Cluster removed.')
-        navigate('/admin/servers')
+        navigate(routes.admin.servers())
       }}
     />
   )
@@ -125,12 +125,12 @@ export function ClusterDetailPage() {
     )
   }
 
-  if (failure instanceof ApiError && failure.status === 404) {
+  if (missing) {
     return (
       <EmptyState
         title="Cluster not found"
         description={`No cluster matched ${ref}. It may have been removed.`}
-        action={<Button href="/admin/servers">Back to servers</Button>}
+        action={<Button href={routes.admin.servers()}>Back to servers</Button>}
       />
     )
   }

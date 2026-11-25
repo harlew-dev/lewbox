@@ -18,11 +18,12 @@ import { Outlet, useLocation } from 'react-router'
 import { BrandLogo } from './brand-logo'
 import { homeFor, useAuth } from '../lib/auth'
 import * as api from '../lib/api'
+import { routes } from '../lib/routes'
 import { useLoad } from '../lib/use-load'
 
 const books: Record<api.DocsBook, { prefix: string; title: string; other: api.DocsBook }> = {
-  consumer: { prefix: '/docs', title: 'Docs', other: 'platform' },
-  platform: { prefix: '/platform', title: 'Platform docs', other: 'consumer' },
+  consumer: { prefix: routes.docs(), title: 'Docs', other: 'platform' },
+  platform: { prefix: routes.platformDocs(), title: 'Platform docs', other: 'consumer' },
 }
 
 function docsPath(pathname: string, prefix: string): string {
@@ -50,7 +51,7 @@ export function DocsLayout({ book = 'consumer' }: { book?: api.DocsBook }) {
   const location = useLocation()
   const { prefix, title, other } = books[book]
   const current = docsPath(location.pathname, prefix)
-  const nav = useLoad(() => api.docsNav(book), [book])
+  const nav = useLoad(`docs:nav:${book}`, () => api.docsNav(book))
   const signedIn = status === 'authenticated'
 
   const sideNav = (
@@ -112,7 +113,7 @@ export function DocsLayout({ book = 'consumer' }: { book?: api.DocsBook }) {
         {signedIn ? (
           <NavbarItem href={homeFor(user)}>{user?.instance_admin ? 'Console' : 'Dashboard'}</NavbarItem>
         ) : (
-          <NavbarItem href="/login">Sign in</NavbarItem>
+          <NavbarItem href={routes.login()}>Sign in</NavbarItem>
         )}
       </NavbarSection>
     </Navbar>

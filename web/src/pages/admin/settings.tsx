@@ -52,9 +52,9 @@ export function AdminSettingsPage() {
 }
 
 function GeneralSettings() {
-  const settings = useLoad(() => api.getSettings(), [])
-  const plans = useLoad(() => api.listPlans(), [])
-  const regions = useLoad(() => api.listRegions(), [])
+  const settings = useLoad('settings', () => api.getSettings())
+  const plans = useLoad('plans', () => api.listPlans())
+  const regions = useLoad('regions:all', () => api.listRegions())
 
   return (
     <>

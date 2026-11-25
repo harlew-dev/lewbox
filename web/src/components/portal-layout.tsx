@@ -8,18 +8,19 @@ import {
 } from '@heroicons/react/20/solid'
 import type { ReactNode } from 'react'
 import { AppShell, useIsActive } from './app-shell'
+import { routes } from '../lib/routes'
 import { WorkspaceSwitcher } from './workspace-switcher'
 
 export function PortalLayout({ children }: { children: ReactNode }) {
   const isActive = useIsActive()
   const primary = [
-    { href: '/', label: 'Home', icon: HomeIcon, exact: true },
-    { href: '/sandboxes', label: 'Sandboxes', icon: CubeIcon },
+    { href: routes.home(), label: 'Home', icon: HomeIcon, exact: true },
+    { href: routes.sandboxes(), label: 'Sandboxes', icon: CubeIcon },
   ]
   const manage = [
-    { href: '/keys', label: 'API keys', icon: KeyIcon },
-    { href: '/usage', label: 'Usage', icon: ChartBarIcon },
-    { href: '/plan', label: 'Plan & Billing', icon: RectangleStackIcon },
+    { href: routes.keys(), label: 'API keys', icon: KeyIcon },
+    { href: routes.usage(), label: 'Usage', icon: ChartBarIcon },
+    { href: routes.plan(), label: 'Plan & Billing', icon: RectangleStackIcon },
   ]
   return (
     <AppShell

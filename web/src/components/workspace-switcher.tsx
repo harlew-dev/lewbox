@@ -37,6 +37,7 @@ import * as api from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useInstance } from '../lib/instance'
 import { orgInitials, useOrganizations } from '../lib/organizations'
+import { routes } from '../lib/routes'
 import { failureMessage } from '../lib/use-load'
 
 // The current workspace, its settings, every workspace the member belongs to
@@ -53,7 +54,9 @@ export function WorkspaceSwitcher({ navbar = false, className }: { navbar?: bool
 
   const Item = navbar ? NavbarItem : SidebarItem
   const Label = navbar ? NavbarLabel : SidebarLabel
-  const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
+  const onSettings = [routes.settings.general(), routes.settings.members(), routes.settings.apiKeys()].some(
+    (href) => pathname === href || pathname.startsWith(`${href}/`),
+  )
   const admin = user?.instance_admin === true
   const canCreate = signup !== 'closed' || admin
 
@@ -67,7 +70,7 @@ export function WorkspaceSwitcher({ navbar = false, className }: { navbar?: bool
         </DropdownButton>
         <DropdownMenu className="min-w-80 lg:min-w-64" anchor={navbar ? 'bottom end' : 'bottom start'}>
           <DropdownItem
-            href="/settings"
+            href={routes.settings.general()}
             aria-current={onSettings ? 'page' : undefined}
             selected={onSettings}
           >
@@ -80,7 +83,7 @@ export function WorkspaceSwitcher({ navbar = false, className }: { navbar?: bool
               key={org.id}
               onClick={() => {
                 select(org.slug)
-                navigate('/')
+                navigate(routes.home())
               }}
               aria-current={org.id === current.id ? 'page' : undefined}
             >
@@ -105,7 +108,7 @@ export function WorkspaceSwitcher({ navbar = false, className }: { navbar?: bool
           {admin && (
             <>
               <DropdownDivider />
-              <DropdownItem href="/admin">
+              <DropdownItem href={routes.admin.overview()}>
                 <WrenchScrewdriverIcon data-slot="icon" />
                 <DropdownLabel>Operator console</DropdownLabel>
               </DropdownItem>
@@ -140,7 +143,7 @@ function CreateWorkspaceForm({ open, onClose }: { open: boolean; onClose: () => 
     await reloadOrganizations()
     select(result.value.slug)
     onClose()
-    navigate('/')
+    navigate(routes.home())
     toast.success(`${result.value.name} created.`)
   }
 

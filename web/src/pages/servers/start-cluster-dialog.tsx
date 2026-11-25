@@ -25,6 +25,7 @@ import {
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState } from 'react'
 import * as api from '../../lib/api'
+import { routes } from '../../lib/routes'
 import {
   dnsRecordsOffCommand,
   installCommand,
@@ -87,8 +88,8 @@ function StartCluster({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState('')
   const [extraFlags, setExtraFlags] = useState('')
 
-  const dnsProfiles = useLoad(() => api.listDNSProfiles(), [])
-  const storageProfiles = useLoad(() => api.listStorageProfiles(), [])
+  const dnsProfiles = useLoad('dns-profiles', () => api.listDNSProfiles())
+  const storageProfiles = useLoad('storage-profiles', () => api.listStorageProfiles())
   const dnsList = dnsProfiles.data?.data ?? []
   const storageList = storageProfiles.data?.data ?? []
   const selectedDNS = dnsList.find((profile) => profile.name === dnsProfile)
@@ -144,7 +145,7 @@ function StartCluster({ onClose }: { onClose: () => void }) {
               description={
                 <>
                   Follow{' '}
-                  <TextLink href="/platform/setup/install-the-cli" target="_blank" rel="noreferrer">
+                  <TextLink href={routes.platformDocs('setup/install-the-cli')} target="_blank" rel="noreferrer">
                     Install the CLI
                   </TextLink>
                   . Run the next commands as your own user, not root.
@@ -257,11 +258,11 @@ function StartCluster({ onClose }: { onClose: () => void }) {
                   {dnsList.length === 0 && !dnsProfiles.loading ? (
                     <>
                       No DNS profile yet. Domain mode needs one, to get certificates:{' '}
-                      <TextLink href="/admin/settings?tab=dns">add a DNS profile</TextLink>.
+                      <TextLink href={routes.admin.settings('dns')}>add a DNS profile</TextLink>.
                     </>
                   ) : (
                     <>
-                      Its zone must contain the domain. <TextLink href="/admin/settings?tab=dns">Settings → DNS profiles</TextLink>
+                      Its zone must contain the domain. <TextLink href={routes.admin.settings('dns')}>Settings → DNS profiles</TextLink>
                     </>
                   )}
                 </Description>
@@ -334,7 +335,7 @@ function StartCluster({ onClose }: { onClose: () => void }) {
             </Listbox>
             <Description>
               Optional. A bucket for snapshots and archived sandboxes.{' '}
-              <TextLink href="/admin/settings?tab=storage">Settings → Storage profiles</TextLink>
+              <TextLink href={routes.admin.settings('storage')}>Settings → Storage profiles</TextLink>
             </Description>
           </Field>
           <RadioGroup

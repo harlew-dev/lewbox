@@ -1,9 +1,10 @@
 import { Logo } from '@harlew-dev/ui'
 import { useInstance } from '../lib/instance'
+import { routes } from '../lib/routes'
 
 // The instance's name, as its operator set it.
 export function BrandLogo({
-  href = '/',
+  href = routes.home(),
   className,
 }: {
   href?: string

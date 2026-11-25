@@ -17,6 +17,7 @@ import {
 } from '@heroicons/react/16/solid'
 import type { User } from '../lib/api'
 import { roleLabel, useOrganizations } from '../lib/organizations'
+import { routes } from '../lib/routes'
 
 function initials(email: string): string {
   const name = email.split('@')[0] ?? email
@@ -83,11 +84,11 @@ export function AccountMenu({
         anchor={placement === 'sidebar' ? 'top start' : 'bottom end'}
         className={placement === 'sidebar' ? 'min-w-(--anchor-width)' : 'min-w-64'}
       >
-        <DropdownItem href="/account" selected={active}>
+        <DropdownItem href={routes.account()} selected={active}>
           <Cog6ToothIcon data-slot="icon" />
           Account settings
         </DropdownItem>
-        <DropdownItem href="/docs">
+        <DropdownItem href={routes.docs()}>
           <BookOpenIcon data-slot="icon" />
           Documentation
         </DropdownItem>

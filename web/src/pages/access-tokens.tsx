@@ -59,7 +59,7 @@ function TokenStatus({ status }: { status: api.AccessToken['status'] }) {
 export function AccessTokensSection({ instanceAdmin }: { instanceAdmin: boolean }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<api.AccessToken | null>(null)
-  const tokens = useLoad(() => api.listAccessTokens(), [])
+  const tokens = useLoad('access-tokens', () => api.listAccessTokens())
   const list = tokens.data?.data ?? []
 
   return (

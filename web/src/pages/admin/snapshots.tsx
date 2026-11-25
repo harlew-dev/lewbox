@@ -10,11 +10,13 @@ import {
   Text,
 } from '@harlew-dev/ui'
 import { BarList } from '@harlew-dev/ui/chart'
-import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import * as api from '../../lib/api'
 import { PartialNotice, SnapshotTable, useSnapshots } from '../../components/snapshot-table'
 import { formatMemory, formatNumber } from '../../lib/format'
+import { one, oneOf, withParam } from '../../lib/query-params'
 import { useRegions } from '../../lib/regions'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 
 interface Group {
@@ -67,17 +69,23 @@ export function FleetSnapshotsPage() {
 }
 
 function SnapshotsView() {
-  const [region, setRegion] = useState('')
-  const [workspace, setWorkspace] = useState('')
-  const [kind, setKind] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const region = one(searchParams, 'region')
+  const workspace = one(searchParams, 'workspace')
+  const kind = oneOf(searchParams, 'kind', ['snapshot', 'archive'])
   const snapshots = useSnapshots('')
   const { load } = snapshots
   const regions = useRegions()
+  const filtered = region !== '' || workspace !== '' || kind !== ''
+
+  function choose(key: string, value: string) {
+    setSearchParams((current) => withParam(current, key, value), { preventScrollReset: true })
+  }
 
   const workspaces = groupBy(snapshots.list, (snapshot) => ({
     key: snapshot.organization?.slug ?? '',
     label: snapshot.organization?.name ?? 'Unknown',
-    href: `/admin/workspaces/${encodeURIComponent(snapshot.organization?.slug ?? '')}`,
+    href: routes.admin.workspace(snapshot.organization?.slug ?? ''),
   })).sort((a, b) => a.label.localeCompare(b.label))
   const list = snapshots.list.filter(
     (snapshot) =>
@@ -95,12 +103,12 @@ function SnapshotsView() {
       snapshot.kind === 'archive'
         ? `Archived to storage (${regions.name(snapshot.region)})`
         : `${snapshot.node ?? 'Unknown node'} (${regions.name(snapshot.region)})`,
-    href: `/admin/servers/clusters/${encodeURIComponent(snapshot.region)}`,
+    href: routes.admin.cluster(snapshot.region),
   }))
   const byWorkspace = groupBy(list, (snapshot) => ({
     key: snapshot.organization?.slug ?? '',
     label: snapshot.organization?.name ?? 'Unknown',
-    href: `/admin/workspaces/${encodeURIComponent(snapshot.organization?.slug ?? '')}`,
+    href: routes.admin.workspace(snapshot.organization?.slug ?? ''),
   }))
 
   return (
@@ -110,12 +118,12 @@ function SnapshotsView() {
         description="Every workspace’s snapshots and archived sandboxes, on every node and in every bucket."
       />
       <div className="mb-6 flex flex-wrap gap-3">
-        <Listbox aria-label="Kind" value={kind} onChange={setKind} className="sm:w-48">
+        <Listbox aria-label="Kind" value={kind} onChange={(value) => choose('kind', value ?? '')} className="sm:w-48">
           <ListboxOption value="">All kinds</ListboxOption>
           <ListboxOption value="snapshot">Snapshots</ListboxOption>
           <ListboxOption value="archive">Archived sandboxes</ListboxOption>
         </Listbox>
-        <Listbox aria-label="Region" value={region} onChange={setRegion} className="sm:w-48">
+        <Listbox aria-label="Region" value={region} onChange={(value) => choose('region', value ?? '')} className="sm:w-48">
           <ListboxOption value="">All regions</ListboxOption>
           {regions.list.map((option) => (
             <ListboxOption key={option.slug} value={option.slug}>
@@ -123,7 +131,7 @@ function SnapshotsView() {
             </ListboxOption>
           ))}
         </Listbox>
-        <Listbox aria-label="Workspace" value={workspace} onChange={setWorkspace} className="sm:w-48">
+        <Listbox aria-label="Workspace" value={workspace} onChange={(value) => choose('workspace', value ?? '')} className="sm:w-48">
           <ListboxOption value="">All workspaces</ListboxOption>
           {workspaces.map((option) => (
             <ListboxOption key={option.key} value={option.key}>
@@ -133,60 +141,72 @@ function SnapshotsView() {
         </Listbox>
       </div>
 
-      {load.loading && !load.data ? (
-        <ListSkeleton label="Loading snapshots" rows={4} />
-      ) : load.error.message ? (
+      {load.error.message && !load.data ? (
         <ErrorNotice error={load.error} onRetry={load.reload} />
       ) : (
         <>
-          <PartialNotice partial={snapshots.partial} />
-          <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat title="Snapshots" value={formatNumber(list.length, 0)}>
-              <span>across {plural(owners, 'workspace')}</span>
-            </Stat>
-            <Stat title="Disk" value={`${formatNumber(diskGB, 0)} GB`}>
-              <span>of sandbox disk captured</span>
-            </Stat>
-            <Stat title="Memory" value={formatMemory(memoryMB)}>
-              <span>of sandbox memory captured</span>
-            </Stat>
-            <Stat title="Failed uploads" value={formatNumber(failed, 0)} level={failed > 0 ? 'warn' : undefined}>
-              <span>not pushed to the registry</span>
-            </Stat>
-          </div>
-          <Text className="mt-4">
-            AerolVM doesn’t report how much space a snapshot takes, so these totals add up the disk and memory size of
-            the sandbox each snapshot was taken from.
-          </Text>
-
-          {list.length === 0 ? (
-            <div className="mt-10">
-              <EmptyState
-                title="No snapshots"
-                description={
-                  region || workspace || kind
-                    ? 'None match these filters.'
-                    : 'Snapshots workspaces take and sandboxes archived on stop show up here.'
-                }
-              />
-            </div>
-          ) : (
-            <>
-              <div className="mt-14 grid gap-10 lg:grid-cols-2">
-                <GroupList title="By node" groups={byNode} />
-                <GroupList title="By workspace" groups={byWorkspace} />
-              </div>
-              <Subheading className="mt-14 mb-4">All snapshots and archives</Subheading>
-              <SnapshotTable
-                snapshots={list}
-                regionName={regions.name}
-                canChange
-                fleet
-                onDeleted={snapshots.deleted}
-                onRestored={snapshots.changed}
-              />
-            </>
+          {load.error.message && (
+            <ErrorNotice error={load.error} onRetry={load.reload} className="mb-6" />
           )}
+          <div
+            aria-busy={load.stale || undefined}
+            className={load.stale ? 'opacity-60 transition-opacity' : undefined}
+          >
+            {load.loading && !load.data ? (
+              <ListSkeleton label="Loading snapshots" rows={4} />
+            ) : (
+              <>
+                <PartialNotice partial={snapshots.partial} />
+                <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-4">
+                  <Stat title="Snapshots" value={formatNumber(list.length, 0)}>
+                    <span>across {plural(owners, 'workspace')}</span>
+                  </Stat>
+                  <Stat title="Disk" value={`${formatNumber(diskGB, 0)} GB`}>
+                    <span>of sandbox disk captured</span>
+                  </Stat>
+                  <Stat title="Memory" value={formatMemory(memoryMB)}>
+                    <span>of sandbox memory captured</span>
+                  </Stat>
+                  <Stat title="Failed uploads" value={formatNumber(failed, 0)} level={failed > 0 ? 'warn' : undefined}>
+                    <span>not pushed to the registry</span>
+                  </Stat>
+                </div>
+                <Text className="mt-4">
+                  AerolVM doesn’t report how much space a snapshot takes, so these totals add up the disk and memory
+                  size of the sandbox each snapshot was taken from.
+                </Text>
+
+                {list.length === 0 ? (
+                  <div className="mt-10">
+                    <EmptyState
+                      title="No snapshots"
+                      description={
+                        filtered
+                          ? 'None match these filters.'
+                          : 'Snapshots workspaces take and sandboxes archived on stop show up here.'
+                      }
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-14 grid gap-10 lg:grid-cols-2">
+                      <GroupList title="By node" groups={byNode} />
+                      <GroupList title="By workspace" groups={byWorkspace} />
+                    </div>
+                    <Subheading className="mt-14 mb-4">All snapshots and archives</Subheading>
+                    <SnapshotTable
+                      snapshots={list}
+                      regionName={regions.name}
+                      canChange
+                      fleet
+                      onDeleted={snapshots.deleted}
+                      onRestored={snapshots.changed}
+                    />
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </>

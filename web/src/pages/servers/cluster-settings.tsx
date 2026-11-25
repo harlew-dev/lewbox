@@ -27,6 +27,7 @@ import {
 import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState } from 'react'
 import * as api from '../../lib/api'
+import { routes } from '../../lib/routes'
 import { validDomain } from '../../lib/commands'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
@@ -180,8 +181,8 @@ function SettingsForm({
   const [stopPolicy, setStopPolicy] = useState(cluster.stop_policy)
   const [retention, setRetention] = useState(cluster.archive_local_retention)
   const [snapshotName, setSnapshotName] = useState(cluster.archive_snapshot_name)
-  const dnsProfiles = useLoad(() => api.listDNSProfiles(), [])
-  const storageProfiles = useLoad(() => api.listStorageProfiles(), [])
+  const dnsProfiles = useLoad('dns-profiles', () => api.listDNSProfiles())
+  const storageProfiles = useLoad('storage-profiles', () => api.listStorageProfiles())
 
   const blocked = storageProfile === '' ? 'Choose a storage profile first.' : ''
   const policy = blocked ? 'keep' : stopPolicy
@@ -244,7 +245,7 @@ function SettingsForm({
             ))}
           </Listbox>
           <Description>
-            <TextLink href="/admin/settings?tab=dns">Settings → DNS profiles</TextLink>
+            <TextLink href={routes.admin.settings('dns')}>Settings → DNS profiles</TextLink>
           </Description>
         </Field>
         <RadioGroup
@@ -268,7 +269,7 @@ function SettingsForm({
             ))}
           </Listbox>
           <Description>
-            <TextLink href="/admin/settings?tab=storage">Settings → Storage profiles</TextLink>
+            <TextLink href={routes.admin.settings('storage')}>Settings → Storage profiles</TextLink>
           </Description>
         </Field>
         <RadioGroup

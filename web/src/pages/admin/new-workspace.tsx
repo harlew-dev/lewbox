@@ -25,6 +25,7 @@ import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useRefreshPending } from '../../components/console-layout'
 import * as api from '../../lib/api'
+import { routes } from '../../lib/routes'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
 const lower = 'abcdefghijklmnopqrstuvwxyz'
@@ -105,9 +106,9 @@ export function NewWorkspaceDialog({
 }
 
 function NewWorkspace({ onClose, onMade }: { onClose: () => void; onMade: () => void }) {
-  const settings = useLoad(() => api.getSettings(), [])
-  const regions = useLoad(() => api.listRegions(), [])
-  const plans = useLoad(() => api.listPlans(), [])
+  const settings = useLoad('settings', () => api.getSettings())
+  const regions = useLoad('regions:all', () => api.listRegions())
+  const plans = useLoad('plans', () => api.listPlans())
 
   if ((settings.loading && !settings.data) || (regions.loading && !regions.data) || (plans.loading && !plans.data)) {
     return (
@@ -181,7 +182,7 @@ function NewWorkspaceForm({
 
   function open(slug: string) {
     onClose()
-    navigate(`/admin/workspaces/${encodeURIComponent(slug)}`)
+    navigate(routes.admin.workspace(slug))
   }
 
   // Finds or creates the account, then the workspace with it as owner, then

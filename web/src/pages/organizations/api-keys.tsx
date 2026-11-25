@@ -70,7 +70,7 @@ export function AdminKeysSection({
   onCreateClose: () => void
 }) {
   const [revokeTarget, setRevokeTarget] = useState<api.AdminKey | null>(null)
-  const keys = useLoad(() => api.listAdminKeys(org.slug), [org.slug])
+  const keys = useLoad(`admin-keys:${org.slug}`, () => api.listAdminKeys(org.slug))
   const list = keys.data?.data ?? []
 
   return (

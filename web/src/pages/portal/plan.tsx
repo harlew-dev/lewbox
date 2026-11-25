@@ -12,7 +12,7 @@ export function PlanPage() {
   useDocumentTitle('Plan & Billing')
   const { org } = usePortalOrg()
   const { name } = useInstance()
-  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+  const limits = useLoad(`limits:${org.slug}`, () => api.getLimits(org.slug))
   const regions = useRegions(org.slug)
   const endpoint = regions.list.find((region) => region.slug === org.region?.slug)?.endpoint_url
 

@@ -36,6 +36,7 @@ import {
   type Runtime,
 } from '../../lib/commands'
 import { relativeTime } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { failureMessage } from '../../lib/use-load'
 import { StepIndicator } from './step-indicator'
 import { SignInStep } from './sign-in-step'
@@ -264,7 +265,7 @@ function AddNode({
               description={
                 <>
                   Follow{' '}
-                  <TextLink href="/platform/setup/install-the-cli" target="_blank" rel="noreferrer">
+                  <TextLink href={routes.platformDocs('setup/install-the-cli')} target="_blank" rel="noreferrer">
                     Install the CLI
                   </TextLink>
                   .

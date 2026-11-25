@@ -14,6 +14,7 @@ import {
 import { createContext, useContext, type ReactNode } from 'react'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { routes } from '../lib/routes'
 import { useLoad } from '../lib/use-load'
 import { AppShell, useIsActive } from './app-shell'
 
@@ -27,31 +28,31 @@ export function useRefreshPending(): () => void {
 export function ConsoleLayout({ children }: { children: ReactNode }) {
   const { organizations } = useAuth()
   const isActive = useIsActive()
-  const pending = useLoad(() => api.listOrganizations({ status: 'pending' }), [])
+  const pending = useLoad('organizations:pending', () => api.listOrganizations({ status: 'pending' }))
   const pendingCount = pending.data?.data.length ?? 0
   type NavItem = { href: string; label: string; icon: typeof HomeIcon; exact?: boolean; badge?: number }
   const groups: { heading?: string; items: NavItem[] }[] = [
     {
       items: [
-        { href: '/admin', label: 'Home', icon: HomeIcon, exact: true },
-        { href: '/admin/workspaces', label: 'Workspaces', icon: BuildingOffice2Icon, badge: pendingCount },
-        { href: '/admin/users', label: 'Users', icon: UsersIcon },
+        { href: routes.admin.overview(), label: 'Home', icon: HomeIcon, exact: true },
+        { href: routes.admin.workspaces(), label: 'Workspaces', icon: BuildingOffice2Icon, badge: pendingCount },
+        { href: routes.admin.users(), label: 'Users', icon: UsersIcon },
       ],
     },
     {
       heading: 'Compute',
       items: [
-        { href: '/admin/sandboxes', label: 'Sandboxes', icon: CubeIcon },
-        { href: '/admin/snapshots', label: 'Snapshots', icon: CameraIcon },
-        { href: '/admin/servers', label: 'Servers', icon: ServerStackIcon },
+        { href: routes.admin.sandboxes(), label: 'Sandboxes', icon: CubeIcon },
+        { href: routes.admin.snapshots(), label: 'Snapshots', icon: CameraIcon },
+        { href: routes.admin.servers(), label: 'Servers', icon: ServerStackIcon },
       ],
     },
     {
       heading: 'Manage',
       items: [
-        { href: '/admin/plans', label: 'Plans', icon: RectangleStackIcon },
-        { href: '/admin/events', label: 'Audit trail', icon: ClipboardDocumentListIcon },
-        { href: '/admin/settings', label: 'Settings', icon: Cog6ToothIcon },
+        { href: routes.admin.plans(), label: 'Plans', icon: RectangleStackIcon },
+        { href: routes.admin.events(), label: 'Audit trail', icon: ClipboardDocumentListIcon },
+        { href: routes.admin.settings(), label: 'Settings', icon: Cog6ToothIcon },
       ],
     },
   ]
@@ -78,7 +79,7 @@ export function ConsoleLayout({ children }: { children: ReactNode }) {
             ))}
             {organizations.length > 0 && (
               <SidebarSection>
-                <SidebarItem href="/">
+                <SidebarItem href={routes.home()}>
                   <UserCircleIcon data-slot="icon" />
                   <SidebarLabel>Workspace portal</SidebarLabel>
                 </SidebarItem>

@@ -31,6 +31,7 @@ import { NoClusters } from '../../components/no-clusters'
 import { AliveBadge, StatusBadge } from '../../components/status'
 import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 import { AddServerMenu } from './add-server-menu'
@@ -48,7 +49,7 @@ export function ServersPage() {
   const tab = tabFrom(searchParams, tabs)
   useDocumentTitle(tab === 'nodes' ? 'Nodes' : 'Servers')
 
-  const clusters = useLoad(() => api.listClusters(), [])
+  const clusters = useLoad('clusters', () => api.listClusters())
   const clusterList = clusters.data?.data ?? []
   // Bumped when a server may have been added, so the nodes tab refreshes.
   const [nodesVersion, setNodesVersion] = useState(0)
@@ -105,7 +106,7 @@ function ClustersTab({ load }: { load: ReturnType<typeof useLoad<api.ClusterList
           {clusters.map((cluster) => (
             <TableRow
               key={cluster.id}
-              href={`/admin/servers/clusters/${encodeURIComponent(cluster.slug)}`}
+              href={routes.admin.cluster(cluster.slug)}
               title={`Open ${cluster.name}`}
             >
               <TableCell>
@@ -139,7 +140,9 @@ function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: num
   const [searchParams, setSearchParams] = useSearchParams()
   const cluster = searchParams.get('cluster') ?? ''
   const [target, setTarget] = useState<api.Node | null>(null)
-  const nodes = useLoad(() => api.listNodes(cluster === '' ? undefined : cluster), [cluster])
+  const nodes = useLoad(`nodes:${cluster === '' ? 'all' : cluster}`, () =>
+    api.listNodes(cluster === '' ? undefined : cluster),
+  )
   const nodeList = nodes.data?.data ?? []
   const refreshNodes = nodes.refresh
   // Refresh in the background, keeping the list on screen.
@@ -182,22 +185,31 @@ function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: num
         )}
       </div>
 
-      {nodes.loading && !nodes.data ? (
-        <ListSkeleton label="Loading nodes" rows={5} />
-      ) : nodes.error.message ? (
+      {nodes.error.message && !nodes.data ? (
         <ErrorNotice error={nodes.error} onRetry={nodes.reload} />
-      ) : nodeList.length === 0 ? (
-        <EmptyState
-          title="No nodes"
-          description={
-            cluster === ''
-              ? 'Nodes appear here when a cluster is registered or a node joins one.'
-              : 'No nodes belong to this cluster.'
-          }
-          action={<Button href="/platform/clusters/add-nodes">Read the node guide</Button>}
-        />
       ) : (
-        <Table>
+        <>
+          {nodes.error.message && (
+            <ErrorNotice error={nodes.error} onRetry={nodes.reload} className="mb-6" />
+          )}
+          <div
+            aria-busy={nodes.stale || undefined}
+            className={nodes.stale ? 'opacity-60 transition-opacity' : undefined}
+          >
+            {nodes.loading && !nodes.data ? (
+              <ListSkeleton label="Loading nodes" rows={5} />
+            ) : nodeList.length === 0 ? (
+              <EmptyState
+                title="No nodes"
+                description={
+                  cluster === ''
+                    ? 'Nodes appear here when a cluster is registered or a node joins one.'
+                    : 'No nodes belong to this cluster.'
+                }
+                action={<Button href={routes.platformDocs('clusters/add-nodes')}>Read the node guide</Button>}
+              />
+            ) : (
+              <Table>
           <TableHead>
             <TableRow>
               <TableHeader>Node</TableHeader>
@@ -218,7 +230,7 @@ function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: num
                 <TableCell className="font-medium">{node.name}</TableCell>
                 <TableCell>
                   {node.cluster ? (
-                    <TextLink href={`/admin/servers/clusters/${encodeURIComponent(node.cluster)}`}>
+                    <TextLink href={routes.admin.cluster(node.cluster)}>
                       {node.cluster}
                     </TextLink>
                   ) : (
@@ -245,7 +257,10 @@ function NodesTab({ clusters, version }: { clusters: api.Cluster[]; version: num
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+              </Table>
+            )}
+          </div>
+        </>
       )}
 
       <RemoveNodeDialog node={target} onClose={() => setTarget(null)} onRemoved={nodes.reload} />

@@ -19,6 +19,7 @@ import { BookOpenIcon } from '@heroicons/react/20/solid'
 import { useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { homeFor, useAuth } from '../lib/auth'
+import { routes } from '../lib/routes'
 import { AccountMenu } from './account-menu'
 import { BrandLogo } from './brand-logo'
 
@@ -55,7 +56,7 @@ export function AppShell({
     setSigningOut(true)
     try {
       await signOut()
-      navigate('/login', { replace: true })
+      navigate(routes.login(), { replace: true })
     } finally {
       setSigningOut(false)
     }
@@ -64,7 +65,7 @@ export function AppShell({
   const accountMenu = (placement: 'sidebar' | 'navbar') => (
     <AccountMenu
       user={user}
-      active={isActive('/account')}
+      active={isActive(routes.account())}
       signingOut={signingOut}
       onSignOut={() => void handleSignOut()}
       placement={placement}
@@ -83,7 +84,7 @@ export function AppShell({
         {nav}
         <SidebarSpacer />
         <SidebarSection>
-          <SidebarItem href={user?.instance_admin ? '/platform' : '/docs'}>
+          <SidebarItem href={user?.instance_admin ? routes.platformDocs() : routes.docs()}>
             <BookOpenIcon data-slot="icon" />
             <SidebarLabel>Docs</SidebarLabel>
           </SidebarItem>

@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router'
 import * as api from '../../../lib/api'
 import { useAuth } from '../../../lib/auth'
 import { useOrganizations } from '../../../lib/organizations'
+import { routes } from '../../../lib/routes'
 import { useDocumentTitle } from '../../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../../lib/use-load'
 import { usePortalOrg } from '../portal-route'
@@ -85,6 +86,7 @@ function RenameForm() {
     event.preventDefault()
     const result = await rename.run()
     if (result.ok) {
+      setName(result.value.name)
       toast.success('Workspace renamed.')
       reload()
       void reloadOrganizations()
@@ -143,7 +145,7 @@ function LeaveZone({ org }: { org: api.Organization }) {
   const { organizations, select } = useOrganizations()
   const { reloadOrganizations } = useAuth()
   const navigate = useNavigate()
-  const members = useLoad(() => api.listMembers(org.slug), [org.slug])
+  const members = useLoad(`members:${org.slug}`, () => api.listMembers(org.slug))
   const [open, setOpen] = useState(false)
   const list = members.data?.data ?? []
   const self = list.find((member) => member.user_id === user?.id)
@@ -157,7 +159,7 @@ function LeaveZone({ org }: { org: api.Organization }) {
     await reloadOrganizations()
     const next = organizations.find((other) => other.slug !== org.slug)
     if (next) select(next.slug)
-    navigate('/')
+    navigate(routes.home())
   }
 
   return (

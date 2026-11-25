@@ -40,10 +40,11 @@ run: build ## Build, then serve on the port in PORT. Set LEWBOX_BOOTSTRAP_ADMIN_
 dev: deps ## Run the Vite dev server on :5173, proxying /v0 to :8080. Run `make run` in another terminal.
 	npm --prefix web run dev
 
-check: deps ## Run the static checks without rewriting: gofmt -l, go vet, web typecheck.
+check: deps ## Run the static checks without rewriting: gofmt -l, go vet, web typecheck and lint.
 	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	go vet ./...
 	npm --prefix web run typecheck
+	npm --prefix web run lint
 
 # The race detector needs cgo and a C compiler (gcc/cc).
 test: check ## Run every check: static checks, Go tests with -race, and web tests.

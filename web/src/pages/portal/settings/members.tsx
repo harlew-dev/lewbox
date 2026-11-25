@@ -2,6 +2,7 @@ import { Button } from '@harlew-dev/ui'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useAuth } from '../../../lib/auth'
+import { routes } from '../../../lib/routes'
 import { useDocumentTitle } from '../../../lib/use-document-title'
 import { MembersSection } from '../../organizations/members'
 import { usePortalOrg } from '../portal-route'
@@ -25,7 +26,7 @@ export function SettingsMembersPage() {
         onAddClose={() => setOpen(false)}
         onLeft={() => {
           void reloadOrganizations()
-          navigate('/')
+          navigate(routes.home())
         }}
       />
     </>

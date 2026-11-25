@@ -5,6 +5,7 @@ import { ConsoleLayout } from './components/console-layout'
 import { DocsLayout } from './components/docs-layout'
 import { PortalLayout } from './components/portal-layout'
 import { RequireAdmin, RequireAuth, useAuth } from './lib/auth'
+import { routes } from './lib/routes'
 import { LoginPage } from './pages/login'
 import { NotFoundPage } from './pages/not-found'
 import { PortalRoute } from './pages/portal/portal-route'
@@ -66,7 +67,7 @@ function PlatformDocsPage() {
 function Portal() {
   const { user, organizations } = useAuth()
   if (organizations.length === 0) {
-    return <Navigate to={user?.instance_admin ? '/admin' : '/onboarding'} replace />
+    return <Navigate to={user?.instance_admin ? routes.admin.overview() : routes.onboarding()} replace />
   }
   return <PortalRoute />
 }
@@ -97,11 +98,13 @@ export function legacyPath(pathname: string, search: string): string {
   const tail = rest.filter(Boolean).join('/')
   switch (first) {
     case 'clusters':
-      return tail ? `/admin/servers/clusters/${tail}` : '/admin/servers'
+      return tail ? routes.admin.cluster(tail) : routes.admin.servers()
     case 'nodes':
-      return '/admin/servers?tab=nodes'
-    case 'organizations':
-      return tail ? `/admin/workspaces/${tail.split('/')[0]}` : '/admin/workspaces'
+      return routes.admin.servers('nodes')
+    case 'organizations': {
+      const slug = tail.split('/')[0]
+      return slug ? routes.admin.workspace(slug) : routes.admin.workspaces()
+    }
     default:
       return `/admin${pathname}${search}`
   }
@@ -117,7 +120,7 @@ function Legacy() {
 // The console's old customer pages became workspaces.
 function LegacyCustomer() {
   const { org = '' } = useParams()
-  return <Navigate to={`/admin/workspaces/${encodeURIComponent(org)}`} replace />
+  return <Navigate to={routes.admin.workspace(org)} replace />
 }
 
 export function App() {
@@ -162,7 +165,7 @@ export function App() {
         <Route element={<Portal />}>
           <Route index element={<HomePage />} />
           <Route path="/sandboxes" element={<SandboxesPage />} />
-          <Route path="/snapshots" element={<Navigate to="/sandboxes?tab=snapshots" replace />} />
+          <Route path="/snapshots" element={<Navigate to={routes.sandboxes('snapshots')} replace />} />
           <Route path="/keys" element={<KeysPage />} />
           <Route path="/usage" element={<UsagePage />} />
           <Route path="/plan" element={<PlanPage />} />
@@ -171,14 +174,14 @@ export function App() {
             <Route path="members" element={<SettingsMembersPage />} />
             <Route path="api-keys" element={<SettingsKeysPage />} />
           </Route>
-          <Route path="/team" element={<Navigate to="/settings/members" replace />} />
+          <Route path="/team" element={<Navigate to={routes.settings.members()} replace />} />
         </Route>
 
         <Route path="/admin" element={<Console />}>
           <Route index element={<OverviewPage />} />
           <Route path="workspaces" element={<WorkspacesPage />} />
           <Route path="workspaces/:org" element={<WorkspaceDetailPage />} />
-          <Route path="customers" element={<Navigate to="/admin/workspaces" replace />} />
+          <Route path="customers" element={<Navigate to={routes.admin.workspaces()} replace />} />
           <Route path="customers/:org" element={<LegacyCustomer />} />
           <Route path="sandboxes" element={<FleetSandboxesPage />} />
           <Route path="snapshots" element={<FleetSnapshotsPage />} />

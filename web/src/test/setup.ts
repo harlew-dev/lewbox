@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { clearLoadCache } from '../lib/load-cache'
 
 // Pages load lazily, so under a full parallel run the first findBy can wait
 // on a chunk; one second is too tight for that.
@@ -8,6 +9,7 @@ configure({ asyncUtilTimeout: 5000 })
 
 afterEach(() => {
   cleanup()
+  clearLoadCache()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })

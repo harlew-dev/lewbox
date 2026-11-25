@@ -3,6 +3,7 @@
 // platform/ at /platform. Each book's README.md is its home page.
 
 import type { DocsBook } from './api'
+import { routes } from './routes'
 
 export type DocsLink =
   | { kind: 'internal'; to: string }
@@ -13,8 +14,8 @@ const REPO_BLOB = 'https://github.com/harlew-dev/lewbox/blob/main/'
 const SCHEME = /^[a-z][a-z\d+.-]*:/i
 
 const books: Record<DocsBook, string> = {
-  consumer: '/docs',
-  platform: '/platform',
+  consumer: routes.docs(),
+  platform: routes.platformDocs(),
 }
 
 function bookFor(dir: string): DocsBook | null {

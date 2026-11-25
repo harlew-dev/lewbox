@@ -21,6 +21,7 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
+import { routes } from '../../lib/routes'
 import type { Runtime } from '../../lib/commands'
 import { failureMessage } from '../../lib/use-load'
 
@@ -82,7 +83,7 @@ function RegisterCluster({ onClose }: { onClose: () => void }) {
     if (result.ok && result.value) {
       toast.success(`Cluster ${result.value.name} registered.`)
       onClose()
-      navigate(`/admin/servers/clusters/${encodeURIComponent(result.value.slug)}`)
+      navigate(routes.admin.cluster(result.value.slug))
     }
   }
 

@@ -1,6 +1,7 @@
 import { Button, Code, EmptyState } from '@harlew-dev/ui'
+import { routes } from '../lib/routes'
 
-export function NoClusters({ action = '/platform/clusters/start-a-cluster' }: { action?: string }) {
+export function NoClusters({ action = routes.platformDocs('clusters/start-a-cluster') }: { action?: string }) {
   return (
     <EmptyState
       title="No clusters yet"

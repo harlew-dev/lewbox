@@ -14,6 +14,7 @@ import { Spinner } from '../components/loading'
 import { SignupFields } from '../components/signup-fields'
 import { useAuth, homeFor } from '../lib/auth'
 import { useInstance } from '../lib/instance'
+import { routes } from '../lib/routes'
 import { useDocumentTitle } from '../lib/use-document-title'
 import { failureMessage } from '../lib/use-load'
 
@@ -32,7 +33,7 @@ export function SignupPage() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     const result = await action.run()
-    if (result.ok) navigate('/onboarding', { replace: true })
+    if (result.ok) navigate(routes.onboarding(), { replace: true })
   }
 
   if (status === 'authenticated' && !action.busy) return <Navigate to={homeFor(user)} replace />
@@ -40,14 +41,14 @@ export function SignupPage() {
   return (
     <CenteredLayout>
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
-        <BrandLogo href="/login" />
+        <BrandLogo href={routes.login()} />
         {!instance.loaded ? (
           <Spinner />
         ) : instance.signup === 'closed' ? (
           <div className="space-y-2">
             <Heading>Sign-up is closed</Heading>
             <Text>
-              Ask {instance.name} for an account, or <TextLink href="/login">sign in</TextLink>.
+              Ask {instance.name} for an account, or <TextLink href={routes.login()}>sign in</TextLink>.
             </Text>
           </div>
         ) : (
@@ -77,7 +78,7 @@ export function SignupPage() {
           </>
         )}
         <Text className="text-center">
-          Have an account? <TextLink href="/login">Sign in</TextLink>
+          Have an account? <TextLink href={routes.login()}>Sign in</TextLink>
         </Text>
       </div>
     </CenteredLayout>

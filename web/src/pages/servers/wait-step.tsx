@@ -2,6 +2,7 @@ import { Step, Text, TextLink } from '@harlew-dev/ui'
 import { CheckCircleIcon, ExclamationTriangleIcon } from '@heroicons/react/16/solid'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as api from '../../lib/api'
+import { routes } from '../../lib/routes'
 
 // How often to ask. Tests shorten it.
 export const waitTiming = { every: 3000 }
@@ -95,8 +96,6 @@ function Status({
   )
 }
 
-const clusterPath = (slug: string) => `/admin/servers/clusters/${encodeURIComponent(slug)}`
-
 // The last step of "Start a new cluster": waits for the cluster to be
 // registered here, which `lewbox node add --new-cluster` does as it finishes.
 export function WaitForClusterStep({ slug }: { slug: string }) {
@@ -128,7 +127,7 @@ export function WaitForClusterStep({ slug }: { slug: string }) {
           waiting={`Waiting for cluster “${slug}” to connect…`}
           done={
             <>
-              Cluster “{slug}” is connected. <TextLink href={clusterPath(slug)}>Open it</TextLink>.
+              Cluster “{slug}” is connected. <TextLink href={routes.admin.cluster(slug)}>Open it</TextLink>.
             </>
           }
           taken={`A cluster named “${slug}” already exists here. Go back and choose another slug.`}

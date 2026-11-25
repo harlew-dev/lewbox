@@ -8,6 +8,7 @@ import {
 import type { ComponentType } from 'react'
 import { useNavigate } from 'react-router'
 import { Carousel, type CarouselSlide } from '../../components/carousel'
+import { routes } from '../../lib/routes'
 import { OnboardingChrome } from './chrome'
 
 // Placeholder artwork until the owner supplies real images: a soft gradient
@@ -60,8 +61,8 @@ export function GettingStartedPage() {
       <Carousel
         label="Getting started"
         slides={slides}
-        onSkip={() => navigate('/', { replace: true })}
-        onFinish={() => navigate('/', { replace: true })}
+        onSkip={() => navigate(routes.home(), { replace: true })}
+        onFinish={() => navigate(routes.home(), { replace: true })}
       />
     </OnboardingChrome>
   )

@@ -1,7 +1,7 @@
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { daysAgo } from '../../lib/format'
-import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
+import { acme, acmeMembership, choose, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
 const usage = {
   from: daysAgo(30),
@@ -54,5 +54,29 @@ describe('UsagePage', () => {
     expect(screen.getByText('1 GB of 4 GB')).toBeInTheDocument()
     expect(screen.queryByText('eu-west')).toBeNull()
     expect(calls.find((call) => call.url.startsWith('/v0/usage'))?.url).toContain(`from=${encodeURIComponent(daysAgo(30))}`)
+  })
+
+  it('restores the range from the URL and requests it', async () => {
+    const calls = stubAPI(
+      {
+        'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/usage': () => json(200, usage),
+        'GET /v0/limits': () => json(200, limits),
+      },
+      customerUser,
+      [acmeMembership],
+    )
+    renderApp('/usage?days=7')
+
+    await waitFor(() => {
+      const requests = calls.filter((call) => call.url.startsWith('/v0/usage'))
+      expect(requests.at(-1)?.url).toContain(`from=${encodeURIComponent(daysAgo(7))}`)
+    })
+
+    await choose('Range', 'Last 90 days')
+    await waitFor(() => {
+      const requests = calls.filter((call) => call.url.startsWith('/v0/usage'))
+      expect(requests.at(-1)?.url).toContain(`from=${encodeURIComponent(daysAgo(90))}`)
+    })
   })
 })

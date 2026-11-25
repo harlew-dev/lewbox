@@ -36,7 +36,7 @@ import { LastTest, masked, saveError } from './profile-common'
 
 // Saved buckets where clusters keep snapshots and archived sandboxes.
 export function StorageProfiles() {
-  const profiles = useLoad(() => api.listStorageProfiles(), [])
+  const profiles = useLoad('storage-profiles', () => api.listStorageProfiles())
   const [editing, setEditing] = useState<api.StorageProfile | 'new' | null>(null)
   const [deleting, setDeleting] = useState<api.StorageProfile | null>(null)
   const [testing, setTesting] = useState('')

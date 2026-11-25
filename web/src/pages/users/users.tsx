@@ -30,6 +30,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
 import { relativeTime } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { UserActions } from './user-actions'
@@ -45,7 +46,7 @@ export function UserBadges({ user }: { user: api.User }) {
 
 export function UsersPage() {
   useDocumentTitle('Users')
-  const users = useLoad(() => api.listUsers(), [])
+  const users = useLoad('users', () => api.listUsers())
   const userList = users.data?.data ?? []
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -77,7 +78,7 @@ export function UsersPage() {
             {userList.map((user) => (
               <TableRow key={user.id}>
                 <TableCell className="font-medium">
-                  <TextLink href={`/admin/users/${user.id}`}>{user.email}</TextLink>
+                  <TextLink href={routes.admin.user(user.id)}>{user.email}</TextLink>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
@@ -128,7 +129,7 @@ function CreateUser({ onClose }: { onClose: () => void }) {
     if (result.ok) {
       toast.success('Account created.')
       onClose()
-      navigate(`/admin/users/${result.value.id}`)
+      navigate(routes.admin.user(result.value.id))
     }
   }
 

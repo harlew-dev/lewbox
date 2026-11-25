@@ -16,6 +16,8 @@ import * as api from './api'
 import type { MeOrganization, User } from './api'
 import { NotFoundPage } from '../pages/not-found'
 import { Spinner } from '../components/loading'
+import { routes } from './routes'
+import { clearLoadCache } from './load-cache'
 
 type Status = 'loading' | 'authenticated' | 'guest' | 'error'
 
@@ -74,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // revoked or expired. Drop it; RequireAuth sends the browser to sign in.
   useEffect(() => {
     return api.onUnauthorized(() => {
+      clearLoadCache()
       setUser(null)
       setStatus('guest')
     })
@@ -118,6 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.signOut()
     } finally {
+      // Drop every cached answer, so nothing the account loaded stays in
+      // memory for whoever uses this tab next.
+      clearLoadCache()
       setUser(null)
       setOrganizations([])
       setStatus('guest')
@@ -162,7 +168,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
           </Button>
         }
         logo={
-          <TextLink href="/" className="text-sm">
+          <TextLink href={routes.home()} className="text-sm">
             Lewbox
           </TextLink>
         }
@@ -171,7 +177,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (status === 'guest') {
     const next = `${location.pathname}${location.search}`
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />
+    return <Navigate to={routes.login(next)} replace />
   }
   return <>{children}</>
 }
@@ -186,5 +192,5 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
 // Where an account lands after signing in: the console for instance admins,
 // the portal for everyone else.
 export function homeFor(user: User | null): string {
-  return user?.instance_admin ? '/admin' : '/'
+  return user?.instance_admin ? routes.admin.overview() : routes.home()
 }

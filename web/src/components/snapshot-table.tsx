@@ -64,7 +64,7 @@ export interface SnapshotsState {
 // Loads snapshots and archived sandboxes. An empty org is every workspace's,
 // for an instance admin.
 export function useSnapshots(org: string): SnapshotsState {
-  const load = useLoad(() => api.listSnapshots(org), [org])
+  const load = useLoad(`snapshots:${org}`, () => api.listSnapshots(org))
   // Deleted here, hidden until the list loads again: the answer it was
   // deleted from may still have them.
   const [hidden, setHidden] = useState<{

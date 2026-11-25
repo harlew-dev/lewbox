@@ -5,6 +5,7 @@ import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useInstance } from '../../lib/instance'
 import { orgPermissions, useOrganizations, type Permissions } from '../../lib/organizations'
+import { routes } from '../../lib/routes'
 import { useLoad } from '../../lib/use-load'
 
 export interface PortalOrg {
@@ -41,9 +42,9 @@ export function PortalRoute() {
   const { user } = useAuth()
   const { current } = useOrganizations()
   const slug = current?.slug ?? ''
-  const { data, error, loading, reload } = useLoad(
-    () => (slug ? api.getOrganization(slug) : Promise.resolve(null)),
-    [slug],
+  const { data, error, loading, reload } = useLoad<api.Organization | null>(
+    slug ? `organization:${slug}` : null,
+    () => api.getOrganization(slug),
   )
 
   if (!current) {
@@ -52,7 +53,7 @@ export function PortalRoute() {
         <EmptyState
           title="You’re not in a workspace"
           description="Ask someone on your team to add you to theirs."
-          action={<Button href="/docs">Read the docs</Button>}
+          action={<Button href={routes.docs()}>Read the docs</Button>}
         />
       </PortalLayout>
     )

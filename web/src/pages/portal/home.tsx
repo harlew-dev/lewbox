@@ -15,6 +15,7 @@ import * as api from '../../lib/api'
 import { RegionLimits } from '../../components/limit-meters'
 import { NoRegion } from '../../components/no-region'
 import { daysAgo, defaultUsageDays, formatNumber } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { sandboxSnippets } from '../../lib/snippets'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad, type LoadState } from '../../lib/use-load'
@@ -41,11 +42,10 @@ const historyDays = 90
 
 function Home() {
   const { org } = usePortalOrg()
-  const usage = useLoad(
-    () => api.getUsage({ org: org.slug, from: daysAgo(historyDays), granularity: 'day' }),
-    [org.slug],
+  const usage = useLoad(`usage:${org.slug}:${historyDays}`, () =>
+    api.getUsage({ org: org.slug, from: daysAgo(historyDays), granularity: 'day' }),
   )
-  const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug])
+  const sandboxes = useLoad(`sandboxes:${org.slug}:all`, () => api.listSandboxes({ org: org.slug }))
   // Once the dashboard is opened it stays: a new sandbox while getting
   // started turns the last step green rather than swapping the page.
   const [opened, setOpened] = useState(false)
@@ -95,9 +95,13 @@ function Home() {
 
 function GetStarted({ onDone }: { onDone: () => void }) {
   const { org, can } = usePortalOrg()
-  const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
-  const regions = useLoad(() => api.listRegions(org.slug), [org.slug])
-  const sandboxes = useLoad(() => api.listSandboxes({ org: org.slug }), [org.slug], { every: 5_000 })
+  const keys = useLoad(`sandbox-keys:${org.slug}`, () => api.listSandboxKeys(org.slug))
+  const regions = useLoad(`regions:${org.slug}`, () => api.listRegions(org.slug))
+  const sandboxes = useLoad(
+    `sandboxes:${org.slug}:all`,
+    () => api.listSandboxes({ org: org.slug }),
+    { every: (data) => (data?.data.some((sandbox) => sandbox.status === 'creating') ? 5_000 : 0) },
+  )
   const [createOpen, setCreateOpen] = useState(false)
   const [created, setCreated] = useState<api.NewSandboxKey | null>(null)
 
@@ -169,7 +173,7 @@ function recentTotals(usage: api.Usage): api.UsageAmounts {
 
 function Dashboard({ usage, running }: { usage: LoadState<api.Usage>; running: api.Sandbox[] }) {
   const { org } = usePortalOrg()
-  const limits = useLoad(() => api.getLimits(org.slug), [org.slug])
+  const limits = useLoad(`limits:${org.slug}`, () => api.getLimits(org.slug))
   const count = running.filter((sandbox) => sandbox.status === 'started').length
   const totals = usage.data ? recentTotals(usage.data) : null
   const days = `(${defaultUsageDays} days)`
@@ -179,11 +183,11 @@ function Dashboard({ usage, running }: { usage: LoadState<api.Usage>; running: a
       <PageHeader title={org.name} />
       {usage.error.message && <ErrorNotice error={usage.error} onRetry={usage.reload} className="mb-8" />}
       <div className="grid gap-8 sm:grid-cols-3">
-        <Stat title="Running sandboxes" value={formatNumber(count, 0)} href="/sandboxes" />
-        <Stat title={`vCPU-hours ${days}`} value={totals ? formatNumber(totals.vcpu_hours, 1) : undefined} href="/usage">
+        <Stat title="Running sandboxes" value={formatNumber(count, 0)} href={routes.sandboxes()} />
+        <Stat title={`vCPU-hours ${days}`} value={totals ? formatNumber(totals.vcpu_hours, 1) : undefined} href={routes.usage()}>
           {totals && <span>{formatNumber(totals.memory_gib_hours, 1)} GiB-hours of memory</span>}
         </Stat>
-        <Stat title={`Sandbox-hours ${days}`} value={totals ? formatNumber(totals.sandbox_hours, 1) : undefined} href="/usage" />
+        <Stat title={`Sandbox-hours ${days}`} value={totals ? formatNumber(totals.sandbox_hours, 1) : undefined} href={routes.usage()} />
       </div>
       <RegionLimits limits={limits} />
     </>

@@ -1,5 +1,6 @@
 import { Divider, Heading, Navbar, NavbarItem, NavbarSection } from '@harlew-dev/ui'
 import { Outlet, useLocation } from 'react-router'
+import { routes } from '../../../lib/routes'
 import { usePortalOrg } from '../portal-route'
 
 // Workspace settings' heading and tabs around General, Members and API keys.
@@ -8,9 +9,9 @@ export function SettingsLayout() {
   const { can } = context
   const { pathname } = useLocation()
   const tabs = [
-    { label: 'General', href: '/settings' },
-    { label: 'Members', href: '/settings/members' },
-    ...(can.keys ? [{ label: 'Management API keys', href: '/settings/api-keys' }] : []),
+    { label: 'General', href: routes.settings.general() },
+    { label: 'Members', href: routes.settings.members() },
+    ...(can.keys ? [{ label: 'Management API keys', href: routes.settings.apiKeys() }] : []),
   ]
 
   return (

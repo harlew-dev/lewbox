@@ -41,6 +41,7 @@ import * as api from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { formatDate, relativeTime } from '../../lib/format'
 import type { Permissions } from '../../lib/organizations'
+import { routes } from '../../lib/routes'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { RoleBadge, roleOptions } from './roles'
 
@@ -60,7 +61,7 @@ export function MembersSection({
   onLeft: () => void
 }) {
   const { user } = useAuth()
-  const members = useLoad(() => api.listMembers(org.slug), [org.slug])
+  const members = useLoad(`members:${org.slug}`, () => api.listMembers(org.slug))
   const list = members.data?.data ?? []
   const [roleTarget, setRoleTarget] = useState<api.Member | null>(null)
   const [removeTarget, setRemoveTarget] = useState<api.Member | null>(null)
@@ -95,7 +96,7 @@ export function MembersSection({
                 <TableRow key={member.id}>
                   <TableCell className="font-medium">
                     {user?.instance_admin ? (
-                      <TextLink href={`/admin/users/${member.user_id}`}>{member.email}</TextLink>
+                      <TextLink href={routes.admin.user(member.user_id)}>{member.email}</TextLink>
                     ) : (
                       member.email
                     )}

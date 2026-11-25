@@ -19,6 +19,7 @@ import { ApiError } from '../lib/api'
 import { homeFor, useAuth } from '../lib/auth'
 import { useInstance } from '../lib/instance'
 import { safeNext } from '../lib/next'
+import { routes } from '../lib/routes'
 import { useDocumentTitle } from '../lib/use-document-title'
 
 function signInMessage(failure: unknown): string {
@@ -57,7 +58,7 @@ export function LoginPage() {
   return (
     <CenteredLayout>
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
-        <BrandLogo href="/login" />
+        <BrandLogo href={routes.login()} />
         <div className="space-y-2">
           <Heading>Sign in to {instance.name}</Heading>
         </div>
@@ -96,11 +97,11 @@ export function LoginPage() {
         <Text className="text-center">
           {instance.signup !== 'closed' ? (
             <>
-              New here? <TextLink href="/signup">Create an account</TextLink>
+              New here? <TextLink href={routes.signup()}>Create an account</TextLink>
             </>
           ) : (
             <>
-              Need help? Read the <TextLink href="/docs">documentation</TextLink>.
+              Need help? Read the <TextLink href={routes.docs()}>documentation</TextLink>.
             </>
           )}
         </Text>

@@ -12,7 +12,7 @@ export function KeysPage() {
   useDocumentTitle('API keys')
   const { org, can } = usePortalOrg()
   const [createOpen, setCreateOpen] = useState(false)
-  const keys = useLoad(() => api.listSandboxKeys(org.slug), [org.slug])
+  const keys = useLoad(`sandbox-keys:${org.slug}`, () => api.listSandboxKeys(org.slug))
   const list = keys.data?.data ?? []
   const noRegion = org.region === null
   const create = can.use ? (

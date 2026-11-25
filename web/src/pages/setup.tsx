@@ -13,10 +13,10 @@ import { useNavigate, useParams } from 'react-router'
 import { BrandLogo } from '../components/brand-logo'
 import { Spinner } from '../components/loading'
 import { SignupFields } from '../components/signup-fields'
-import { ApiError } from '../lib/api'
 import * as api from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useInstance } from '../lib/instance'
+import { routes } from '../lib/routes'
 import { useDocumentTitle } from '../lib/use-document-title'
 import { failureMessage, useLoad } from '../lib/use-load'
 
@@ -28,7 +28,7 @@ export function SetupPage() {
   const { status, user, signUp, signOut } = useAuth()
   const instance = useInstance()
   const navigate = useNavigate()
-  const info = useLoad(() => api.setupLinkInfo(token), [token])
+  const info = useLoad(`setup-link:${token}`, () => api.setupLinkInfo(token))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [signingOut, setSigningOut] = useState(false)
@@ -52,16 +52,16 @@ export function SetupPage() {
     event.preventDefault()
     const result = await signup.run()
     // The token goes to onboarding in router state, never in the URL.
-    if (result.ok) navigate('/onboarding', { state: { setupToken: token } })
+    if (result.ok) navigate(routes.onboarding(), { state: { setupToken: token } })
   }
 
   return (
     <CenteredLayout>
       <div className="grid w-full max-w-sm grid-cols-1 gap-8">
-        <BrandLogo href="/login" />
+        <BrandLogo href={routes.login()} />
         {info.loading && !info.data ? (
           <Spinner />
-        ) : info.failure instanceof ApiError && info.failure.status === 404 ? (
+        ) : info.missing ? (
           <div className="space-y-2">
             <Heading>Set up your account</Heading>
             <Text>
@@ -83,7 +83,7 @@ export function SetupPage() {
               <>
                 <Button
                   className="w-full"
-                  onClick={() => navigate('/onboarding', { state: { setupToken: token } })}
+                  onClick={() => navigate(routes.onboarding(), { state: { setupToken: token } })}
                 >
                   Continue as {user?.email}
                 </Button>
@@ -112,7 +112,7 @@ export function SetupPage() {
                 </form>
                 <Text className="text-center">
                   Already have an account?{' '}
-                  <TextLink href={`/login?next=${encodeURIComponent(`/setup/${token}`)}`}>Sign in</TextLink>
+                  <TextLink href={routes.login(routes.setup(token))}>Sign in</TextLink>
                 </Text>
               </>
             )}

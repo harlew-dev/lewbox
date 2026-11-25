@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { acme, acmeMembership, customerUser, json, renderApp, stubAPI } from '../../test/render'
+import { acme, acmeMembership, choose, customerUser, json, renderApp, stubAPI } from '../../test/render'
 
 const sandbox = {
   id: 'sb-7f3a9c',
@@ -18,6 +18,34 @@ const sandbox = {
 }
 
 describe('SandboxesPage', () => {
+  it('restores the status filter from the URL and removes it at the default', async () => {
+    const calls = stubAPI(
+      {
+        'GET /v0/organizations/acme': () => json(200, acme),
+        'GET /v0/regions': () =>
+          json(200, {
+            data: [{ slug: 'eu-west', name: 'EU West', endpoint_url: 'https://eu.example', runtime: 'docker' }],
+          }),
+        'GET /v0/sandboxes': () => json(200, { data: [sandbox] }),
+      },
+      customerUser,
+      [acmeMembership],
+    )
+    renderApp('/sandboxes?status=stopped')
+
+    await waitFor(() =>
+      expect(calls.find((call) => call.url.startsWith('/v0/sandboxes'))?.url).toBe(
+        '/v0/sandboxes?org=acme&status=stopped',
+      ),
+    )
+
+    await choose('Status', 'All statuses')
+    await waitFor(() => {
+      const requests = calls.filter((call) => call.url.startsWith('/v0/sandboxes'))
+      expect(requests.at(-1)?.url).toBe('/v0/sandboxes?org=acme')
+    })
+  })
+
   it('stops a sandbox once it is confirmed', async () => {
     const calls = stubAPI(
       {

@@ -14,19 +14,19 @@ import { useEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useLocation, useParams } from 'react-router'
-import { ApiError } from '../lib/api'
 import * as api from '../lib/api'
 import {
   extractHeadings,
   markdownComponents,
   rehypeHeadingIds,
 } from '../lib/docs-markdown'
+import { routes } from '../lib/routes'
 import { useDocumentTitle } from '../lib/use-document-title'
 import { useLoad } from '../lib/use-load'
 
 const prefixes: Record<api.DocsBook, string> = {
-  consumer: '/docs',
-  platform: '/platform',
+  consumer: routes.docs(),
+  platform: routes.platformDocs(),
 }
 
 function PageLink({
@@ -62,9 +62,9 @@ function DocsBookPage({ book }: { book: api.DocsBook }) {
   const location = useLocation()
   const pagePath = (params['*'] ?? '').replace(/^\/+|\/+$/g, '')
   const prefix = prefixes[book]
-  const { data: page, error, failure, loading, reload } = useLoad(
+  const { data: page, error, loading, missing, reload } = useLoad(
+    `docs:page:${book}:${pagePath}`,
     () => api.docsPage(book, pagePath),
-    [book, pagePath],
   )
   const headings = useMemo(
     () => extractHeadings(page?.markdown ?? ''),
@@ -106,7 +106,7 @@ function DocsBookPage({ book }: { book: api.DocsBook }) {
     )
   }
 
-  if (failure instanceof ApiError && failure.status === 404) {
+  if (missing) {
     return (
       <div className="max-w-3xl space-y-4">
         <Heading>Page not found</Heading>

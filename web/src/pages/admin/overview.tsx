@@ -5,6 +5,7 @@ import { NoClusters } from '../../components/no-clusters'
 import { StatusBadge } from '../../components/status'
 import { Uptime } from '../../components/uptime'
 import { formatMemory, formatNumber } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { useLoad } from '../../lib/use-load'
 
@@ -19,7 +20,7 @@ function hourLabel(value: string): string {
 
 export function OverviewPage() {
   useDocumentTitle('Overview')
-  const { data, error, reload } = useLoad(() => api.getOverview(), [], { every: 60_000 })
+  const { data, error, reload } = useLoad('overview', () => api.getOverview())
   const customers = data?.customers
   const sandboxes = data?.sandboxes
   const capacity = data?.capacity
@@ -38,20 +39,20 @@ export function OverviewPage() {
             <Stat
               title="Workspaces"
               value={customers ? formatNumber(customers.total, 0) : undefined}
-              href="/admin/workspaces"
+              href={routes.admin.workspaces()}
             >
               {customers && customers.suspended > 0 && <span>{customers.suspended} suspended</span>}
             </Stat>
             <Stat
               title="Pending approval"
               value={customers ? formatNumber(customers.pending, 0) : undefined}
-              href="/admin/workspaces?tab=pending"
+              href={routes.admin.workspaces('pending')}
               level={customers && customers.pending > 0 ? 'warn' : undefined}
             />
             <Stat
               title="Sandboxes running"
               value={sandboxes ? formatNumber(sandboxes.running, 0) : undefined}
-              href="/admin/sandboxes"
+              href={routes.admin.sandboxes()}
               chart={
                 data && data.running.length > 1 ? (
                   <Sparkline
@@ -84,7 +85,7 @@ export function OverviewPage() {
             <Stat
               title="Clusters healthy"
               value={data ? `${healthy} / ${clusters.length}` : undefined}
-              href="/admin/servers"
+              href={routes.admin.servers()}
               level={data && clusters.length > 0 && healthy < clusters.length ? 'warn' : undefined}
             >
               {capacity && (
@@ -105,7 +106,7 @@ export function OverviewPage() {
               {clusters.map((cluster) => (
                 <div key={cluster.slug}>
                   <div className="mb-3 flex items-center gap-3">
-                    <TextLink href={`/admin/servers/clusters/${encodeURIComponent(cluster.slug)}`} className="font-medium">
+                    <TextLink href={routes.admin.cluster(cluster.slug)} className="font-medium">
                       {cluster.name}
                     </TextLink>
                     <StatusBadge status={cluster.status} />
@@ -129,7 +130,7 @@ export function OverviewPage() {
                 key: customer.slug,
                 label: customer.name,
                 value: Math.round(customer.vcpu_hours * 10) / 10,
-                href: `/admin/workspaces/${encodeURIComponent(customer.slug)}`,
+                href: routes.admin.workspace(customer.slug),
               }))}
             />
           )}

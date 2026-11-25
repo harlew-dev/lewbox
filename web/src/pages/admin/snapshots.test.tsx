@@ -1,10 +1,18 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import type * as api from '../../lib/api'
 import { json, renderApp, stubAPI } from '../../test/render'
 
 const euWest = { slug: 'eu-west', name: 'EU West', endpoint_url: 'https://eu.example', runtime: 'docker', status: 'ready' }
 
-function snapshot(name: string, org: { slug: string; name: string }, node: string, diskGB: number, status = 'active') {
+function snapshot(
+  name: string,
+  org: { slug: string; name: string },
+  node: string,
+  diskGB: number,
+  status = 'active',
+  extra: Partial<api.Snapshot> = {},
+) {
   return {
     id: '',
     kind: 'snapshot',
@@ -27,6 +35,7 @@ function snapshot(name: string, org: { slug: string; name: string }, node: strin
     registry_ref: '',
     last_restored_sandbox_id: '',
     last_restored_at: null,
+    ...extra,
   }
 }
 
@@ -34,6 +43,38 @@ const acme = { slug: 'acme', name: 'Acme' }
 const globex = { slug: 'globex', name: 'Globex' }
 
 describe('FleetSnapshotsPage', () => {
+  it('filters by kind, region and workspace from the URL', async () => {
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/regions': () =>
+        json(200, {
+          data: [
+            euWest,
+            { slug: 'us-east', name: 'US East', endpoint_url: 'https://us.example', runtime: 'docker', status: 'ready' },
+          ],
+        }),
+      'GET /v0/snapshots': () =>
+        json(200, {
+          data: [
+            snapshot('builder', globex, 'node-a', 10, 'active', {
+              kind: 'archive',
+              sandbox_name: 'builder',
+              archived_at: '2026-11-12T10:05:00Z',
+            }),
+            snapshot('ckpt-a', acme, 'node-a', 20),
+            snapshot('ckpt-b', globex, 'node-b', 5, 'active', { region: 'us-east' }),
+          ],
+          partial_nodes: [],
+        }),
+    })
+    renderApp('/admin/snapshots?kind=archive&region=eu-west&workspace=globex')
+
+    expect(await screen.findByText('builder')).toBeInTheDocument()
+    expect(screen.queryByText('ckpt-a')).toBeNull()
+    expect(screen.queryByText('ckpt-b')).toBeNull()
+    expect(screen.getByText('10 GB')).toBeInTheDocument()
+  })
+
   it('totals every workspace’s snapshots, by node and workspace, and deletes in the owner’s workspace', async () => {
     const calls = stubAPI({
       'GET /v0/organizations': () => json(200, { data: [] }),

@@ -40,7 +40,7 @@ import { failureMessage, useLoad } from '../../lib/use-load'
 
 export function PlansPage() {
   useDocumentTitle('Plans')
-  const plans = useLoad(() => api.listPlans(), [])
+  const plans = useLoad('plans', () => api.listPlans())
   const list = plans.data?.data ?? []
   const [editing, setEditing] = useState<api.Plan | 'new' | null>(null)
   const [deleting, setDeleting] = useState<api.Plan | null>(null)

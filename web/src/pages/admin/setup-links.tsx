@@ -22,6 +22,7 @@ import { useOpenCount } from '@harlew-dev/ui/lib/use-open-count'
 import { useState, type FormEvent } from 'react'
 import * as api from '../../lib/api'
 import { formatDate } from '../../lib/format'
+import { routes } from '../../lib/routes'
 import { failureMessage, useLoad } from '../../lib/use-load'
 
 const statusColors: Record<api.SetupLinkStatus, 'lime' | 'amber' | 'zinc' | 'red'> = {
@@ -59,9 +60,9 @@ export function CreateSetupLinkDialog({
 }
 
 function CreateSetupLinkForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const settings = useLoad(() => api.getSettings(), [])
-  const regions = useLoad(() => api.listRegions(), [])
-  const plans = useLoad(() => api.listPlans(), [])
+  const settings = useLoad('settings', () => api.getSettings())
+  const regions = useLoad('regions:all', () => api.listRegions())
+  const plans = useLoad('plans', () => api.listPlans())
   const [created, setCreated] = useState<api.SetupLink | null>(null)
   const [region, setRegion] = useState('')
   const [plan, setPlan] = useState('')
@@ -93,7 +94,7 @@ function CreateSetupLinkForm({ onClose, onCreated }: { onClose: () => void; onCr
   }
 
   if (created) {
-    const url = `${window.location.origin}/setup/${created.token ?? ''}`
+    const url = `${window.location.origin}${routes.setup(created.token ?? '')}`
     return (
       <>
         <DialogTitle>Setup link created</DialogTitle>

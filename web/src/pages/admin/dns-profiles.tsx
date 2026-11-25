@@ -33,7 +33,7 @@ import { LastTest, masked, saveError } from './profile-common'
 
 // Saved Cloudflare credentials that clusters use for DNS and TLS.
 export function DNSProfiles() {
-  const profiles = useLoad(() => api.listDNSProfiles(), [])
+  const profiles = useLoad('dns-profiles', () => api.listDNSProfiles())
   const [editing, setEditing] = useState<api.DNSProfile | 'new' | null>(null)
   const [deleting, setDeleting] = useState<api.DNSProfile | null>(null)
   const [testing, setTesting] = useState('')

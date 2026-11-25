@@ -37,13 +37,14 @@ import { useNavigate, useParams } from 'react-router'
 import * as api from '../../lib/api'
 import { formatDate, relativeTime } from '../../lib/format'
 import { useAuth } from '../../lib/auth'
+import { routes } from '../../lib/routes'
 import { useDocumentTitle } from '../../lib/use-document-title'
 import { failureMessage, useLoad } from '../../lib/use-load'
 import { RoleBadge, roleOptions } from '../organizations/roles'
 import { UserActions } from './user-actions'
 import { UserBadges } from './users'
 
-const back = { href: '/admin/users', label: 'Users' }
+const back = { href: routes.admin.users(), label: 'Users' }
 
 // One account: what it is, which organizations it belongs to, and what an
 // instance admin can do to it.
@@ -51,9 +52,9 @@ export function UserDetailPage() {
   const { ref = '' } = useParams()
   const navigate = useNavigate()
   const { reloadOrganizations } = useAuth()
-  const all = useLoad(() => api.listOrganizations(), [])
-  const user = useLoad(() => api.getUser(ref), [ref])
-  const orgs = useLoad(() => api.listOrganizations({ user: ref }), [ref])
+  const all = useLoad('organizations:all', () => api.listOrganizations())
+  const user = useLoad(`user:${ref}`, () => api.getUser(ref))
+  const orgs = useLoad(`organizations:user:${ref}`, () => api.listOrganizations({ user: ref }))
   const [addOpen, setAddOpen] = useState(false)
   useDocumentTitle(user.data?.email ?? 'User')
 
@@ -65,12 +66,12 @@ export function UserDetailPage() {
       </>
     )
   }
-  if (user.failure instanceof api.ApiError && user.failure.status === 404) {
+  if (user.missing) {
     return (
       <EmptyState
         title="Account not found"
         description="It may have been removed."
-        action={<Button href="/admin/users">Back to users</Button>}
+        action={<Button href={routes.admin.users()}>Back to users</Button>}
       />
     )
   }
@@ -96,7 +97,7 @@ export function UserDetailPage() {
         title={account.email}
         meta={<UserBadges user={account} />}
         actions={
-          <UserActions user={account} onChanged={user.reload} onRemoved={() => navigate('/admin/users')} />
+          <UserActions user={account} onChanged={user.reload} onRemoved={() => navigate(routes.admin.users())} />
         }
       />
 
@@ -142,7 +143,7 @@ export function UserDetailPage() {
               {memberships.map((org) => (
                 <TableRow key={org.id}>
                   <TableCell className="font-medium">
-                    <TextLink href={`/admin/workspaces/${encodeURIComponent(org.slug)}`}>{org.name}</TextLink>
+                    <TextLink href={routes.admin.workspace(org.slug)}>{org.name}</TextLink>
                   </TableCell>
                   <TableCell>{org.role && <RoleBadge role={org.role} />}</TableCell>
                 </TableRow>

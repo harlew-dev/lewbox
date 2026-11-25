@@ -16,53 +16,83 @@ import {
   TableHeader,
   TableRow,
   Text,
-} from '@harlew-dev/ui'
-import { useEffect, useState, type FormEvent } from 'react'
-import * as api from '../../lib/api'
-import { relativeTime } from '../../lib/format'
-import { useDocumentTitle } from '../../lib/use-document-title'
-import { useLoad } from '../../lib/use-load'
+} from "@harlew-dev/ui";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
+import * as api from "../../lib/api";
+import { relativeTime } from "../../lib/format";
+import { useDocumentTitle } from "../../lib/use-document-title";
+import { useLoad } from "../../lib/use-load";
+import { one, withParam } from "../../lib/query-params";
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 50;
+
+const filterKeys = ["actor", "organization", "action", "from", "to"] as const;
 
 // The operator's audit trail: every state change, who made it and from where.
 export function EventsPage() {
-  useDocumentTitle('Audit trail')
-  const [draft, setDraft] = useState<api.EventFilters>({})
-  const [applied, setApplied] = useState<api.EventFilters>({})
-  const page = useLoad(() => api.listEvents({ ...applied, limit: PAGE_SIZE }), [applied])
+  useDocumentTitle("Audit trail");
+  // The applied filters live in the URL, so a reload, Back or a shared link
+  // shows the same events; the form edits a draft until it is submitted.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const applied: api.EventFilters = {};
+  for (const key of filterKeys) {
+    const value = one(searchParams, key);
+    if (value) applied[key] = value;
+  }
+  const appliedKey = filterKeys.map((key) => applied[key] ?? "").join("\u0000");
+  const [draft, setDraft] = useState<api.EventFilters>(() => ({
+    ...applied,
+    from: localInput(applied.from),
+    to: localInput(applied.to),
+  }));
+  const page = useLoad(`events\u0000${appliedKey}`, () =>
+    api.listEvents({ ...applied, limit: PAGE_SIZE }),
+  );
 
-  const [extra, setExtra] = useState<api.AuditEvent[]>([])
-  const [next, setNext] = useState<string | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [moreError, setMoreError] = useState('')
+  const [extra, setExtra] = useState<api.AuditEvent[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState("");
 
   useEffect(() => {
-    setExtra([])
-    setNext(page.data?.next ?? null)
-    setMoreError('')
-  }, [page.data])
+    setExtra([]);
+    setNext(page.data?.next ?? null);
+    setMoreError("");
+  }, [page.data]);
 
-  const rows = [...(page.data?.data ?? []), ...extra]
+  const rows = [...(page.data?.data ?? []), ...extra];
 
   async function loadMore() {
-    if (!next) return
-    setLoadingMore(true)
-    setMoreError('')
+    if (!next) return;
+    setLoadingMore(true);
+    setMoreError("");
     try {
-      const answer = await api.listEvents({ ...applied, before: next, limit: PAGE_SIZE })
-      setExtra((current) => [...current, ...answer.data])
-      setNext(answer.next)
+      const answer = await api.listEvents({
+        ...applied,
+        before: next,
+        limit: PAGE_SIZE,
+      });
+      setExtra((current) => [...current, ...answer.data]);
+      setNext(answer.next);
     } catch {
-      setMoreError('Could not load more events. Try again.')
+      setMoreError("Could not load more events. Try again.");
     } finally {
-      setLoadingMore(false)
+      setLoadingMore(false);
     }
   }
 
   function apply(event: FormEvent) {
-    event.preventDefault()
-    setApplied({ ...draft, from: rfc3339(draft.from), to: rfc3339(draft.to) })
+    event.preventDefault();
+    const filters: api.EventFilters = {
+      ...draft,
+      from: rfc3339(draft.from),
+      to: rfc3339(draft.to),
+    };
+    let params = new URLSearchParams();
+    for (const key of filterKeys)
+      params = withParam(params, key, filters[key]?.trim() ?? "");
+    setSearchParams(params);
   }
 
   return (
@@ -79,8 +109,10 @@ export function EventsPage() {
               <Label htmlFor="event-actor">Actor</Label>
               <Input
                 id="event-actor"
-                value={draft.actor ?? ''}
-                onChange={(event) => setDraft({ ...draft, actor: event.target.value })}
+                value={draft.actor ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, actor: event.target.value })
+                }
                 placeholder="account ID or email"
               />
             </Field>
@@ -88,8 +120,10 @@ export function EventsPage() {
               <Label htmlFor="event-workspace">Workspace</Label>
               <Input
                 id="event-workspace"
-                value={draft.organization ?? ''}
-                onChange={(event) => setDraft({ ...draft, organization: event.target.value })}
+                value={draft.organization ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, organization: event.target.value })
+                }
                 placeholder="workspace ID or slug"
               />
             </Field>
@@ -97,8 +131,10 @@ export function EventsPage() {
               <Label htmlFor="event-action">Action</Label>
               <Input
                 id="event-action"
-                value={draft.action ?? ''}
-                onChange={(event) => setDraft({ ...draft, action: event.target.value })}
+                value={draft.action ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, action: event.target.value })
+                }
                 placeholder="plan.updated"
               />
             </Field>
@@ -107,8 +143,10 @@ export function EventsPage() {
               <Input
                 id="event-from"
                 type="datetime-local"
-                value={draft.from ?? ''}
-                onChange={(event) => setDraft({ ...draft, from: event.target.value })}
+                value={draft.from ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, from: event.target.value })
+                }
               />
             </Field>
             <Field>
@@ -116,8 +154,10 @@ export function EventsPage() {
               <Input
                 id="event-to"
                 type="datetime-local"
-                value={draft.to ?? ''}
-                onChange={(event) => setDraft({ ...draft, to: event.target.value })}
+                value={draft.to ?? ""}
+                onChange={(event) =>
+                  setDraft({ ...draft, to: event.target.value })
+                }
               />
             </Field>
           </div>
@@ -127,8 +167,8 @@ export function EventsPage() {
               type="button"
               plain
               onClick={() => {
-                setDraft({})
-                setApplied({})
+                setDraft({});
+                setSearchParams(new URLSearchParams());
               }}
             >
               Clear
@@ -170,9 +210,18 @@ export function EventsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{event.actor_label || '—'}</span>
-                      <Badge color={event.actor_kind === 'system' || event.actor_kind === 'anonymous' ? 'zinc' : 'purple'}>
-                        {event.actor_kind.replace('_', ' ')}
+                      <span className="font-medium">
+                        {event.actor_label || "—"}
+                      </span>
+                      <Badge
+                        color={
+                          event.actor_kind === "system" ||
+                          event.actor_kind === "anonymous"
+                            ? "zinc"
+                            : "purple"
+                        }
+                      >
+                        {event.actor_kind.replace("_", " ")}
                       </Badge>
                     </div>
                   </TableCell>
@@ -181,56 +230,84 @@ export function EventsPage() {
                       {event.name}
                     </Text>
                     {event.changes && Object.keys(event.changes).length > 0 && (
-                      <Text size="sm" className="mt-1 text-zinc-500 dark:text-zinc-400">
+                      <Text
+                        size="sm"
+                        className="mt-1 text-zinc-500 dark:text-zinc-400"
+                      >
                         {Object.entries(event.changes)
-                          .map(([field, change]) => `${field}: ${valueText(change.from)} → ${valueText(change.to)}`)
-                          .join(', ')}
+                          .map(
+                            ([field, change]) =>
+                              `${field}: ${valueText(change.from)} → ${valueText(change.to)}`,
+                          )
+                          .join(", ")}
                       </Text>
                     )}
                   </TableCell>
                   <TableCell>
                     <Text size="sm">{targetText(event)}</Text>
                     {event.target_id && (
-                      <Text size="sm" className="font-mono text-zinc-500 dark:text-zinc-400">
+                      <Text
+                        size="sm"
+                        className="font-mono text-zinc-500 dark:text-zinc-400"
+                      >
                         {event.target_id}
                       </Text>
                     )}
                   </TableCell>
-                  <TableCell className="text-zinc-500 dark:text-zinc-400">{event.organization_id || '—'}</TableCell>
-                  <TableCell className="whitespace-nowrap text-zinc-500 dark:text-zinc-400">{event.ip || '—'}</TableCell>
+                  <TableCell className="text-zinc-500 dark:text-zinc-400">
+                    {event.organization_id || "—"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-zinc-500 dark:text-zinc-400">
+                    {event.ip || "—"}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
 
-          {moreError && <Text className="mt-4 text-red-600 dark:text-red-400">{moreError}</Text>}
+          {moreError && (
+            <Text className="mt-4 text-red-600 dark:text-red-400">
+              {moreError}
+            </Text>
+          )}
           {next && (
             <div className="mt-4 flex justify-center">
               <Button plain onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? 'Loading…' : 'Load more'}
+                {loadingMore ? "Loading…" : "Load more"}
               </Button>
             </div>
           )}
         </>
       )}
     </>
-  )
+  );
 }
 
 // rfc3339 turns a datetime-local input value into the API's RFC 3339 time.
-function rfc3339(local: string | undefined): string | undefined {
-  if (!local) return undefined
-  const date = new Date(local)
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+// localInput turns an RFC 3339 time from the URL back into the value a
+// datetime-local input shows, in the browser's time zone.
+function localInput(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
-function targetText(event: api.AuditEvent): string {  const name = event.target_name || event.target_id
-  if (!name) return event.target_type
-  return `${event.target_type} · ${name}`
+function rfc3339(local: string | undefined): string | undefined {
+  if (!local) return undefined;
+  const date = new Date(local);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function targetText(event: api.AuditEvent): string {
+  const name = event.target_name || event.target_id;
+  if (!name) return event.target_type;
+  return `${event.target_type} · ${name}`;
 }
 
 function valueText(value: unknown): string {
-  if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'string') return value
-  return JSON.stringify(value)
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }
