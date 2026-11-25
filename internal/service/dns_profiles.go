@@ -161,26 +161,39 @@ func (s *Service) CreateDNSProfile(ctx context.Context, req CreateDNSProfileRequ
 		return DNSProfile{}, err
 	}
 	now := s.now()
-	row, err := s.queries(ctx).CreateDNSProfile(ctx, db.CreateDNSProfileParams{
-		ID:          uuid.NewV7().String(),
-		Name:        name,
-		Provider:    provider,
-		Zone:        zone,
-		ZoneID:      result.zoneID,
-		ApiTokenEnc: sealed,
-		TokenLast4:  last4(token),
-		AcmeEmail:   acme,
-		Version:     1,
-		TestedAt:    sql.NullTime{Time: now, Valid: true},
-		TestError:   "",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+	var row db.DnsProfile
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateDNSProfile(ctx, db.CreateDNSProfileParams{
+			ID:          uuid.NewV7().String(),
+			Name:        name,
+			Provider:    provider,
+			Zone:        zone,
+			ZoneID:      result.zoneID,
+			ApiTokenEnc: sealed,
+			TokenLast4:  last4(token),
+			AcmeEmail:   acme,
+			Version:     1,
+			TestedAt:    sql.NullTime{Time: now, Valid: true},
+			TestError:   "",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a DNS profile named %q already exists", name)
+		}
+		if err != nil {
+			return fmt.Errorf("create DNS profile: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "dns_profile.created",
+			TargetType: "dns_profile",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return DNSProfile{}, conflict("a DNS profile named %q already exists", name)
-	}
 	if err != nil {
-		return DNSProfile{}, fmt.Errorf("create DNS profile: %w", err)
+		return DNSProfile{}, err
 	}
 	return toDNSProfile(row, 0), nil
 }
@@ -198,6 +211,7 @@ func (s *Service) UpdateDNSProfile(ctx context.Context, ref string, req UpdateDN
 	if err != nil {
 		return DNSProfile{}, err
 	}
+	before := row
 
 	if req.Name != nil {
 		row.Name, err = planSlug(*req.Name)
@@ -254,24 +268,56 @@ func (s *Service) UpdateDNSProfile(ctx context.Context, ref string, req UpdateDN
 	}
 	row.UpdatedAt = now
 
-	updated, err := s.queries(ctx).UpdateDNSProfile(ctx, db.UpdateDNSProfileParams{
-		Name:        row.Name,
-		Zone:        row.Zone,
-		ZoneID:      row.ZoneID,
-		ApiTokenEnc: row.ApiTokenEnc,
-		TokenLast4:  row.TokenLast4,
-		AcmeEmail:   row.AcmeEmail,
-		Version:     row.Version,
-		TestedAt:    row.TestedAt,
-		TestError:   row.TestError,
-		UpdatedAt:   row.UpdatedAt,
-		ID:          row.ID,
+	var updated db.DnsProfile
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).UpdateDNSProfile(ctx, db.UpdateDNSProfileParams{
+			Name:        row.Name,
+			Zone:        row.Zone,
+			ZoneID:      row.ZoneID,
+			ApiTokenEnc: row.ApiTokenEnc,
+			TokenLast4:  row.TokenLast4,
+			AcmeEmail:   row.AcmeEmail,
+			Version:     row.Version,
+			TestedAt:    row.TestedAt,
+			TestError:   row.TestError,
+			UpdatedAt:   row.UpdatedAt,
+			ID:          row.ID,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a DNS profile named %q already exists", row.Name)
+		}
+		if err != nil {
+			return fmt.Errorf("update DNS profile: %w", err)
+		}
+		changes := map[string]Change{}
+		if before.Name != updated.Name {
+			changes["name"] = Change{From: before.Name, To: updated.Name}
+		}
+		if before.Zone != updated.Zone {
+			changes["zone"] = Change{From: before.Zone, To: updated.Zone}
+		}
+		if before.AcmeEmail != updated.AcmeEmail {
+			changes["acme_email"] = Change{From: before.AcmeEmail, To: updated.AcmeEmail}
+		}
+		if before.Version != updated.Version {
+			// The token itself is never recorded; a new version means the
+			// token, zone or both were replaced and re-tested.
+			changes["version"] = Change{From: before.Version, To: updated.Version}
+		}
+		if len(changes) == 0 {
+			return nil
+		}
+		return s.record(ctx, Event{
+			Name:       "dns_profile.updated",
+			TargetType: "dns_profile",
+			TargetID:   updated.ID,
+			TargetName: updated.Name,
+			Changes:    changes,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return DNSProfile{}, conflict("a DNS profile named %q already exists", row.Name)
-	}
 	if err != nil {
-		return DNSProfile{}, fmt.Errorf("update DNS profile: %w", err)
+		return DNSProfile{}, err
 	}
 	counts, err := s.dnsProfileClusterCounts(ctx)
 	if err != nil {
@@ -291,19 +337,30 @@ func (s *Service) DeleteDNSProfile(ctx context.Context, ref string) (DNSProfile,
 	if err != nil {
 		return DNSProfile{}, err
 	}
-	n, err := s.queries(ctx).DeleteDNSProfile(ctx, row.ID)
-	if err != nil {
-		return DNSProfile{}, fmt.Errorf("delete DNS profile: %w", err)
-	}
-	if n == 0 {
-		counts, err := s.dnsProfileClusterCounts(ctx)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteDNSProfile(ctx, row.ID)
 		if err != nil {
-			return DNSProfile{}, err
+			return fmt.Errorf("delete DNS profile: %w", err)
 		}
-		if counts[row.ID] > 0 {
-			return DNSProfile{}, conflict("DNS profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+		if n == 0 {
+			counts, err := s.dnsProfileClusterCounts(ctx)
+			if err != nil {
+				return err
+			}
+			if counts[row.ID] > 0 {
+				return conflict("DNS profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+			}
+			return conflict("DNS profile %q still has DNS records that Lewbox keeps; check the clusters that used it and try again", row.Name)
 		}
-		return DNSProfile{}, conflict("DNS profile %q still has DNS records that Lewbox keeps; check the clusters that used it and try again", row.Name)
+		return s.record(ctx, Event{
+			Name:       "dns_profile.deleted",
+			TargetType: "dns_profile",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
+	})
+	if err != nil {
+		return DNSProfile{}, err
 	}
 	return toDNSProfile(row, 0), nil
 }
@@ -359,6 +416,14 @@ func (s *Service) DNSProfileCredentials(ctx context.Context, ref string) (DNSPro
 	}
 	token, err := s.keyring.Open(row.ApiTokenEnc)
 	if err != nil {
+		return DNSProfileCredentials{}, err
+	}
+	if err := s.record(ctx, Event{
+		Name:       "dns_profile.credentials_read",
+		TargetType: "dns_profile",
+		TargetID:   row.ID,
+		TargetName: row.Name,
+	}); err != nil {
 		return DNSProfileCredentials{}, err
 	}
 	return DNSProfileCredentials{

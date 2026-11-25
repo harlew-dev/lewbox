@@ -817,6 +817,16 @@ func (s *Service) subscribeSetupLink(ctx context.Context, org db.Organization, l
 	if err != nil {
 		return nil, fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
 	}
+	if err := s.record(ctx, Event{
+		Name:           "subscription.created",
+		TargetType:     "workspace",
+		TargetID:       org.ID,
+		TargetName:     org.Slug,
+		OrganizationID: org.ID,
+		Changes:        map[string]Change{"plan": {From: "", To: plan.Slug}},
+	}); err != nil {
+		return nil, err
+	}
 	return &subscriptionPush{cluster: cluster, plan: plan, sub: sub}, nil
 }
 
@@ -849,6 +859,16 @@ func (s *Service) subscribeDefaults(ctx context.Context, org db.Organization, se
 	})
 	if err != nil {
 		return nil, fmt.Errorf("subscribe %q: %w", cluster.Slug, err)
+	}
+	if err := s.record(ctx, Event{
+		Name:           "subscription.created",
+		TargetType:     "workspace",
+		TargetID:       org.ID,
+		TargetName:     org.Slug,
+		OrganizationID: org.ID,
+		Changes:        map[string]Change{"plan": {From: "", To: plan.Slug}},
+	}); err != nil {
+		return nil, err
 	}
 	return &subscriptionPush{cluster: cluster, plan: plan, sub: sub}, nil
 }

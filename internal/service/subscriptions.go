@@ -106,52 +106,102 @@ func (s *Service) SetSubscription(ctx context.Context, org, region string, req S
 		return Subscription{}, err
 	}
 
-	existing, err := s.queries(ctx).GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
-	switch {
-	case err == nil:
-		if !req.MaxSandboxes.Set {
-			sandboxes = existing.MaxSandboxes
+	var (
+		sub     db.Subscription
+		created bool
+		changes map[string]Change
+	)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		existing, err := s.queries(ctx).GetSubscription(ctx, db.GetSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+		switch {
+		case err == nil:
+			before := existing
+			beforePlan, err := s.queries(ctx).GetPlanByID(ctx, before.PlanID)
+			if err != nil {
+				return fmt.Errorf("get plan: %w", err)
+			}
+			if !req.MaxSandboxes.Set {
+				sandboxes = existing.MaxSandboxes
+			}
+			if !req.MaxVcpus.Set {
+				vcpus = existing.MaxVcpus
+			}
+			if !req.MaxMemoryMB.Set {
+				memory = existing.MaxMemoryMb
+			}
+			sub, err = s.queries(ctx).UpdateSubscription(ctx, db.UpdateSubscriptionParams{
+				PlanID:       plan.ID,
+				MaxSandboxes: sandboxes,
+				MaxVcpus:     vcpus,
+				MaxMemoryMb:  memory,
+				OrgID:        c.org.ID,
+				ClusterID:    cluster.ID,
+			})
+			if err != nil {
+				return fmt.Errorf("update subscription: %w", err)
+			}
+			changes = subscriptionChanges(before, beforePlan, sub, plan)
+		case errors.Is(err, sql.ErrNoRows):
+			sub, err = s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
+				OrgID:        c.org.ID,
+				ClusterID:    cluster.ID,
+				PlanID:       plan.ID,
+				MaxSandboxes: sandboxes,
+				MaxVcpus:     vcpus,
+				MaxMemoryMb:  memory,
+				CreatedAt:    s.now(),
+			})
+			if db.IsUniqueViolation(err) {
+				return s.regionConflict(ctx, c.org, cluster.ID)
+			}
+			if err != nil {
+				return fmt.Errorf("create subscription: %w", err)
+			}
+			created = true
+		default:
+			return fmt.Errorf("get subscription: %w", err)
 		}
-		if !req.MaxVcpus.Set {
-			vcpus = existing.MaxVcpus
+		name := "subscription.updated"
+		if created {
+			name = "subscription.created"
+		} else if len(changes) == 0 {
+			return nil
 		}
-		if !req.MaxMemoryMB.Set {
-			memory = existing.MaxMemoryMb
-		}
-		existing, err = s.queries(ctx).UpdateSubscription(ctx, db.UpdateSubscriptionParams{
-			PlanID:       plan.ID,
-			MaxSandboxes: sandboxes,
-			MaxVcpus:     vcpus,
-			MaxMemoryMb:  memory,
-			OrgID:        c.org.ID,
-			ClusterID:    cluster.ID,
+		return s.record(ctx, Event{
+			Name:           name,
+			TargetType:     "workspace",
+			TargetID:       c.org.ID,
+			TargetName:     c.org.Slug,
+			OrganizationID: c.org.ID,
+			Changes:        changes,
 		})
-		if err != nil {
-			return Subscription{}, fmt.Errorf("update subscription: %w", err)
-		}
-	case errors.Is(err, sql.ErrNoRows):
-		existing, err = s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
-			OrgID:        c.org.ID,
-			ClusterID:    cluster.ID,
-			PlanID:       plan.ID,
-			MaxSandboxes: sandboxes,
-			MaxVcpus:     vcpus,
-			MaxMemoryMb:  memory,
-			CreatedAt:    s.now(),
-		})
-		if db.IsUniqueViolation(err) {
-			return Subscription{}, s.regionConflict(ctx, c.org, cluster.ID)
-		}
-		if err != nil {
-			return Subscription{}, fmt.Errorf("create subscription: %w", err)
-		}
-	default:
-		return Subscription{}, fmt.Errorf("get subscription: %w", err)
+	})
+	if err != nil {
+		return Subscription{}, err
 	}
 
-	out := toSubscription(existing, plan, cluster, true)
-	s.pushSubscriptionQuota(ctx, c.org, cluster, plan, existing)
+	out := toSubscription(sub, plan, cluster, true)
+	s.pushSubscriptionQuota(ctx, c.org, cluster, plan, sub)
 	return out, nil
+}
+
+// subscriptionChanges lists the subscription fields an update changed. The
+// plan is named by its slug, never an internal ID.
+func subscriptionChanges(before db.Subscription, beforePlan db.Plan, after db.Subscription, afterPlan db.Plan) map[string]Change {
+	changes := map[string]Change{}
+	if beforePlan.Slug != afterPlan.Slug {
+		changes["plan"] = Change{From: beforePlan.Slug, To: afterPlan.Slug}
+	}
+	if before.MaxSandboxes != after.MaxSandboxes {
+		changes["max_sandboxes"] = Change{From: nullIntValue(before.MaxSandboxes), To: nullIntValue(after.MaxSandboxes)}
+	}
+	if before.MaxVcpus != after.MaxVcpus {
+		changes["max_vcpus"] = Change{From: nullIntValue(before.MaxVcpus), To: nullIntValue(after.MaxVcpus)}
+	}
+	if before.MaxMemoryMb != after.MaxMemoryMb {
+		changes["max_memory_mb"] = Change{From: nullIntValue(before.MaxMemoryMb), To: nullIntValue(after.MaxMemoryMb)}
+	}
+	return changes
 }
 
 // checkOneRegion refuses a subscription outside the workspace's current
@@ -218,24 +268,30 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	out := toSubscription(sub, plan, cluster, true)
 
 	// Remove the row first, so no new key can be minted while its keys are
-	// being revoked.
-	n, err := s.queries(ctx).DeleteSubscription(ctx, db.DeleteSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+	// being revoked. The event is written with the deletion; if revocation
+	// fails, the restoring transaction records the restoration, so the trail
+	// is append-only and still tells the whole story.
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteSubscription(ctx, db.DeleteSubscriptionParams{OrgID: c.org.ID, ClusterID: cluster.ID})
+		if err != nil {
+			return fmt.Errorf("delete subscription: %w", err)
+		}
+		if n == 0 {
+			return notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
+		}
+		return s.record(ctx, Event{
+			Name:           "subscription.deleted",
+			TargetType:     "workspace",
+			TargetID:       c.org.ID,
+			TargetName:     c.org.Slug,
+			OrganizationID: c.org.ID,
+		})
+	})
 	if err != nil {
-		return Subscription{}, fmt.Errorf("delete subscription: %w", err)
-	}
-	if n == 0 {
-		return Subscription{}, notFound("organization %q has no plan in region %q", c.org.Slug, cluster.Slug)
+		return Subscription{}, err
 	}
 	if err := s.revokeSubscriptionKeys(ctx, c.org, cluster, force); err != nil {
-		if _, rerr := s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
-			OrgID:        sub.OrgID,
-			ClusterID:    sub.ClusterID,
-			PlanID:       sub.PlanID,
-			MaxSandboxes: sub.MaxSandboxes,
-			MaxVcpus:     sub.MaxVcpus,
-			MaxMemoryMb:  sub.MaxMemoryMb,
-			CreatedAt:    sub.CreatedAt,
-		}); rerr != nil {
+		if rerr := s.restoreSubscriptionDeletion(ctx, c.org, sub); rerr != nil {
 			return Subscription{}, fmt.Errorf("restore subscription: %w", rerr)
 		}
 		return Subscription{}, err
@@ -249,6 +305,33 @@ func (s *Service) DeleteSubscription(ctx context.Context, org, region string, fo
 	s.pushQuota(ctx, c.org, cluster, blockingQuota(), false, state, err == nil, now, 0)
 	s.stopSandboxes(ctx, c.org, map[string]bool{cluster.ID: true})
 	return out, nil
+}
+
+// restoreSubscriptionDeletion puts back a subscription whose key revocation
+// failed and records the restoration in the same transaction. The audit trail
+// is append-only: the deletion and its undo both stay, in order.
+func (s *Service) restoreSubscriptionDeletion(ctx context.Context, org db.Organization, sub db.Subscription) error {
+	return s.withTx(ctx, func(ctx context.Context) error {
+		if _, err := s.queries(ctx).CreateSubscription(ctx, db.CreateSubscriptionParams{
+			OrgID:        sub.OrgID,
+			ClusterID:    sub.ClusterID,
+			PlanID:       sub.PlanID,
+			MaxSandboxes: sub.MaxSandboxes,
+			MaxVcpus:     sub.MaxVcpus,
+			MaxMemoryMb:  sub.MaxMemoryMb,
+			CreatedAt:    sub.CreatedAt,
+		}); err != nil {
+			return fmt.Errorf("recreate subscription: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:           "subscription.restored",
+			TargetType:     "workspace",
+			TargetID:       org.ID,
+			TargetName:     org.Slug,
+			OrganizationID: org.ID,
+			Changes:        map[string]Change{"reason": {From: "", To: "key revocation failed"}},
+		})
+	})
 }
 
 // subscriptionAdmin resolves an organization and requires an instance admin.

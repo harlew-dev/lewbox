@@ -3,9 +3,9 @@ title: Audit trail
 description: Every change Lewbox makes, who made it, what changed and from where, and how long it is kept.
 ---
 
-Lewbox records every state change made through the service in an audit trail: accounts, passwords, access tokens, organization API keys and sandbox keys, setup links, workspaces, members, plans and instance settings. A refused change records nothing. The trail is written in the same database transaction as the change, so a change that fails leaves no event, and an event that cannot be written rolls the change back.
+Lewbox records every state change made through the service in an audit trail: accounts, passwords, access tokens, organization API keys and sandbox keys, setup links, workspaces, members, plans, instance settings, clusters, nodes, DNS and storage profiles, and subscriptions. A refused change records nothing. The trail is written in the same database transaction as the change, so a change that fails leaves no event, and an event that cannot be written rolls the change back.
 
-Changes to clusters, nodes, DNS and storage profiles, subscriptions, and sandbox, snapshot and archive actions are not in the trail yet; they are the next step.
+Sandbox, snapshot and archive actions are not in the trail yet; they are the next step.
 
 Each event carries:
 
@@ -34,6 +34,11 @@ Passwords, password hashes, session tokens, access tokens, API keys, setup-link 
 | Workspace | `workspace.created`, `workspace.updated`, `workspace.suspended`, `workspace.restored` |
 | Members | `member.created`, `member.updated`, `member.deleted` |
 | Plans and settings | `plan.created`, `plan.updated`, `plan.deleted`, `settings.updated` |
+| Clusters and nodes | `cluster.created`, `cluster.updated`, `cluster.deleted`, `join_token.created`, `node.created`, `node.deleted` |
+| Profiles | `dns_profile.created`, `dns_profile.updated`, `dns_profile.deleted`, `dns_profile.credentials_read`, `storage_profile.created`, `storage_profile.updated`, `storage_profile.deleted`, `storage_profile.credentials_read` |
+| Subscriptions | `subscription.created`, `subscription.updated`, `subscription.deleted`, `subscription.restored` |
+
+A removal whose key revocation fails is recorded in full rather than erased: `subscription.deleted`, then `subscription.restored` with `{"reason": "key revocation failed"}` in `changes`. The trail is append-only.
 
 ## See it
 

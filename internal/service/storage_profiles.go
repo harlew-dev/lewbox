@@ -192,29 +192,42 @@ func (s *Service) CreateStorageProfile(ctx context.Context, req CreateStoragePro
 		return StorageProfile{}, err
 	}
 	now := s.now()
-	row, err := s.queries(ctx).CreateStorageProfile(ctx, db.CreateStorageProfileParams{
-		ID:           uuid.NewV7().String(),
-		Name:         name,
-		Provider:     provider,
-		Endpoint:     endpoint,
-		Region:       region,
-		Bucket:       bucket,
-		Prefix:       prefix,
-		PathStyle:    boolToInt(cfg.PathStyle),
-		AccessKeyID:  accessKey,
-		SecretKeyEnc: sealed,
-		SecretLast4:  last4(secret),
-		Version:      1,
-		TestedAt:     sql.NullTime{Time: now, Valid: true},
-		TestError:    "",
-		CreatedAt:    now,
-		UpdatedAt:    now,
+	var row db.StorageProfile
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateStorageProfile(ctx, db.CreateStorageProfileParams{
+			ID:           uuid.NewV7().String(),
+			Name:         name,
+			Provider:     provider,
+			Endpoint:     endpoint,
+			Region:       region,
+			Bucket:       bucket,
+			Prefix:       prefix,
+			PathStyle:    boolToInt(cfg.PathStyle),
+			AccessKeyID:  accessKey,
+			SecretKeyEnc: sealed,
+			SecretLast4:  last4(secret),
+			Version:      1,
+			TestedAt:     sql.NullTime{Time: now, Valid: true},
+			TestError:    "",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a storage profile named %q already exists", name)
+		}
+		if err != nil {
+			return fmt.Errorf("create storage profile: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "storage_profile.created",
+			TargetType: "storage_profile",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return StorageProfile{}, conflict("a storage profile named %q already exists", name)
-	}
 	if err != nil {
-		return StorageProfile{}, fmt.Errorf("create storage profile: %w", err)
+		return StorageProfile{}, err
 	}
 	return toStorageProfile(row, 0), nil
 }
@@ -234,6 +247,7 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 	if err != nil {
 		return StorageProfile{}, err
 	}
+	before := row
 
 	if req.Name != nil {
 		row.Name, err = planSlug(*req.Name)
@@ -346,27 +360,71 @@ func (s *Service) UpdateStorageProfile(ctx context.Context, ref string, req Upda
 	row.AccessKeyID = accessKey
 	row.UpdatedAt = now
 
-	updated, err := s.queries(ctx).UpdateStorageProfile(ctx, db.UpdateStorageProfileParams{
-		Name:         row.Name,
-		Endpoint:     row.Endpoint,
-		Region:       row.Region,
-		Bucket:       row.Bucket,
-		Prefix:       row.Prefix,
-		PathStyle:    row.PathStyle,
-		AccessKeyID:  row.AccessKeyID,
-		SecretKeyEnc: row.SecretKeyEnc,
-		SecretLast4:  row.SecretLast4,
-		Version:      row.Version,
-		TestedAt:     row.TestedAt,
-		TestError:    row.TestError,
-		UpdatedAt:    row.UpdatedAt,
-		ID:           row.ID,
+	var updated db.StorageProfile
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).UpdateStorageProfile(ctx, db.UpdateStorageProfileParams{
+			Name:         row.Name,
+			Endpoint:     row.Endpoint,
+			Region:       row.Region,
+			Bucket:       row.Bucket,
+			Prefix:       row.Prefix,
+			PathStyle:    row.PathStyle,
+			AccessKeyID:  row.AccessKeyID,
+			SecretKeyEnc: row.SecretKeyEnc,
+			SecretLast4:  row.SecretLast4,
+			Version:      row.Version,
+			TestedAt:     row.TestedAt,
+			TestError:    row.TestError,
+			UpdatedAt:    row.UpdatedAt,
+			ID:           row.ID,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a storage profile named %q already exists", row.Name)
+		}
+		if err != nil {
+			return fmt.Errorf("update storage profile: %w", err)
+		}
+		changes := map[string]Change{}
+		if before.Name != updated.Name {
+			changes["name"] = Change{From: before.Name, To: updated.Name}
+		}
+		if before.Endpoint != updated.Endpoint {
+			changes["endpoint"] = Change{From: before.Endpoint, To: updated.Endpoint}
+		}
+		if before.Region != updated.Region {
+			changes["region"] = Change{From: before.Region, To: updated.Region}
+		}
+		if before.Bucket != updated.Bucket {
+			changes["bucket"] = Change{From: before.Bucket, To: updated.Bucket}
+		}
+		if before.Prefix != updated.Prefix {
+			changes["prefix"] = Change{From: before.Prefix, To: updated.Prefix}
+		}
+		if before.PathStyle != updated.PathStyle {
+			changes["path_style"] = Change{From: before.PathStyle != 0, To: updated.PathStyle != 0}
+		}
+		if before.AccessKeyID != updated.AccessKeyID {
+			changes["access_key_id"] = Change{From: before.AccessKeyID, To: updated.AccessKeyID}
+		}
+		if before.Version != updated.Version {
+			// The secret itself is never recorded; a new version means it or
+			// the destination was replaced and re-tested.
+			changes["version"] = Change{From: before.Version, To: updated.Version}
+		}
+		if len(changes) == 0 {
+			return nil
+		}
+		return s.record(ctx, Event{
+			Name:       "storage_profile.updated",
+			TargetType: "storage_profile",
+			TargetID:   updated.ID,
+			TargetName: updated.Name,
+			Changes:    changes,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return StorageProfile{}, conflict("a storage profile named %q already exists", row.Name)
-	}
 	if err != nil {
-		return StorageProfile{}, fmt.Errorf("update storage profile: %w", err)
+		return StorageProfile{}, err
 	}
 	counts, err := s.storageProfileClusterCounts(ctx)
 	if err != nil {
@@ -386,16 +444,27 @@ func (s *Service) DeleteStorageProfile(ctx context.Context, ref string) (Storage
 	if err != nil {
 		return StorageProfile{}, err
 	}
-	n, err := s.queries(ctx).DeleteStorageProfile(ctx, row.ID)
-	if err != nil {
-		return StorageProfile{}, fmt.Errorf("delete storage profile: %w", err)
-	}
-	if n == 0 {
-		counts, err := s.storageProfileClusterCounts(ctx)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteStorageProfile(ctx, row.ID)
 		if err != nil {
-			return StorageProfile{}, err
+			return fmt.Errorf("delete storage profile: %w", err)
 		}
-		return StorageProfile{}, conflict("storage profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+		if n == 0 {
+			counts, err := s.storageProfileClusterCounts(ctx)
+			if err != nil {
+				return err
+			}
+			return conflict("storage profile %q is used by %d cluster(s); stop using it in those clusters first", row.Name, counts[row.ID])
+		}
+		return s.record(ctx, Event{
+			Name:       "storage_profile.deleted",
+			TargetType: "storage_profile",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
+	})
+	if err != nil {
+		return StorageProfile{}, err
 	}
 	return toStorageProfile(row, 0), nil
 }
@@ -449,6 +518,14 @@ func (s *Service) StorageProfileCredentials(ctx context.Context, ref string) (St
 	}
 	secret, err := s.keyring.Open(row.SecretKeyEnc)
 	if err != nil {
+		return StorageProfileCredentials{}, err
+	}
+	if err := s.record(ctx, Event{
+		Name:       "storage_profile.credentials_read",
+		TargetType: "storage_profile",
+		TargetID:   row.ID,
+		TargetName: row.Name,
+	}); err != nil {
 		return StorageProfileCredentials{}, err
 	}
 	return StorageProfileCredentials{

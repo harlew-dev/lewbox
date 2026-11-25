@@ -250,35 +250,48 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 		return ClusterDetail{}, err
 	}
 	now := s.now()
-	row, err := s.queries(ctx).CreateCluster(ctx, db.CreateClusterParams{
-		ID:                    uuid.NewV7().String(),
-		Slug:                  slug,
-		Name:                  name,
-		AdminURL:              adminURL,
-		EndpointURL:           endpointURL,
-		Runtime:               runtime,
-		AdminTokenEnc:         sealed,
-		AdminTokenID:          result.principalID,
-		AdminTokenLast4:       last4(token),
-		Status:                status,
-		StatusDetail:          detail,
-		Version:               result.version,
-		Domain:                domain,
-		DnsProfileID:          nullProfileID(profile),
-		DnsRecords:            dnsRecords,
-		StorageProfileID:      nullStorageProfileID(storageProfile),
-		StopPolicy:            stopPolicy,
-		ArchiveLocalRetention: retention,
-		ArchiveSnapshotName:   snapshotName,
-		Checks:                encodeChecks(checks),
-		CheckedAt:             sql.NullTime{Time: now, Valid: true},
-		CreatedAt:             now,
+	var row db.Cluster
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateCluster(ctx, db.CreateClusterParams{
+			ID:                    uuid.NewV7().String(),
+			Slug:                  slug,
+			Name:                  name,
+			AdminURL:              adminURL,
+			EndpointURL:           endpointURL,
+			Runtime:               runtime,
+			AdminTokenEnc:         sealed,
+			AdminTokenID:          result.principalID,
+			AdminTokenLast4:       last4(token),
+			Status:                status,
+			StatusDetail:          detail,
+			Version:               result.version,
+			Domain:                domain,
+			DnsProfileID:          nullProfileID(profile),
+			DnsRecords:            dnsRecords,
+			StorageProfileID:      nullStorageProfileID(storageProfile),
+			StopPolicy:            stopPolicy,
+			ArchiveLocalRetention: retention,
+			ArchiveSnapshotName:   snapshotName,
+			Checks:                encodeChecks(checks),
+			CheckedAt:             sql.NullTime{Time: now, Valid: true},
+			CreatedAt:             now,
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a cluster with slug %q already exists", slug)
+		}
+		if err != nil {
+			return fmt.Errorf("create cluster: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "cluster.created",
+			TargetType: "cluster",
+			TargetID:   row.ID,
+			TargetName: row.Slug,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
-	}
 	if err != nil {
-		return ClusterDetail{}, fmt.Errorf("create cluster: %w", err)
+		return ClusterDetail{}, err
 	}
 
 	if result.membersAvailable {
@@ -441,18 +454,57 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 		}
 	}
 
-	updated, err := s.queries(ctx).UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
-		Domain:                domain,
-		DnsProfileID:          profileID,
-		DnsRecords:            records,
-		StorageProfileID:      storageID,
-		StopPolicy:            stopPolicy,
-		ArchiveLocalRetention: retention,
-		ArchiveSnapshotName:   snapshotName,
-		ID:                    row.ID,
+	var updated db.Cluster
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		updated, err = s.queries(ctx).UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
+			Domain:                domain,
+			DnsProfileID:          profileID,
+			DnsRecords:            records,
+			StorageProfileID:      storageID,
+			StopPolicy:            stopPolicy,
+			ArchiveLocalRetention: retention,
+			ArchiveSnapshotName:   snapshotName,
+			ID:                    row.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("update cluster: %w", err)
+		}
+		changes := map[string]Change{}
+		if row.Domain != updated.Domain {
+			changes["domain"] = Change{From: row.Domain, To: updated.Domain}
+		}
+		if row.DnsProfileID != updated.DnsProfileID {
+			changes["dns_profile"] = Change{From: nullStringValue(row.DnsProfileID), To: nullStringValue(updated.DnsProfileID)}
+		}
+		if row.DnsRecords != updated.DnsRecords {
+			changes["dns_records"] = Change{From: row.DnsRecords, To: updated.DnsRecords}
+		}
+		if row.StorageProfileID != updated.StorageProfileID {
+			changes["storage_profile"] = Change{From: nullStringValue(row.StorageProfileID), To: nullStringValue(updated.StorageProfileID)}
+		}
+		if row.StopPolicy != updated.StopPolicy {
+			changes["stop_policy"] = Change{From: row.StopPolicy, To: updated.StopPolicy}
+		}
+		if row.ArchiveLocalRetention != updated.ArchiveLocalRetention {
+			changes["archive_local_retention"] = Change{From: row.ArchiveLocalRetention, To: updated.ArchiveLocalRetention}
+		}
+		if row.ArchiveSnapshotName != updated.ArchiveSnapshotName {
+			changes["archive_snapshot_name"] = Change{From: row.ArchiveSnapshotName, To: updated.ArchiveSnapshotName}
+		}
+		if len(changes) == 0 {
+			return nil
+		}
+		return s.record(ctx, Event{
+			Name:       "cluster.updated",
+			TargetType: "cluster",
+			TargetID:   updated.ID,
+			TargetName: updated.Slug,
+			Changes:    changes,
+		})
 	})
 	if err != nil {
-		return ClusterDetail{}, fmt.Errorf("update cluster: %w", err)
+		return ClusterDetail{}, err
 	}
 	return s.clusterDetail(ctx, updated.ID)
 }
@@ -580,12 +632,23 @@ func (s *Service) RemoveCluster(ctx context.Context, ref string, force bool) (Cl
 	if err != nil {
 		return Cluster{}, err
 	}
-	n, err := s.queries(ctx).DeleteCluster(ctx, row.ID)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteCluster(ctx, row.ID)
+		if err != nil {
+			return fmt.Errorf("delete cluster: %w", err)
+		}
+		if n == 0 {
+			return notFound("cluster %q not found", ref)
+		}
+		return s.record(ctx, Event{
+			Name:       "cluster.deleted",
+			TargetType: "cluster",
+			TargetID:   row.ID,
+			TargetName: row.Slug,
+		})
+	})
 	if err != nil {
-		return Cluster{}, fmt.Errorf("delete cluster: %w", err)
-	}
-	if n == 0 {
-		return Cluster{}, notFound("cluster %q not found", ref)
+		return Cluster{}, err
 	}
 	return toCluster(row, len(nodes), name, storage), nil
 }
@@ -687,6 +750,15 @@ func (s *Service) CreateJoinToken(ctx context.Context, ref string, req JoinToken
 	joinURL := ""
 	if len(join.JoinURLs) > 0 {
 		joinURL = join.JoinURLs[0]
+	}
+	if err := s.record(ctx, Event{
+		Name:       "join_token.created",
+		TargetType: "cluster",
+		TargetID:   row.ID,
+		TargetName: row.Slug,
+		Changes:    map[string]Change{"role": {From: "", To: role}},
+	}); err != nil {
+		return JoinToken{}, err
 	}
 	return JoinToken{
 		ClusterID:  row.ID,

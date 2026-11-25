@@ -82,17 +82,30 @@ func (s *Service) AddNode(ctx context.Context, req AddNodeRequest) (Node, error)
 		return Node{}, err
 	}
 
-	row, err := s.queries(ctx).CreateNode(ctx, db.CreateNodeParams{
-		ID:        uuid.NewV7().String(),
-		Name:      name,
-		URL:       nodeURL,
-		CreatedAt: s.now(),
+	var row db.Node
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var err error
+		row, err = s.queries(ctx).CreateNode(ctx, db.CreateNodeParams{
+			ID:        uuid.NewV7().String(),
+			Name:      name,
+			URL:       nodeURL,
+			CreatedAt: s.now(),
+		})
+		if db.IsUniqueViolation(err) {
+			return conflict("a node named %q already exists", name)
+		}
+		if err != nil {
+			return fmt.Errorf("create node: %w", err)
+		}
+		return s.record(ctx, Event{
+			Name:       "node.created",
+			TargetType: "node",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
 	})
-	if db.IsUniqueViolation(err) {
-		return Node{}, conflict("a node named %q already exists", name)
-	}
 	if err != nil {
-		return Node{}, fmt.Errorf("create node: %w", err)
+		return Node{}, err
 	}
 	return toNode(row), nil
 }
@@ -176,12 +189,23 @@ func (s *Service) RemoveNode(ctx context.Context, ref string, req RemoveNodeRequ
 			return Node{}, err
 		}
 	}
-	n, err := s.queries(ctx).DeleteNode(ctx, row.ID)
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.queries(ctx).DeleteNode(ctx, row.ID)
+		if err != nil {
+			return fmt.Errorf("delete node: %w", err)
+		}
+		if n == 0 { // removed by someone else in between
+			return notFound("node %q not found", ref)
+		}
+		return s.record(ctx, Event{
+			Name:       "node.deleted",
+			TargetType: "node",
+			TargetID:   row.ID,
+			TargetName: row.Name,
+		})
+	})
 	if err != nil {
-		return Node{}, fmt.Errorf("delete node: %w", err)
-	}
-	if n == 0 { // removed by someone else in between
-		return Node{}, notFound("node %q not found", ref)
+		return Node{}, err
 	}
 	return node, nil
 }

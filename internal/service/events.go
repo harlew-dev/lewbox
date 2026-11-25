@@ -393,6 +393,14 @@ func parseEventTime(raw, field string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
+// nullStringValue turns an optional ID into a JSON-friendly value.
+func nullStringValue(s sql.NullString) any {
+	if s.Valid {
+		return s.String
+	}
+	return nil
+}
+
 // nullIntValue turns a nullable limit into a JSON-friendly value.
 func nullIntValue(n sql.NullInt64) any {
 	if n.Valid {
