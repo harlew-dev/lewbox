@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && node --no-maglev ./node_modules/vite/bin/vite.js build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
