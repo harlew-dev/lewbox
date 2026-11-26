@@ -16,11 +16,11 @@ d=/root/incident-$(date -u +%Y%m%dT%H%M%SZ)
 sudo install -d -m 0700 "$d"
 sudo sqlite3 /srv/lewbox/lewbox.db ".backup '$d/lewbox.db'"
 sudo cp -a /srv/lewbox/keyring.key "$d/keyring.key"
-sudo docker compose --project-directory /opt/stack logs --no-color --since 7d > "$d/lewbox.log" 2>&1
-sudo docker compose --project-directory /opt/stack ps > "$d/containers.txt" 2>&1
+sudo docker compose --project-directory /opt/apps/lewbox --env-file /opt/apps/lewbox/.ship.env logs --no-color --since 7d > "$d/lewbox.log" 2>&1
+sudo docker compose --project-directory /opt/apps/lewbox --env-file /opt/apps/lewbox/.ship.env ps > "$d/containers.txt" 2>&1
 ```
 
-Use `.backup`, not a plain copy of a live SQLite file. Do not run `lewbox-deploy backup` over the top; keep this copy separate from the nightly rotation.
+Use `.backup`, not a plain copy of a live SQLite file. Do not run `ship backup` over the top; keep this copy separate from the nightly rotation.
 
 The daily prune (31-day samples, expired sessions, 400-day usage) keeps running while the orchestrator is up. There is no pause switch, so copy first. Truncated logs rotate at 3 × 10 MB per container.
 
@@ -30,7 +30,7 @@ Signals to check:
 
 - the external uptime monitor and `curl -fsS https://DOMAIN/v0/health`;
 - `lewbox status --check` and `lewbox cluster check SLUG`;
-- `lewbox-deploy status`, `docker compose ps`, and container logs (one access line per request: method, route pattern, status, duration, request ID);
+- `ship status lewbox`, `docker compose ps`, and container logs (one access line per request: method, route pattern, status, duration, request ID);
 - a report from a customer, a researcher, or the hosting or DNS provider.
 
 Access lines deliberately hold no account, IP, path or body. Account and IP scoping has to come from the database and from what the affected people tell you.
@@ -68,8 +68,8 @@ These are the containment tools that exist. All CLI commands act on the orchestr
 | A setup link leaked | `lewbox setup-link revoke ID --yes`. A used link cannot be revoked |
 | A workspace is abusing the service | `lewbox org suspend SLUG`. It blocks new sandboxes and keys; the sync loop stops running ones |
 | A profile credential (Cloudflare, S3) leaked | Rotate at the provider, then `lewbox dns-profile update NAME --api-token-stdin` or `lewbox storage-profile update NAME --secret-access-key-stdin`, and run `lewbox node configure` on every node of each cluster that uses it |
-| The orchestrator host is compromised | Stop it: `sudo docker compose --project-directory /opt/stack stop lewbox`. Preserve evidence, then restore a known-good backup on a rebuilt host. Treat every secret below as exposed |
-| A bad release | `lewbox-deploy rollback` (the previous image). The database is **not** restored, and migrations do not roll back |
+| The orchestrator host is compromised | Stop it: `sudo docker compose --project-directory /opt/apps/lewbox --env-file /opt/apps/lewbox/.ship.env stop lewbox`. Preserve evidence, then restore a known-good backup on a rebuilt host. Treat every secret below as exposed |
+| A bad release | `ship rollback lewbox` (the previous image). The database is **not** restored, and migrations do not roll back |
 
 A workspace's own keys stop working when the workspace is suspended, but a **leaked cluster admin token is not something Lewbox can rotate**: no command replaces the token stored for an existing cluster. Revoke the `lewbox-<slug>` token inside AerolVM (`DELETE /v1/tokens/{id}` on the cluster's admin API), mint a new admin token there with the node's operator token, then remove and re-add the cluster with the new token. Removing and adding the cluster deletes its nodes, sandboxes, archives and samples (archive repositories in the bucket are left behind), so it is a last resort; otherwise accept the gap and plan the rotation.
 
@@ -92,17 +92,14 @@ The keyring is one AES-256-GCM key with no key IDs and no rotation. **If both th
 
 ## 5. Restore from backup
 
-Backups are the database and keyring together. They must come from the same moment, or sealed values will not open. The VPS setup takes a nightly backup at 03:30 UTC and one before each deploy.
+Backups are the database and keyring together. They must come from the same moment, or sealed values will not open. The VPS deploy tool (`ship`, kept outside this repo) takes a nightly backup at 03:30 UTC and one before each deploy, each a single archive of the database, keyring and `.env`.
 
 ```bash
-cd /opt/stack
-b=/var/backups/lewbox/pre-v0.2.0-20261112T120000Z   # or a nightly one
-sudo docker compose stop lewbox
-sudo install -m 0600 -o lewbox -g lewbox "$b/lewbox.db" /srv/lewbox/lewbox.db
-sudo install -m 0600 -o lewbox -g lewbox "$b/keyring.key" /srv/lewbox/keyring.key
-sudo rm -f /srv/lewbox/lewbox.db-wal /srv/lewbox/lewbox.db-shm
-sudo lewbox-deploy v0.2.0                            # the version that wrote the backup
+ship backups lewbox                                   # list the archives on the server
+ship restore lewbox /var/backups/ship/lewbox/pre-v0.2.0-20261112T120000Z.tar.gz
 ```
+
+`ship restore` takes a `pre-restore` backup first, stops Lewbox, puts the files back with their owners, removes stale `-wal`/`-shm` files, and starts the version that wrote the backup.
 
 Confirm `https://DOMAIN/v0/health` is OK, then `lewbox status --check` and `lewbox cluster list`. A restored database brings back accounts, sessions and tokens that were deleted or revoked since the backup: disable or revoke them again before reopening access. If the compromise was in the orchestrator itself, also rotate the provider credentials that the host could read and rebuild from a clean image.
 

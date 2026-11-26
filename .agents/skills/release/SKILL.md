@@ -7,7 +7,7 @@ disable-model-invocation: true
 
 # Release Lewbox
 
-A release is what `lewbox update` and `lewbox-deploy` download, so a bad one reaches every server. v0.3.5 went out with a one-line description, a commit subject as its tag message, and none of the sections below. Don't repeat that: **every step here is required, in order**, and nothing is pushed until the user has seen the version and notes.
+A release is what `lewbox update` and the VPS deploy tool (`ship deploy lewbox`) download, so a bad one reaches every server. v0.3.5 went out with a one-line description, a commit subject as its tag message, and none of the sections below. Don't repeat that: **every step here is required, in order**, and nothing is pushed until the user has seen the version and notes.
 
 `$ARGUMENTS` may give the version. If not, propose one in step 4.
 
@@ -91,8 +91,8 @@ Write them to a file outside `release/` (`make release` deletes that folder), fo
    - Then any remaining limits ("A private `data_plane_host` … still gets no record").
    - Docs-only corrections go in their own bullet, linking to the page.
 4. `### Upgrade notes`: **always.** In this order:
-   - The migrations line, always first: `**No database migrations.**`, or name each new migration and say what it changes. `lewbox-deploy` backs up first, migrations don't roll back, and rolling back means restoring the `pre-<tag>` backup.
-   - What to update: the orchestrator (`lewbox update` or `lewbox-deploy`), the CLI on nodes, and `lewbox node configure` when node-side files changed.
+   - The migrations line, always first: `**No database migrations.**`, or name each new migration and say what it changes. The VPS deploy backs up first, migrations don't roll back, and rolling back means restoring the `pre-<tag>` backup.
+   - What to update: the orchestrator (`lewbox update` or `ship deploy lewbox`), the CLI on nodes, and `lewbox node configure` when node-side files changed.
    - What to do if the bug already happened, and anything transient the operator may still see (caches, the next check).
    - The AerolVM pin, always last: `AerolVM stays pinned at v0.7.0.` or `AerolVM moves from vA to vB: run lewbox update --aerolvm on each node, one at a time.`
 5. `### Tested`: **always, and only with what step 2 actually ran.**
@@ -160,4 +160,4 @@ The release must be named with the title, not a draft, marked latest (or a pre-r
 
 ## Deploying
 
-Publishing doesn't deploy. Only deploy when the user asks, as a separate step: `DEPLOY_HOST=ops@<host> deploy/vps/deploy.sh vX.Y.Z` for the orchestrator (see `deploy/vps/README.md`), then `lewbox update` (and `lewbox node configure` or `lewbox update --aerolvm` if the upgrade notes say so) on each node.
+Publishing doesn't deploy. Only deploy when the user asks, as a separate step: `ship deploy lewbox vX.Y.Z` from `~/dev/deploy` for the orchestrator (see that repo's README), then `lewbox update` (and `lewbox node configure` or `lewbox update --aerolvm` if the upgrade notes say so) on each node.
