@@ -46,7 +46,14 @@ tok=$(curl -fsS -X POST "$API/v0/auth/login" -H 'Content-Type: application/json'
 admin() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' "$API$p" "$@"; }
 JAR="$(mktemp -d)"
 trap 'rm -rf "$JAR"' EXIT
-cust() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -b "$JAR/c" -c "$JAR/c" -H 'Content-Type: application/json' -H "Lewbox-Organization: $ORG" "$API$p" "$@"; }
+# Cookie writes need the session's CSRF token, which sign-in returns.
+cust() {
+	local m="$1" p="$2" out
+	shift 2
+	out=$(curl -fsS -X "$m" -b "$JAR/c" -c "$JAR/c" -H 'Content-Type: application/json' -H "Lewbox-Organization: $ORG" -H "X-CSRF-Token: $(cat "$JAR/c.csrf" 2>/dev/null || true)" "$API$p" "$@") || return
+	[[ $p != /v0/auth/session ]] || jq -r '.csrf_token // empty' <<<"$out" >"$JAR/c.csrf"
+	printf '%s\n' "$out"
+}
 
 step "a storage profile on the dev bucket"
 s3 -X PUT "$S3/$BUCKET" -o /dev/null -w '%{http_code}' | grep -qE '^(200|409)$' && pass "bucket $BUCKET exists" || fail "create bucket"

@@ -45,7 +45,15 @@ trap 'admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not rest
 
 # A customer: a browser session cookie, and their organization in the header.
 declare -A ORG KEY
-cust() { local who="$1" m="$2" p="$3"; shift 3; curl -fsS -X "$m" -b "$JAR/$who" -c "$JAR/$who" -H 'Content-Type: application/json' -H "Lewbox-Organization: ${ORG[$who]:-}" "$API$p" "$@"; }
+# Cookie writes need the session's CSRF token, which sign-in and sign-up return.
+csrf() { cat "$JAR/$1.csrf" 2>/dev/null || true; }
+cust() {
+	local who="$1" m="$2" p="$3" out
+	shift 3
+	out=$(curl -fsS -X "$m" -b "$JAR/$who" -c "$JAR/$who" -H 'Content-Type: application/json' -H "Lewbox-Organization: ${ORG[$who]:-}" -H "X-CSRF-Token: $(csrf "$who")" "$API$p" "$@") || return
+	case $p in /v0/auth/session | /v0/auth/signup) jq -r '.csrf_token // empty' <<<"$out" >"$JAR/$who.csrf" ;; esac
+	printf '%s\n' "$out"
+}
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
 # The cluster's own API with a customer's sandbox key. EP is the region's endpoint.
@@ -126,7 +134,7 @@ step "a customer gets no region until the operator assigns one"
 new_customer c ""
 ORG[c]="c-$RUN"
 expect "c sees no regions" '.data == []' "$(cust c GET /v0/regions)"
-c_code=$(code -X POST -b "$JAR/c" -H "Lewbox-Organization: ${ORG[c]}" -H 'Content-Type: application/json' \
+c_code=$(code -X POST -b "$JAR/c" -H "Lewbox-Organization: ${ORG[c]}" -H "X-CSRF-Token: $(csrf c)" -H 'Content-Type: application/json' \
 	"$API/v0/sandbox-keys" -d "{\"name\":\"e2e\",\"region\":\"$CLUSTER\"}")
 [[ $c_code == 404 ]] && pass "c can't create a key in a region it has no plan in (404, the region is hidden)" || fail "c's key got $c_code, want 404"
 sub=$(admin PATCH "/v0/subscriptions/$CLUSTER" -H "Lewbox-Organization: ${ORG[c]}" -d "{\"plan\":\"$plan\"}")
@@ -151,7 +159,7 @@ expect "d's workspace is active on the link's plan and region" ".status == \"act
 ORG[d]=$(jq -r .slug <<<"$dorg")
 e_code=$(code -X POST -H 'Content-Type: application/json' "$API/v0/auth/signup" \
 	-d "{\"email\":\"e-$RUN@e2e.dev\",\"password\":\"customer-password-123\",\"setup_token\":\"$stoken\"}")
-[[ $e_code == 400 ]] && pass "the used token cannot register anyone else" || fail "reused token got $e_code, want 400"
+[[ $e_code == 422 ]] && pass "the used token cannot register anyone else (422)" || fail "reused token got $e_code, want 422"
 [[ $(code -X POST -H 'Content-Type: application/json' "$API/v0/setup-links/check" -d "{\"token\":\"$stoken\"}") == 404 ]] && pass "the public page is gone after use" || fail "the used link still has a page"
 
 step "a runs a sandbox with its key, straight on the cluster (no Lewbox in the path)"
@@ -164,7 +172,7 @@ step "Lewbox mirrors it for a, and only for a"
 eventually 60 "a's sandbox list has it" has_sandbox a "$id1"
 expect "b's list doesn't" "[.data[] | select(.id == \"$id1\")] | length == 0" "$(sandboxes_of b)"
 [[ $(avm b GET "/v1/sandboxes/$id1" -o /dev/null -w '%{http_code}') == 404 ]] && pass "b's key gets 404 for a's sandbox" || fail "b reached a's sandbox"
-[[ $(code -X POST -b "$JAR/b" -H "Lewbox-Organization: ${ORG[b]}" "$API/v0/sandboxes/$id1/stop?region=$CLUSTER") == 404 ]] && pass "b can't stop it through Lewbox" || fail "b stopped a's sandbox"
+[[ $(code -X POST -b "$JAR/b" -H "Lewbox-Organization: ${ORG[b]}" -H "X-CSRF-Token: $(csrf b)" "$API/v0/sandboxes/$id1/stop?region=$CLUSTER") == 404 ]] && pass "b can't stop it through Lewbox" || fail "b stopped a's sandbox"
 
 step "a snapshots a sandbox with its key; Lewbox lists it for a, and a deletes it"
 snapname="snap-$RUN"
