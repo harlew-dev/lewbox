@@ -33,13 +33,14 @@ Signals to check:
 - `ship status lewbox`, `docker compose ps`, and container logs (one access line per request: method, route pattern, status, duration, request ID);
 - a report from a customer, a researcher, or the hosting or DNS provider.
 
-Access lines deliberately hold no account, IP, path or body. Account and IP scoping has to come from the database and from what the affected people tell you.
+Use the request ID to match a log entry to an event in the [audit trail](audit-trail.md#see-it). The event carries the actor and client IP when available.
 
 ## 3. Triage
 
 Answer: what happened, whose data, over what time, and is it still happening?
 
 ```bash
+lewbox events --from START --to END --json
 lewbox user list --json
 lewbox org list --json
 lewbox org get SLUG --json
@@ -51,6 +52,8 @@ lewbox setup-link list --json
 lewbox cluster list --json
 lewbox sandbox list --all --json
 ```
+
+Replace `START` and `END` with RFC 3339 timestamps. For more events, pass the previous response's `next` value to `--before`. Paged `list` commands show 20 rows by default. Read `pages.total` in the JSON response and use `--page` to collect every page you need. See [List flags](../reference/cli.md#list-flags).
 
 A request ID from a log line or an error body finds the other lines of that request. Compare account creation, token creation and last-use times with when the incident started. A disabled account has no sessions or access tokens left; re-enable it only deliberately.
 
@@ -109,7 +112,7 @@ Lewbox has no email, so every notice goes out through a channel you control and 
 
 - A personal-data breach is personal data destroyed, lost, altered or disclosed. Notify the supervisory authority within **72 hours** of becoming aware, unless it is unlikely to put people at risk. Notify affected people without undue delay when the risk is high.
 - A customer is the controller of its workspace data and Lewbox's operator is its processor. Check the contracts: they often set 24–48 hours.
-- Collect the affected addresses with `lewbox user list --json` and `lewbox member list --org SLUG --json`. Lewbox holds no phone numbers or postal addresses.
+- Collect the affected addresses across the relevant pages of `lewbox user list --json` and `lewbox member list --org SLUG --json`. Lewbox holds no phone numbers or postal addresses.
 - Say what happened, what data was involved, what you did, and what the person should do (change the password, revoke keys). Do not describe which defence failed.
 - Never claim more than you know. If scoping is incomplete, notify what you know and update it.
 
@@ -121,7 +124,7 @@ Within two weeks, hold a blameless review: what would have detected it sooner, w
 
 ## Known gaps
 
-- No audit or event log, and access lines carry no account or IP, so scoping needs the database and the affected people.
+- The audit trail covers changes and certain refusals. Use access logs and reports from affected people to investigate reads. See [Audit trail coverage](audit-trail.md#what-is-not-recorded).
 - No command rotates a cluster's stored admin token, the keyring, or all sessions at once.
 - No email, so notification and password recovery are manual.
 - Backups are local unless copied off the server; a compromised host may have lost both the live data and the local backups.
