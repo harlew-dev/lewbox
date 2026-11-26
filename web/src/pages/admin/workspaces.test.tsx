@@ -335,6 +335,9 @@ describe('workspace cluster and plan', () => {
 
     const force = await screen.findByRole('button', { name: 'Remove anyway' })
     expect(screen.getByText(/could not revoke 1 sandbox keys/)).toBeInTheDocument()
+    // A slow first attempt shows the spinner, which stays (and keeps the
+    // button disabled) for its minimum duration; a click then is ignored.
+    await waitFor(() => expect(force).toBeEnabled())
     fireEvent.click(force)
     await waitFor(() =>
       expect(calls.filter((call) => call.method === 'DELETE').map((call) => call.url)).toEqual([

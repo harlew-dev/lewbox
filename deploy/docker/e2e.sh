@@ -156,6 +156,13 @@ has_header '^Set-Cookie: lewbox_session=[^;]*;.*SameSite=Strict' || fail "the se
 pass "the session cookie is HttpOnly and SameSite=Strict"
 if grep -q '"token"' "$BODY"; then fail "the session response leaked a token"; fi
 pass "the session response has no token field"
+if [ "$HAVE_JQ" = 1 ]; then
+	CSRF=$(jq -r '.csrf_token // empty' "$BODY")
+else
+	CSRF=$(sed -n 's/.*"csrf_token":"\([^"]*\)".*/\1/p' "$BODY")
+fi
+[ -n "$CSRF" ] || fail "the session response has no csrf_token"
+pass "the session response carries a csrf_token"
 
 step "the cookie signs in and reads the API"
 req GET /v0/profile -b "$JAR"
@@ -198,7 +205,9 @@ expect 200 "GET /v0/profile with a bearer token returns 200"
 
 step "logging out ends the session"
 req POST /v0/auth/logout -b "$JAR" -c "$JAR"
-expect 200 "POST /v0/auth/logout returns 200"
+expect 403 "POST /v0/auth/logout without the CSRF token returns 403"
+req POST /v0/auth/logout -b "$JAR" -c "$JAR" -H "X-CSRF-Token: $CSRF"
+expect 200 "POST /v0/auth/logout with the CSRF token returns 200"
 req GET /v0/profile -b "$JAR"
 expect 401 "GET /v0/profile after logout returns 401"
 
