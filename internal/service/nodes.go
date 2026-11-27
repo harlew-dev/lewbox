@@ -276,16 +276,33 @@ func (s *Service) removeClusterNode(ctx context.Context, row db.Node, req Remove
 	if err != nil {
 		return unavailable("cluster %q: %s", cluster.Slug, err)
 	}
-	member := false
-	for _, m := range members.Members {
-		if m.NodeID == row.Name {
-			member = true
+	var member *aerolvm.Member
+	for i := range members.Members {
+		if members.Members[i].NodeID == row.Name {
+			member = &members.Members[i]
 			break
 		}
 	}
-	if !member {
+	if member == nil {
 		// The cluster already forgot it; only the row is left to remove.
 		return nil
+	}
+	leader := ""
+	for _, m := range members.Members {
+		if m.Leader {
+			leader = m.NodeID
+			break
+		}
+	}
+	if leader == "" && hasVoter(members.Members) {
+		// This AerolVM annotates voters but names no leader: a removal now
+		// could not be proved to leave one behind.
+		return unavailable("cluster %q: no Raft leader is reported; try again when the cluster has one", cluster.Slug)
+	}
+	if leader == row.Name {
+		if err := transferLeadershipOff(ctx, client, cluster.Slug, row.Name, members.Members); err != nil {
+			return err
+		}
 	}
 	if err := client.DrainNode(ctx, row.Name); err != nil {
 		return unavailable("cluster %q: drain %q: %s", cluster.Slug, row.Name, err)
@@ -296,6 +313,78 @@ func (s *Service) removeClusterNode(ctx context.Context, row db.Node, req Remove
 		}
 	}
 	return nil
+}
+
+// leaderHandoffWait bounds how long RemoveNode waits for the member list to
+// name the new leader after a transfer.
+const leaderHandoffWait = 5 * time.Second
+
+// hasVoter reports whether any member carries AerolVM's voter annotation. A
+// cluster that annotates nobody predates those fields, so the check that needs
+// them is skipped rather than refusing every removal there.
+func hasVoter(members []aerolvm.Member) bool {
+	for _, m := range members {
+		if m.Voter {
+			return true
+		}
+	}
+	return false
+}
+
+// transferLeadershipOff moves Raft leadership off nodeID before it is removed,
+// and confirms the new leader before anything is changed.
+//
+// AerolVM v0.7.x deletes a Raft server even when that server is the leader.
+// The leader commits the smaller configuration with its own vote and shuts its
+// Raft down; in a two-voter cluster the survivor then elects itself, but its
+// gossip view can re-add the deleted node as a voter before it sees the deny
+// record. The survivor then needs a vote from a node whose Raft is gone, so it
+// has no leader and every write answers 503 (see §5 of
+// docs/design/aerolvm-integration.md). Removing a follower avoids that path.
+func transferLeadershipOff(ctx context.Context, client *aerolvm.Client, slug, nodeID string, members []aerolvm.Member) error {
+	target := ""
+	for _, m := range members {
+		if m.NodeID != nodeID && m.Alive && m.Voter {
+			target = m.NodeID
+			break
+		}
+	}
+	if target == "" {
+		return conflict("node %q is the Raft leader of cluster %q and no other voter is alive to take over; add a server node before removing it", nodeID, slug)
+	}
+	_, err := client.TransferLeadership(ctx, target)
+	if err != nil {
+		return unavailable("cluster %q: move Raft leadership from %q to %q: %s", slug, nodeID, target, err)
+	}
+	deadline := time.Now().Add(leaderHandoffWait)
+	for {
+		got, err := client.Members(ctx)
+		if err != nil {
+			return unavailable("cluster %q: confirm the new Raft leader: %s", slug, err)
+		}
+		leader := ""
+		for _, m := range got.Members {
+			if m.Leader {
+				leader = m.NodeID
+			}
+		}
+		// Any leader other than the node being removed is safe: AerolVM
+		// may pick another voter than the one asked for.
+		if leader != "" && leader != nodeID {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if leader == "" {
+				return unavailable("cluster %q: no Raft leader was reported after moving leadership off %q", slug, nodeID)
+			}
+			return unavailable("cluster %q: %q still reports itself as Raft leader after the transfer", slug, nodeID)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 func (s *Service) findNode(ctx context.Context, ref string) (db.Node, error) {

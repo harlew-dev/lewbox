@@ -205,12 +205,33 @@ AerolVM's raw rollout is mapped into Lewbox's own response (`ClusterUpgrade`): t
 1. Confirm (`--yes` to skip).
 2. Refuse if it is the cluster's last node (use `cluster remove` for that), or if it is the node behind the cluster's `admin_url`: Lewbox would lose its way into the cluster. This guard compares URLs, so it only works when `admin_url` is a node's own address (IP mode, or the dev cluster). With a domain or load balancer in front, check yourself which machine it points at.
 3. Check it is still a member. **Verified:** AerolVM's drain answers 204 even for a node it doesn't know.
-4. Drain it (`POST /v1/cluster/nodes/{id}/drain`), then take it out of the cluster (`DELETE /v1/cluster/nodes/{id}`, `?force=true` with `--force` when it still owns sandboxes). A 404 means AerolVM already forgot it.
-5. Unregister it in Lewbox.
+4. If it is the Raft leader, hand leadership to another alive voter (`POST /v1/cluster/leader/transfer`) and wait until `GET /v1/cluster/members` names that node `leader`. Refuse, changing nothing, when no other voter is alive, when no leader is reported, or when the hand-off cannot be confirmed. The member list carries `leader` and `voter` from the admin node's Raft view (`RaftRoles`); a cluster that annotates no voter predates those fields and skips this step.
+5. Drain it (`POST /v1/cluster/nodes/{id}/drain`), then take it out of the cluster (`DELETE /v1/cluster/nodes/{id}`, `?force=true` with `--force` when it still owns sandboxes). A 404 means AerolVM already forgot it.
+6. Unregister it in Lewbox.
+
+The hand-off is not cosmetic: AerolVM v0.7.x has a bug that leaves a two-voter cluster without a leader when the removed node is the leader (§5.1). Removing a follower is safe. The leader runs the delete and applies the deny record itself, and a removed follower's own Raft keeps answering RPCs, so even if the voter reconcile re-adds it, quorum is untouched. Only the leader shuts its Raft down and only a two-voter configuration loses its majority when it does.
 
 There is no "unregister but keep it in the cluster" option: the next sync would find it among the members and add it back.
 
 AerolVM stays installed on the machine. To use it again, run `sudo sandboxd reset --yes` there (AerolVM denies the old node ID and key), then `lewbox node add` again. AerolVM releases now ship an `uninstall.sh`, which a future `lewbox uninstall` can wrap.
+
+### 5.1 Upstream bug: removing the Raft leader of a two-voter cluster
+
+**Found 2026-11-27 on AerolVM v0.7.0 in the dev cluster; still present in v0.7.0–v0.7.7 (the removal and voter-autojoin code is unchanged in v0.7.7).** Reported here only; nothing has been filed upstream.
+
+What happens, with `lab` = node-1 + node-2 and node-2 the leader:
+
+1. `DELETE /v1/cluster/nodes/node-2` (`deleteServerLocal`, `internal/cluster/node_lifecycle.go:182`) writes the deny record, then calls `removeMemberLocal` (`internal/cluster/client.go:1252`), which runs `RemoveServer(node-2)` on node-2 itself.
+2. Hashicorp raft commits the new one-voter configuration with the leader's own vote (`appendConfigurationEntry` → `commitment.setConfiguration`; the new configuration's majority is node-1 alone). It then steps its own Raft down and, because `ShutdownOnRemove` is on (raft's default), **shuts it down**: `raft: removed ourself, shutting down`.
+3. node-1 applies the new configuration, notices the missing leader and elects itself. So far, so good.
+4. But `writeNodeDeny` only forces the gossip view refresh on the node that ran the delete (`deleteServerLocal` → `gossip.applyDenySet`, `internal/cluster/gossip_deny.go:94`). On node-1 the stale member index still lists node-2, and the voter reconcile (`reconcileVoters` → `handleMemberJoin`, `internal/cluster/voter_autojoin.go:470`) has **no deny check**. Within the election window it runs `AddVoter node-2`.
+5. node-2's Raft is shut down, so node-1 now needs 2 of 2 votes and can never elect again. Every write answers `503 cluster: not raft leader`; the log repeats `raft: Election timeout reached` and `failed to make requestVote RPC`.
+
+The repro: two mixed nodes, transfer leadership to node-2, `lewbox node remove node-2 --yes --force`. node-1 logged `election won: tally=1`, then `updating configuration: command=AddVoter server-id=node-2`, then `failed to contact quorum of nodes, stepping down`. Moving leadership to node-1 first and then running the same removal left node-1 leader and token writes answered 201.
+
+**Lewbox's workaround** (step 4 above): do the delete as a follower. The leader then runs it and refreshes its own gossip view before the reconcile can see the deleted node. Removing a non-leader is unaffected: in a three-voter cluster the survivors keep a majority even if the deleted follower is re-added, and in a two-voter cluster the leader never steps down.
+
+**Repairing a cluster already stuck this way:** stop `sandboxd` on the surviving nodes, then `sudo sandboxd recover-quorum --start` on the node to keep (it backs up first, makes that node the only voter and waits for leadership); `recover-quorum --rejoin --start` on other survivors, one at a time. This is in the operator book: `docs/platform/clusters/remove-nodes-and-clusters.md`.
 
 ---
 

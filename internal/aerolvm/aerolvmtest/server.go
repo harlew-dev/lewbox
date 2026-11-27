@@ -38,6 +38,8 @@ type Server struct {
 	joins       []aerolvm.JoinToken
 	drained     []string
 	deleted     []string
+	transfers   []string
+	actions     []string
 	revoked     []string
 	failures    map[string]*failure
 	delays      map[string]time.Duration
@@ -326,6 +328,21 @@ func (s *Server) Deleted() []string {
 	return append([]string(nil), s.deleted...)
 }
 
+// Transfers returns the nodes leadership was handed to, in order.
+func (s *Server) Transfers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.transfers...)
+}
+
+// Actions returns the node lifecycle calls in the order they arrived:
+// "transfer:<id>", "drain:<id>" and "delete:<id>".
+func (s *Server) Actions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.actions...)
+}
+
 // Revoked returns the token IDs passed to the revoke route, in order.
 func (s *Server) Revoked() []string {
 	s.mu.Lock()
@@ -348,6 +365,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/cluster/join-tokens", s.handleCreateJoinToken)
 	mux.HandleFunc("POST /v1/cluster/nodes/{id}/drain", s.handleDrainNode)
 	mux.HandleFunc("DELETE /v1/cluster/nodes/{id}", s.handleDeleteNode)
+	mux.HandleFunc("POST /v1/cluster/leader/transfer", s.handleTransferLeadership)
 	mux.HandleFunc("GET /v1/sandboxes", s.handleListSandboxes)
 	mux.HandleFunc("POST /v1/sandboxes", s.handleCreateSandbox)
 	mux.HandleFunc("GET /v1/sandboxes/{id}", s.handleGetSandbox)
@@ -609,6 +627,7 @@ func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
 	s.drained = append(s.drained, id)
+	s.actions = append(s.actions, "drain:"+id)
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -621,11 +640,48 @@ func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
 		if m.NodeID == id {
 			s.members = append(s.members[:i], s.members[i+1:]...)
 			s.deleted = append(s.deleted, id)
+			s.actions = append(s.actions, "delete:"+id)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 	}
 	s.writeError(w, http.StatusNotFound, "cluster: unknown node")
+}
+
+func (s *Server) handleTransferLeadership(w http.ResponseWriter, r *http.Request) {
+	var req aerolvm.LeaderTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	to := strings.TrimSpace(req.To)
+	if to == "" {
+		for _, m := range s.members {
+			if m.Voter && m.Alive {
+				to = m.NodeID
+				break
+			}
+		}
+	}
+	voter := false
+	for _, m := range s.members {
+		if m.NodeID == to && m.Voter {
+			voter = true
+			break
+		}
+	}
+	if !voter {
+		s.writeError(w, http.StatusBadRequest, to+" is not a Raft voter")
+		return
+	}
+	for i := range s.members {
+		s.members[i].Leader = s.members[i].NodeID == to
+	}
+	s.transfers = append(s.transfers, to)
+	s.actions = append(s.actions, "transfer:"+to)
+	s.writeJSON(w, http.StatusOK, aerolvm.LeaderTransfer{Leader: to, Term: 1})
 }
 
 // page bounds returns the slice [start:end] a request asks for.

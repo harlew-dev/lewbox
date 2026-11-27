@@ -720,6 +720,9 @@ func TestRemoveNode(t *testing.T) {
 	if got := fake.Deleted(); len(got) != 1 || got[0] != "node-b" {
 		t.Errorf("deleted = %v", got)
 	}
+	if got := fake.Transfers(); len(got) != 0 {
+		t.Errorf("transfers = %v, want none for an unannotated cluster", got)
+	}
 	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
 		wantCode(t, err, CodeNotFound)
 	}
@@ -764,6 +767,101 @@ func TestRemoveNodeUpstream404(t *testing.T) {
 	}
 	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
 		wantCode(t, err, CodeNotFound)
+	}
+}
+
+func TestRemoveNodeMovesLeadershipFirst(t *testing.T) {
+	s := newClusterService(t)
+	fake := newClusterFake(t)
+	a := testMember(fake, "node-a", "docker", true)
+	a.Voter = true
+	b := testMember(fake, "node-b", "docker", true)
+	b.Voter = true
+	b.Leader = true
+	fake.SetMembers([]aerolvm.Member{a, b})
+	addTestCluster(t, s, fake, "eu-west")
+
+	if _, err := s.RemoveNode(localCtx(), "node-b", RemoveNodeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(fake.Actions(), ","); got != "transfer:node-a,drain:node-b,delete:node-b" {
+		t.Errorf("actions = %s, want leadership handed over before the drain", got)
+	}
+	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
+		wantCode(t, err, CodeNotFound)
+	}
+}
+
+func TestRemoveNodeLeaderWithoutOtherVoter(t *testing.T) {
+	s := newClusterService(t)
+	fake := newClusterFake(t)
+	leader := testMember(fake, "node-b", "docker", true)
+	leader.Voter = true
+	leader.Leader = true
+	worker := testMember(fake, "node-a", "docker", true) // alive, but not a voter
+	fake.SetMembers([]aerolvm.Member{worker, leader})
+	addTestCluster(t, s, fake, "eu-west")
+
+	_, err := s.RemoveNode(localCtx(), "node-b", RemoveNodeRequest{})
+	se := wantCode(t, err, CodeConflict)
+	if !strings.Contains(se.Message, "no other voter") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if got := fake.Actions(); len(got) != 0 {
+		t.Errorf("actions = %v, want nothing changed", got)
+	}
+	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
+		t.Errorf("node-b should still be registered: %v", err)
+	}
+}
+
+func TestRemoveNodeLeadershipTransferFails(t *testing.T) {
+	s := newClusterService(t)
+	fake := newClusterFake(t)
+	a := testMember(fake, "node-a", "docker", true)
+	a.Voter = true
+	b := testMember(fake, "node-b", "docker", true)
+	b.Voter = true
+	b.Leader = true
+	fake.SetMembers([]aerolvm.Member{a, b})
+	addTestCluster(t, s, fake, "eu-west")
+
+	fake.FailNext("/v1/cluster/leader/transfer", http.StatusConflict, `{"error":"cluster: transfer_failed"}`, 1)
+	_, err := s.RemoveNode(localCtx(), "node-b", RemoveNodeRequest{})
+	se := wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(se.Message, "move Raft leadership") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if got := fake.Actions(); len(got) != 0 {
+		t.Errorf("actions = %v, want nothing changed", got)
+	}
+	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
+		t.Errorf("node-b should still be registered: %v", err)
+	}
+}
+
+func TestRemoveNodeNoLeaderReported(t *testing.T) {
+	s := newClusterService(t)
+	fake := newClusterFake(t)
+	a := testMember(fake, "node-a", "docker", true)
+	a.Voter = true
+	b := testMember(fake, "node-b", "docker", true)
+	b.Voter = true
+	fake.SetMembers([]aerolvm.Member{a, b})
+	addTestCluster(t, s, fake, "eu-west")
+
+	// The members annotate voters but name no leader: the removal cannot be
+	// proved to leave a leader behind, so it must change nothing.
+	_, err := s.RemoveNode(localCtx(), "node-b", RemoveNodeRequest{})
+	se := wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(se.Message, "no Raft leader") {
+		t.Errorf("message = %q", se.Message)
+	}
+	if got := fake.Actions(); len(got) != 0 {
+		t.Errorf("actions = %v, want nothing changed", got)
+	}
+	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
+		t.Errorf("node-b should still be registered: %v", err)
 	}
 }
 

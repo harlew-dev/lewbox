@@ -294,12 +294,41 @@ step "destructive commands want --yes"
 if lb node-1 node remove node-2 >/dev/null 2>&1; then fail "remove without --yes was allowed"; else pass "remove without --yes refused"; fi
 
 step "remove node-2 from the cluster"
+# Removing the Raft leader of a two-voter cluster used to leave node-1 with no
+# leader: AerolVM re-adds the deleted voter before the survivor sees the deny
+# record. Make node-2 the leader, so this step always exercises that path.
+pat=$(compose exec -T node-1 sh -c "grep ^SB_PAT_TOKEN= /etc/sandboxd/sandboxd.env | cut -d= -f2")
+leader=$(compose exec -T node-1 curl -fsS -H "Authorization: Bearer $pat" http://127.0.0.1:21212/v1/cluster/leader | jq -r .leader)
+if [[ $leader != node-2 ]]; then
+	compose exec -T node-1 curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $pat" -H 'Content-Type: application/json' \
+		-d '{"to":"node-2"}' http://127.0.0.1:21212/v1/cluster/leader/transfer >/dev/null
+fi
+for i in $(seq 30); do
+	leader=$(compose exec -T node-1 curl -fsS -H "Authorization: Bearer $pat" http://127.0.0.1:21212/v1/cluster/leader | jq -r .leader)
+	[[ $leader == node-2 ]] && break
+	sleep 1
+done
+[[ $leader == node-2 ]] && pass "node-2 is the cluster's Raft leader" || fail "could not make node-2 the leader (got '$leader')"
 out=$(lb node-1 node remove node-2 --yes --json --force)
 expect "removed node-2" '.name == "node-2"' "$out"
 c=$(lb node-1 cluster check "$CLUSTER" --json)
 expect "one node left" '.nodes == 1' "$c"
 m=$(compose exec -T node-1 sh -c 'curl -s -H "Authorization: Bearer $(grep ^SB_PAT_TOKEN= /etc/sandboxd/sandboxd.env | cut -d= -f2)" http://127.0.0.1:21212/v1/cluster/members')
 expect "AerolVM no longer lists node-2" '[.members[].node_id] == ["node-1"]' "$m"
+# The re-add race shows up within a second. Wait it out, then require a leader
+# and a write: a 201 before the race would prove nothing.
+sleep 5
+leader=$(compose exec -T node-1 curl -fsS -H "Authorization: Bearer $pat" http://127.0.0.1:21212/v1/cluster/leader | jq -r .leader)
+[[ $leader == node-1 ]] && pass "node-1 leads after the removal" || fail "leader after the removal is '$leader'"
+code=""
+for i in $(seq 10); do
+	code=$(compose exec -T node-1 curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $pat" -H 'Content-Type: application/json' \
+		-d "{\"name\":\"e2e-after-removal-$i\",\"role\":\"admin\",\"team\":\"*\",\"expires_in\":\"1d\"}" \
+		http://127.0.0.1:21212/v1/tokens)
+	[[ $code == 201 ]] && break
+	sleep 1
+done
+[[ $code == 201 ]] && pass "node-1 accepts writes after the removal" || fail "token write after the removal: HTTP $code"
 if lb node-1 node remove node-1 --yes >/dev/null 2>&1; then fail "removed the last node"; else pass "the last node can't be removed"; fi
 
 step "one machine (node-3): local-mode AerolVM v0.6.13 and an orchestrator, then update --aerolvm to v0.7.0"

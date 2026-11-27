@@ -84,6 +84,19 @@ type Members struct {
 	Members []Member `json:"members"`
 }
 
+// LeaderTransferRequest is the body of POST /v1/cluster/leader/transfer.
+// An empty To lets Raft pick the most up-to-date voter.
+type LeaderTransferRequest struct {
+	To string `json:"to,omitempty"`
+}
+
+// LeaderTransfer is the answer to POST /v1/cluster/leader/transfer: the node
+// that leads after the transfer.
+type LeaderTransfer struct {
+	Leader string `json:"leader"`
+	Term   uint64 `json:"term"`
+}
+
 // Token is an API token as returned by the token routes.
 type Token struct {
 	ID        string     `json:"id"`

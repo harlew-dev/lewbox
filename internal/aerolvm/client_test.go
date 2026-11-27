@@ -104,8 +104,8 @@ func TestClientMethods(t *testing.T) {
 	ctx := context.Background()
 	fake := newFake(t)
 	fake.SetMembers([]aerolvm.Member{
-		{NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
-		{NodeID: "node-b", NodeName: "node-b", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-a", NodeName: "node-a", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Voter: true, Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Voter: true, Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
 	})
 	client := aerolvm.New(fake.URL(), adminToken, aerolvm.WithRetry(0))
 
@@ -157,6 +157,14 @@ func TestClientMethods(t *testing.T) {
 	var apiErr *aerolvm.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
 		t.Fatalf("DeleteNode missing = %v", err)
+	}
+
+	moved, err := client.TransferLeadership(ctx, "node-b")
+	if err != nil || moved.Leader != "node-b" || moved.Term == 0 {
+		t.Fatalf("TransferLeadership = %+v, %v", moved, err)
+	}
+	if got := fake.Transfers(); len(got) != 1 || got[0] != "node-b" {
+		t.Errorf("transfers = %v", got)
 	}
 }
 

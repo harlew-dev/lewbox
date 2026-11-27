@@ -258,6 +258,14 @@ func (c *Client) DeleteNode(ctx context.Context, id string, force bool) error {
 	return c.do(ctx, http.MethodDelete, path, nil, nil, true)
 }
 
+// TransferLeadership calls POST /v1/cluster/leader/transfer, handing Raft
+// leadership to another voter. An empty to lets Raft choose.
+func (c *Client) TransferLeadership(ctx context.Context, to string) (LeaderTransfer, error) {
+	var out LeaderTransfer
+	err := c.do(ctx, http.MethodPost, "/v1/cluster/leader/transfer", LeaderTransferRequest{To: to}, &out, true)
+	return out, err
+}
+
 // ListSandboxes reads every page of GET /v1/sandboxes. It reports whether any
 // page was partial, which means a node did not answer.
 func (c *Client) ListSandboxes(ctx context.Context) ([]Sandbox, bool, error) {

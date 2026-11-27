@@ -65,7 +65,13 @@ If `which` still finds nothing, check that the binary exists with `ls -l ~/.loca
 
 **`node "x" serves cluster "y"'s admin URL`**: the orchestrator reaches the cluster through that node. Register the cluster through another node first, then remove it.
 
+**`node "x" is the Raft leader of cluster "y" and no other voter is alive to take over`**: add a server node (or bring one back), then remove again. Lewbox hands leadership to another voter first; with nowhere to put it, it changes nothing.
+
+**`no Raft leader is reported`**, or a leadership transfer that could not be confirmed: the cluster is mid-election or unhealthy. Check `lewbox cluster check <slug>` and the nodes' `sudo journalctl -u sandboxd`, then try again.
+
 **AerolVM refuses to delete the node**: it still owns sandboxes. Stop them, or pass `--force`.
+
+**`503` and `cluster: not raft leader` after a node removal**: the surviving node kept the removed machine in its Raft configuration, so it can never get a majority again. Repair the cluster: stop `sandboxd` on the survivors, then run `sudo sandboxd recover-quorum --start` on the one you keep. See [A cluster left without a leader after a removal](../clusters/remove-nodes-and-clusters.md#a-cluster-left-without-a-leader-after-a-removal).
 
 ## Could not resolve 'archive.ubuntu.com' in the dev cluster
 
