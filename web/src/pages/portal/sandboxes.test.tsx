@@ -61,7 +61,7 @@ describe('SandboxesPage', () => {
 
     expect(await screen.findByText('sb-7f3a9c')).toBeInTheDocument()
     expect(screen.getByText('Running')).toBeInTheDocument()
-    expect(screen.getByText('1 vCPU · 1 GB')).toBeInTheDocument()
+    expect(screen.getByText('1 vCPU · 1 GB · 10 GB disk')).toBeInTheDocument()
     // The portal hides the region column: a workspace has one region.
     expect(screen.queryByRole('columnheader', { name: 'Region' })).toBeNull()
     expect(screen.getByRole('button', { name: /Status/ })).toBeInTheDocument()

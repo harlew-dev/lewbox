@@ -32,4 +32,37 @@ describe('FleetSandboxesPage', () => {
       expect(requests.at(-1)?.url).toBe('/v0/sandboxes?status=stopped')
     })
   })
+
+  it('shows each sandbox node, runtime and size', async () => {
+    stubAPI({
+      'GET /v0/organizations': () => json(200, { data: [] }),
+      'GET /v0/regions': () => json(200, { data: [euWest] }),
+      'GET /v0/sandboxes': () =>
+        json(200, {
+          data: [
+            {
+              id: 'sb-7f3a9c',
+              region: 'eu-west',
+              organization: { slug: 'acme', name: 'Acme' },
+              name: '',
+              image: 'ubuntu:22.04',
+              status: 'started',
+              status_reason: '',
+              runtime: 'firecracker',
+              cpu: 2,
+              memory_mb: 2048,
+              disk_gb: 20,
+              node: 'node-a',
+              created_at: '2026-11-11T15:30:00Z',
+              last_seen_at: '2026-11-11T15:40:00Z',
+            },
+          ],
+        }),
+    })
+    renderApp('/admin/sandboxes')
+
+    expect(await screen.findByText('firecracker')).toBeInTheDocument()
+    expect(screen.getByText('node-a')).toBeInTheDocument()
+    expect(screen.getByText('2 vCPU · 2 GB · 20 GB disk')).toBeInTheDocument()
+  })
 })

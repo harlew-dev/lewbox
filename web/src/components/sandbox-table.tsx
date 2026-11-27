@@ -45,13 +45,13 @@ function SandboxStatus({ sandbox }: { sandbox: api.Sandbox }) {
 }
 
 function sandboxSize(sandbox: api.Sandbox): string {
-  return `${formatNumber(sandbox.cpu)} vCPU · ${formatMemory(sandbox.memory_mb)}`
+  return `${formatNumber(sandbox.cpu)} vCPU · ${formatMemory(sandbox.memory_mb)} · ${formatNumber(sandbox.disk_gb, 0)} GB disk`
 }
 
 type Pending = { sandbox: api.Sandbox; action: 'stop' | 'delete' }
 
-// Sandboxes with stop and delete, each confirmed. `fleet` adds the workspace
-// and how long each has run, for the operator. `org` scopes the actions.
+// Sandboxes with stop and delete, each confirmed. `fleet` adds the workspace,
+// node, runtime and how long each has run, for the operator. `org` scopes the actions.
 // `regionName` turns a sandbox's region slug into its name; the portal hides
 // the column because a workspace has one region.
 export function SandboxTable({
@@ -152,6 +152,9 @@ export function SandboxTable({
             {showRegion && (
               <TableCell className="text-zinc-500 dark:text-zinc-400">
                 {regionName(sandbox.region)}
+                {fleet && sandbox.node && (
+                  <div className="text-xs/5">{sandbox.node}</div>
+                )}
               </TableCell>
             )}
             <TableCell>
@@ -159,6 +162,9 @@ export function SandboxTable({
             </TableCell>
             <TableCell className="whitespace-nowrap tabular-nums">
               {sandboxSize(sandbox)}
+              {fleet && sandbox.runtime && (
+                <div className="text-xs/5 text-zinc-500 dark:text-zinc-400">{sandbox.runtime}</div>
+              )}
             </TableCell>
             <TableCell
               className="text-zinc-500 tabular-nums dark:text-zinc-400"
