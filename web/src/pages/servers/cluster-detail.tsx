@@ -29,7 +29,7 @@ import {
   toast,
 } from '@harlew-dev/ui'
 import { EllipsisHorizontalIcon, TrashIcon } from '@heroicons/react/16/solid'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { AliveBadge, StatusBadge } from '../../components/status'
 import * as api from '../../lib/api'
@@ -40,6 +40,7 @@ import { useLoad } from '../../lib/use-load'
 import { AddNodeDialog } from './add-node-dialog'
 import { ClusterSettings, ClusterSettingsDialog } from './cluster-settings'
 import { ClusterMetrics, ClusterUptime } from './cluster-health'
+import { ClusterUpgradeSection, isUpgradeActive, UpgradeClusterDialog, upgradeTiming } from './cluster-upgrade'
 import { RemoveNodeDialog } from './remove-node-dialog'
 import { NodeActions } from './servers'
 
@@ -52,13 +53,24 @@ export function ClusterDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [configureNote, setConfigureNote] = useState(false)
   const [removeNode, setRemoveNode] = useState<api.Node | null>(null)
   const { data, error, loading, missing, reload, refresh } = useLoad(
     `cluster:${ref}`,
     () => api.getCluster(ref),
   )
+  // A 404 means the cluster never upgraded: there is no section to show.
+  const upgrade = useLoad(
+    ref ? `cluster:${ref}:upgrade` : null,
+    () => api.getClusterUpgrade(ref),
+    {
+      every: (rollout) =>
+        rollout && isUpgradeActive(rollout.phase) ? upgradeTiming.every : 0,
+    },
+  )
   const detail = updated ?? data
+  const upgrading = upgrade.data !== null && isUpgradeActive(upgrade.data.phase)
 
   useEffect(() => {
     setUpdated(null)
@@ -75,10 +87,27 @@ export function ClusterDetailPage() {
     { toError: (failure) => ({ message: errorMessage(failure) }) },
   )
 
+  // The cluster's version comes from its last check, so check again as soon
+  // as an upgrade this page watched settles, instead of showing the old one.
+  const wasUpgrading = useRef(false)
+  const runCheck = check.run
+  useEffect(() => {
+    if (wasUpgrading.current && !upgrading) void runCheck()
+    wasUpgrading.current = upgrading
+  }, [upgrading, runCheck])
+
   const actions = (
     <>
       <Button outline onClick={() => void check.run()} loading={check.loading}>
         Run checks
+      </Button>
+      <Button
+        outline
+        onClick={() => setUpgradeOpen(true)}
+        disabled={!detail || upgrading}
+        disabledReason={!detail ? 'Loading the cluster' : 'An upgrade is in progress'}
+      >
+        Upgrade cluster
       </Button>
       <Button onClick={() => setAddOpen(true)} disabled={!detail} disabledReason="Loading the cluster">
         Add node
@@ -165,6 +194,15 @@ export function ClusterDetailPage() {
       <ClusterMetrics cluster={detail.slug} />
 
       <ClusterUptime cluster={detail.slug} />
+
+      <ClusterUpgradeSection
+        cluster={detail.slug}
+        upgrade={upgrade}
+        onChanged={() => {
+          setUpdated(null)
+          reload()
+        }}
+      />
 
       <Subheading className="mt-12">Summary</Subheading>
       <Divider className="mt-4" />
@@ -342,6 +380,12 @@ export function ClusterDetailPage() {
           setUpdated(null)
           reload()
         }}
+      />
+      <UpgradeClusterDialog
+        open={upgradeOpen}
+        cluster={detail.slug}
+        onClose={() => setUpgradeOpen(false)}
+        onStarted={() => upgrade.refresh()}
       />
     </>
   )

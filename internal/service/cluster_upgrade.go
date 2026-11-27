@@ -68,6 +68,7 @@ type ClusterUpgradePlan struct {
 	Allowed               bool                     `json:"allowed"`
 	Refusals              []string                 `json:"refusals"`
 	Warnings              []string                 `json:"warnings"`
+	NeedsAllowDowntime    bool                     `json:"needs_allow_downtime"`
 	Skew                  ClusterUpgradeSkew       `json:"skew"`
 	OneWayMigrations      []int                    `json:"one_way_migrations"`
 	RollbackAfterFinalize bool                     `json:"rollback_after_finalize"`
@@ -471,9 +472,11 @@ func (s *Service) clusterUpgradePlan(ctx context.Context, row db.Cluster, req Pl
 	}
 	switch {
 	case voters == 1:
-		plan.Warnings = append(plan.Warnings, "this cluster has one Raft voter: the API is down while it restarts (sandboxes keep running); start the upgrade with --allow-downtime")
+		plan.NeedsAllowDowntime = true
+		plan.Warnings = append(plan.Warnings, "this cluster has one Raft voter: the API is down while it restarts (sandboxes keep running); starting it needs downtime allowed (--allow-downtime)")
 	case voters == 2 && votersDown == 0:
-		plan.Warnings = append(plan.Warnings, "this cluster has two Raft voters: while either one restarts, one of two is up, which is no majority, so the API is down during each server restart (sandboxes keep running); start the upgrade with --allow-downtime")
+		plan.NeedsAllowDowntime = true
+		plan.Warnings = append(plan.Warnings, "this cluster has two Raft voters: while either one restarts, one of two is up, which is no majority, so the API is down during each server restart (sandboxes keep running); starting it needs downtime allowed (--allow-downtime)")
 	}
 	if votersDown > 0 && voters-votersDown-1 <= voters/2 {
 		plan.Warnings = append(plan.Warnings, fmt.Sprintf("%d of %d Raft voters are down: restarting another would lose the majority, so the rollout will fail at the servers; bring them back first", votersDown, voters))

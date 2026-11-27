@@ -82,6 +82,46 @@ func TestPlanClusterUpgrade(t *testing.T) {
 	}
 }
 
+func TestPlanClusterUpgradeNeedsAllowDowntime(t *testing.T) {
+	rel := releaseFixture(t, "v0.7.1", releaseMetadata("v0.7.1", "v0.6.11"))
+	for _, tc := range []struct {
+		voters int
+		want   bool
+	}{
+		{1, true},
+		{2, true},
+		{3, false},
+	} {
+		t.Run(fmt.Sprintf("%d voters", tc.voters), func(t *testing.T) {
+			s := newClusterService(t, WithAerolVMReleaseURL(rel.URL))
+			fake := newClusterFake(t)
+			members := make([]aerolvm.Member, 0, tc.voters)
+			for i := range tc.voters {
+				members = append(members, aerolvm.Member{
+					NodeID:   fmt.Sprintf("node-%d", i),
+					NodeName: fmt.Sprintf("node-%d", i),
+					APIURL:   fmt.Sprintf("http://node-%d.test:21212", i),
+					Role:     "mixed",
+					Alive:    true,
+					Version:  "v0.7.0",
+					Voter:    true,
+					Leader:   i == 0,
+				})
+			}
+			fake.SetMembers(members)
+			addTestCluster(t, s, fake, "lab")
+
+			plan, err := s.PlanClusterUpgrade(localCtx(), "lab", PlanClusterUpgradeRequest{Version: "v0.7.1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.NeedsAllowDowntime != tc.want {
+				t.Fatalf("needs_allow_downtime = %v, want %v (plan %+v)", plan.NeedsAllowDowntime, tc.want, plan)
+			}
+		})
+	}
+}
+
 func TestPlanClusterUpgradeRefusesSkew(t *testing.T) {
 	rel := releaseFixture(t, "v0.7.1", releaseMetadata("v0.7.1", "v0.7.1"))
 	s := newClusterService(t, WithAerolVMReleaseURL(rel.URL))

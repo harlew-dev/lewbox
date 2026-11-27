@@ -56,8 +56,11 @@ func TestClusterUpgradeCLIParity(t *testing.T) {
 	}
 
 	e.sameError([]string{"cluster", "upgrade", "status", "lab"}, "GET", "/v0/clusters/lab/upgrade", "", 404)
-	e.same([]string{"cluster", "upgrade", "lab", "--check", "--version", "v0.7.1"},
+	planJSON := e.same([]string{"cluster", "upgrade", "lab", "--check", "--version", "v0.7.1"},
 		"GET", "/v0/clusters/lab/upgrade/plan?version=v0.7.1", "", 200)
+	if !strings.Contains(planJSON, `"needs_allow_downtime":true`) {
+		t.Errorf("the plan does not say downtime is needed: %s", planJSON)
+	}
 
 	// Start, and compare the CLI's --json body with reading the same rollout
 	// over the API.

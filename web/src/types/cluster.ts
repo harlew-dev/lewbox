@@ -73,6 +73,93 @@ export interface ClusterList {
   data: Cluster[]
 }
 
+// One node's progress in a rolling upgrade.
+export interface ClusterUpgradeNode {
+  node: string
+  role: string
+  from_version?: string
+  to_version?: string
+  state: string
+  order: number
+  batch?: number
+  error?: string
+  migrated: boolean
+  updated_at: string
+}
+
+// The cluster's current AerolVM rollout.
+export interface ClusterUpgrade {
+  cluster: string
+  cluster_id: string
+  id: string
+  phase: string
+  direction: string
+  target_version: string
+  previous_version?: string
+  source: string
+  hold: boolean
+  batch: string
+  pause_after?: number
+  allow_downtime: boolean
+  error?: string
+  created_at: string
+  updated_at: string
+  nodes: ClusterUpgradeNode[]
+}
+
+export interface ClusterUpgradeSkew {
+  upgrade_from_min?: string
+  below: string[]
+}
+
+export interface ClusterUpgradePlanNode {
+  node: string
+  role: string
+  version: string
+  target_version: string
+  alive: boolean
+  voter: boolean
+  leader: boolean
+  order?: number
+  batch?: number
+  action: 'upgrade' | 'skip_target' | 'skip_down'
+}
+
+// What an upgrade would do, and nothing more.
+export interface ClusterUpgradePlan {
+  cluster: string
+  cluster_id: string
+  target_version: string
+  tested: boolean
+  source: string
+  allowed: boolean
+  refusals: string[]
+  warnings: string[]
+  needs_allow_downtime: boolean
+  skew: ClusterUpgradeSkew
+  one_way_migrations: number[]
+  rollback_after_finalize: boolean
+  batch: string
+  batch_size: number
+  pause_after?: number
+  nodes: ClusterUpgradePlanNode[]
+  metadata: Record<string, unknown>
+}
+
+export interface ClusterUpgradePlanInput {
+  version?: string
+  batch?: string
+  pause_after?: number
+}
+
+export interface ClusterUpgradeStartInput {
+  version?: string
+  batch?: string
+  pause_after?: number
+  hold?: boolean
+  allow_downtime?: boolean
+}
+
 // Only the fields that are set change. dns_profile and storage_profile take
 // 'none' to clear; dns_records is 'auto' or 'off'.
 export interface ClusterUpdate {

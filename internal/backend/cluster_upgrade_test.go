@@ -71,7 +71,18 @@ func TestClusterUpgradeBackendsAgree(t *testing.T) {
 	}
 
 	runSteps(t, h, []step{
-		both("plan", plan),
+		{
+			name:    "plan",
+			local:   plan,
+			remote:  plan,
+			compare: true,
+			check: func(t *testing.T, value any) {
+				p, ok := value.(service.ClusterUpgradePlan)
+				if !ok || !p.NeedsAllowDowntime {
+					t.Fatalf("plan = %#v, want needs_allow_downtime", value)
+				}
+			},
+		},
 		both("status before a rollout", status),
 		{name: "start (local) and read it back (remote)", local: start, remote: status, compare: true},
 		{

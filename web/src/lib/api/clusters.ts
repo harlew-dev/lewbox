@@ -1,4 +1,14 @@
-import type { Cluster, ClusterDetail, ClusterList, ClusterUpdate, JoinToken } from '../../types/cluster'
+import type {
+  Cluster,
+  ClusterDetail,
+  ClusterList,
+  ClusterUpdate,
+  ClusterUpgrade,
+  ClusterUpgradePlan,
+  ClusterUpgradePlanInput,
+  ClusterUpgradeStartInput,
+  JoinToken,
+} from '../../types/cluster'
 import type { ClusterHealth, ClusterMetrics, MetricsRange } from '../../types/monitoring'
 import { query, ref, request } from './client'
 
@@ -61,4 +71,42 @@ export function clusterHealth(clusterRef: string, days = 30): Promise<ClusterHea
 
 export function clusterMetrics(clusterRef: string, range: MetricsRange): Promise<ClusterMetrics> {
   return request<ClusterMetrics>(`/v0/clusters/${ref(clusterRef)}/metrics${query({ range })}`)
+}
+
+// The cluster's current rollout. A cluster that never had one answers 404.
+export function getClusterUpgrade(clusterRef: string): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade`)
+}
+
+export function planClusterUpgrade(
+  clusterRef: string,
+  input: ClusterUpgradePlanInput = {},
+): Promise<ClusterUpgradePlan> {
+  return request<ClusterUpgradePlan>(`/v0/clusters/${ref(clusterRef)}/upgrade/plan${query(input)}`)
+}
+
+export function startClusterUpgrade(
+  clusterRef: string,
+  input: ClusterUpgradeStartInput,
+): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade`, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function stopClusterUpgrade(clusterRef: string): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade/stop`, { method: 'POST' })
+}
+
+export function resumeClusterUpgrade(clusterRef: string): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade/resume`, { method: 'POST' })
+}
+
+export function rollbackClusterUpgrade(clusterRef: string): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade/rollback`, { method: 'POST' })
+}
+
+export function finalizeClusterUpgrade(clusterRef: string): Promise<ClusterUpgrade> {
+  return request<ClusterUpgrade>(`/v0/clusters/${ref(clusterRef)}/upgrade/finalize`, { method: 'POST' })
 }

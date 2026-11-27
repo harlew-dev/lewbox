@@ -70,6 +70,8 @@ The default version is the AerolVM release this Lewbox release was tested with. 
 
 The plan shows the node order, the version skew, one-way migrations and warnings. Lewbox refuses when the jump is not allowed, when a node is newer than the target, or when the plan cannot be read. With one or two Raft voters the cluster has no majority while a server restarts, so AerolVM asks for `--allow-downtime`; without it the error says so.
 
+The cluster's page in the web console plans and starts the same rollout, with an **Upgrade cluster** dialog and a live section on each node's progress, plus stop, resume, roll back and finalize.
+
 Follow and control it with:
 
 ```bash
