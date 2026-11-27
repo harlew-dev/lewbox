@@ -37,7 +37,7 @@ Lewbox is pre-1.0:
 
 ```bash
 git diff --name-only "$prev"..HEAD -- internal/db/migrations    # migrations in this release
-git diff "$prev"..HEAD -- internal/machine/source.go | grep PinnedVersion   # AerolVM pin change
+git diff "$prev"..HEAD -- internal/aerolvm/release.go | grep PinnedVersion   # AerolVM pin change
 git diff --name-only "$prev"..HEAD -- docs/ cmd/ internal/machine/ deploy/
 ```
 

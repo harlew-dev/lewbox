@@ -88,8 +88,8 @@ release: web ## Build the assets `lewbox update` reads (binaries, release.json, 
 		echo "building release/lewbox_linux_$$arch"; \
 		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "-s -w -X main.version=$(VERSION)" -o release/lewbox_linux_$$arch ./cmd/lewbox || exit 1; \
 	done
-	@aerolvm=$$(sed -n 's/^[[:space:]]*PinnedVersion = "\(v[^"]*\)"/\1/p' internal/machine/source.go); \
-		test -n "$$aerolvm" || { echo "release: no PinnedVersion in internal/machine/source.go"; exit 1; }; \
+	@aerolvm=$$(sed -n 's/^[[:space:]]*PinnedVersion = "\(v[^"]*\)"/\1/p' internal/aerolvm/release.go); \
+		test -n "$$aerolvm" || { echo "release: no PinnedVersion in internal/aerolvm/release.go"; exit 1; }; \
 		printf '{"version":"%s","aerolvm_version":"%s"}\n' "$(VERSION)" "$$aerolvm" > release/release.json
 	cd release && sha256sum lewbox_linux_* > checksums.txt && cat release.json checksums.txt
 
