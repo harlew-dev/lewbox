@@ -18,6 +18,8 @@ See [Install the CLI](docs/platform/setup/install-the-cli.md) for a pinned relea
 
 ### Documentation
 
+Visit [lewbox.com](https://lewbox.com) for the hosted version, or read the books below.
+
 - **[Platform documentation](docs/platform/README.md)** is for operators: setup, clusters, accounts and plans, operations, and the [CLI](docs/platform/reference/cli.md) and [HTTP API](docs/platform/reference/http-api.md) reference.
 - **[Customer documentation](docs/consumer/README.md)** is for workspace members: sandbox API keys, the AerolVM and E2B SDKs, usage and limits, and the management API.
 
