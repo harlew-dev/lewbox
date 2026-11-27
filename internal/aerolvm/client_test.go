@@ -398,3 +398,38 @@ func TestCallTimeoutDefaultsOnlyWithoutDeadline(t *testing.T) {
 		t.Fatalf("status after the stop = %q, want stopped", sb.Status)
 	}
 }
+
+// TestUpgradeFixturesDecode checks the real v0.7.0 upgrade responses.
+func TestUpgradeFixturesDecode(t *testing.T) {
+	var none struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+	}
+	readFixture(t, "upgrade_get_none.json", &none)
+	if none.Error != "not_found" || !strings.Contains(none.Reason, "never had a rollout") {
+		t.Errorf("no rollout = %+v", none)
+	}
+
+	var denied struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+		Hint   string `json:"hint"`
+	}
+	readFixture(t, "upgrade_allow_downtime.json", &denied)
+	if denied.Error != "needs_allow_downtime" || denied.Reason == "" || denied.Hint == "" {
+		t.Errorf("allow-downtime refusal = %+v", denied)
+	}
+
+	for name, want := range map[string]string{
+		"upgrade_status_running.json":      "running",
+		"upgrade_status_done.json":         "done",
+		"upgrade_status_rolling_back.json": "rolling-back",
+		"upgrade_status_rolled_back.json":  "rolled-back",
+	} {
+		var r aerolvm.UpgradeRollout
+		readFixture(t, name, &r)
+		if r.State != want || r.TargetVersion != "v0.7.1" || r.PreviousVersion != "v0.7.0" || len(r.Nodes) != 2 {
+			t.Errorf("%s = %+v", name, r)
+		}
+	}
+}

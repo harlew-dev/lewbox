@@ -163,8 +163,8 @@ A Lewbox cluster is one AerolVM cluster. A single machine is a one-node cluster 
 | `lewbox cluster update <slug> [--endpoint-url …] [--admin-url …] [--admin-token-stdin] [--name …]` | Changes endpoints, or rotates the admin token | `PATCH /v0/clusters/{cluster}` | 📋 |
 | `lewbox cluster remove <slug>` | Unregisters the cluster. It refuses while workspaces are entitled to it, unless you pass `--force`. Nothing on the cluster is changed | `DELETE /v0/clusters/{cluster}` | ✅ (no `--force` check for workspaces yet: there are none) |
 | `lewbox cluster join-command <slug> [--role worker\|ingress\|server\|mixed] [--ttl 2h] [--reusable]` | Prints the `install.sh … join` line for a machine that won't run the Lewbox CLI. It wraps `aerolvm join-command` | `POST /v0/clusters/{cluster}/join-tokens` | ✅ |
-| `lewbox cluster upgrade <slug> [--version <tag>] [--batch <n\|n%>] [--pause-after <n>]` | Rolling AerolVM upgrade of every node. The default is the version this Lewbox release is tested with | `POST /v0/clusters/{cluster}/upgrade` | 📋 |
-| `lewbox cluster upgrade status\|pause\|resume\|rollback <slug>` | | `/v0/clusters/{cluster}/upgrade` | 📋 |
+| `lewbox cluster upgrade <slug> [--version <tag>] [--batch <n\|n%>] [--pause-after <n>] [--hold] [--allow-downtime] [--check] [--yes]` | Rolling AerolVM upgrade of every node. The default is the version this Lewbox release is tested with | `POST /v0/clusters/{cluster}/upgrade` (plan: `GET …/upgrade/plan`) | ✅ |
+| `lewbox cluster upgrade status\|stop\|resume\|rollback\|finalize <slug>` | The rollout's progress and the commands that pause, go on, undo or finish it | `GET /v0/clusters/{cluster}/upgrade`, `POST …/upgrade/{stop,resume,rollback,finalize}` | ✅ |
 
 ### Nodes
 

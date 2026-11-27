@@ -88,11 +88,15 @@ func New(baseURL, token string, opts ...Option) *Client {
 	return c
 }
 
-// APIError is a non-2xx answer. Message is the API's reason when it gives
-// one, otherwise its error code or the raw body.
+// APIError is a non-2xx answer. Code is the API's machine-readable error
+// code when it gives one, and Message its reason (or the code, or the raw
+// body). Hint is the one command the API suggests next, for the upgrade
+// routes.
 type APIError struct {
 	Status  int
+	Code    string
 	Message string
+	Hint    string
 }
 
 func (e *APIError) Error() string {
@@ -159,6 +163,57 @@ func (c *Client) NodeCertExpiry(ctx context.Context) (time.Time, bool, error) {
 		return time.Unix(int64(seconds), 0).UTC(), true, nil
 	}
 	return time.Time{}, false, nil
+}
+
+// UpgradeStatus calls GET /v1/cluster/upgrade. A cluster that never had a
+// rollout answers 404 and returns ErrNoRollout.
+func (c *Client) UpgradeStatus(ctx context.Context) (UpgradeRollout, error) {
+	var out UpgradeRollout
+	err := c.do(ctx, http.MethodGet, "/v1/cluster/upgrade", nil, &out, true)
+	if isNoRollout(err) {
+		return out, ErrNoRollout
+	}
+	return out, err
+}
+
+// StartUpgrade calls POST /v1/cluster/upgrade and returns the rollout it
+// created or matched.
+func (c *Client) StartUpgrade(ctx context.Context, req UpgradeApplyRequest) (UpgradeRollout, error) {
+	var out UpgradeRollout
+	err := c.do(ctx, http.MethodPost, "/v1/cluster/upgrade", req, &out, true)
+	return out, err
+}
+
+// StopUpgrade calls POST /v1/cluster/upgrade/stop.
+func (c *Client) StopUpgrade(ctx context.Context) (UpgradeRollout, error) {
+	return c.upgradeCommand(ctx, "stop")
+}
+
+// ResumeUpgrade calls POST /v1/cluster/upgrade/resume.
+func (c *Client) ResumeUpgrade(ctx context.Context) (UpgradeRollout, error) {
+	return c.upgradeCommand(ctx, "resume")
+}
+
+// RollbackUpgrade calls POST /v1/cluster/upgrade/rollback.
+func (c *Client) RollbackUpgrade(ctx context.Context) (UpgradeRollout, error) {
+	return c.upgradeCommand(ctx, "rollback")
+}
+
+// FinalizeUpgrade calls POST /v1/cluster/upgrade/finalize.
+func (c *Client) FinalizeUpgrade(ctx context.Context) (UpgradeRollout, error) {
+	return c.upgradeCommand(ctx, "finalize")
+}
+
+func (c *Client) upgradeCommand(ctx context.Context, command string) (UpgradeRollout, error) {
+	var out UpgradeRollout
+	err := c.do(ctx, http.MethodPost, "/v1/cluster/upgrade/"+command, nil, &out, true)
+	return out, err
+}
+
+// isNoRollout reports the 404 that means the cluster never upgraded.
+func isNoRollout(err error) bool {
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr.Status == http.StatusNotFound
 }
 
 // CreateToken calls POST /v1/tokens.
@@ -444,9 +499,11 @@ func parseAPIError(status int, body []byte) *APIError {
 	var payload struct {
 		Error  string `json:"error"`
 		Reason string `json:"reason"`
+		Hint   string `json:"hint"`
 	}
-	msg := ""
+	msg, code := "", ""
 	if json.Unmarshal(body, &payload) == nil {
+		code = payload.Error
 		if payload.Reason != "" {
 			msg = payload.Reason
 		} else {
@@ -462,5 +519,5 @@ func parseAPIError(status int, body []byte) *APIError {
 	if msg == "" {
 		msg = http.StatusText(status)
 	}
-	return &APIError{Status: status, Message: msg}
+	return &APIError{Status: status, Code: code, Message: msg, Hint: payload.Hint}
 }

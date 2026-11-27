@@ -188,7 +188,15 @@ After replacing itself, the CLI **runs the new binary** for this part. That way 
 
 ### 4.3 A whole cluster: `lewbox cluster upgrade`
 
-Planned. This is run from anywhere, not on a node. The orchestrator starts AerolVM's own rolling upgrade, which is what `aerolvm upgrade plan|apply|status|stop|resume|rollback` drives, using the cluster's admin token. The routes are `GET/POST /v1/cluster/upgrade` plus `…/stop`, `…/resume`, `…/finalize` and `…/rollback`; `GET` answers 404 `this cluster never had a rollout` before the first one. `--batch` and `--pause-after` are passed through. `cluster upgrade status` follows it.
+**Built.** This is run from anywhere, not on a node. The orchestrator starts AerolVM's own rolling upgrade, which is what `aerolvm upgrade plan|apply|status|stop|resume|rollback|finalize` drives, using the cluster's admin token. The routes are `GET/POST /v1/cluster/upgrade` plus `…/stop`, `…/resume`, `…/finalize` and `…/rollback`; `GET` answers 404 `this cluster never had a rollout` before the first one. `--batch`, `--pause-after` and `--hold` are passed through. `cluster upgrade status` follows it, and `stop`, `resume`, `rollback` and `finalize` drive the rest.
+
+AerolVM has no server-side planning route in v0.7.0: `aerolvm upgrade plan` computes its output in the CLI from `GET /v1/cluster/members` and the target's `release.json`. Lewbox does the same in `PlanClusterUpgrade`, and exposes it as `GET /v0/clusters/{cluster}/upgrade/plan` so the console and `--check` show the same plan. The plan's node order, tiers, worker batches, skew, one-way migrations and warnings follow the v0.7.0 CLI's rules. `upgrade_from_min` and a downgrade are refusals; a release without a readable `release.json` is a refusal too, so nothing starts from a plan Lewbox could not check.
+
+**Checksums (verified 2026-11-27 in v0.7.0's source).** The API path does **not** read `checksums.txt`: `POST /v1/cluster/upgrade` takes `files: {name → sha256}` from the caller. Every node checks the bytes it downloads or copies against that hash before installing them (`nodeupgrade.FileStore.Put`, `Materialize`), and an uploaded file is also checked against its `{sha256}` path. The trust anchor for *which* hashes are right is the caller: the `aerolvm` CLI downloads `checksums.txt`, picks the files and sends them. Lewbox therefore does the CLI's part before every start and plan: it fetches `checksums.txt` and `release.json` from the release URL over HTTPS, checks `release.json` against its line, and pins `checksums.txt` for `PinnedVersion` (so a mirror cannot substitute its own hashes). It fails closed on anything missing or malformed. `sbom.cdx.json` and the SLSA provenance are not verified yet.
+
+AerolVM's raw rollout is mapped into Lewbox's own response (`ClusterUpgrade`): the overall phase, direction and target, and each node's name, role, from/to version and state. Unknown states become `unknown`; raw JSON is never passed through. Every start, stop, resume, rollback and finalize records one audit event (`cluster.upgrade.started` and so on). The calls to AerolVM happen outside the transaction.
+
+`update --aerolvm` already refuses a node in a cluster of more than one and points at `lewbox cluster upgrade <slug>`.
 
 ---
 
@@ -210,6 +218,7 @@ AerolVM stays installed on the machine. To use it again, run `sudo sandboxd rese
 
 - **Secrets on the command line can be seen.** `install.sh` takes the DNS token (`--dns-api-token`) and the join token (`--token`) as arguments, so other local users can see them in `ps` while the installer runs. Lewbox reads both from stdin or the API, but it can't avoid this hand-off. The join token is single use and lasts 15 minutes, which limits the damage. Ask upstream for `--dns-api-token-file` and `--token-file` (add them to MVP §17).
 - **No pipe-to-bash.** Lewbox downloads a pinned installer and checks its hash. It never runs `curl | sudo bash`.
+- **The upgrade API trusts the caller's checksums.** `POST /v1/cluster/upgrade` carries a `files` map of name → SHA-256; each node checks the bytes it installs against that hash, but the server never reads `checksums.txt`. Lewbox fetches the release's `checksums.txt` and `release.json` over HTTPS, pins `checksums.txt` for the tested version, and only then sends the hashes (§4.3). Never pass a caller-supplied file list straight to AerolVM.
 - **The PAT stays on the host.** It is read from the root-only env file, used once over loopback and never stored by Lewbox. `--pat-scope host` keeps it off the network.
 - **Join tokens are fleet power.** Only owners and admins can get one. It is minted for one join, never written to disk by Lewbox, and never logged.
 
@@ -219,7 +228,7 @@ AerolVM stays installed on the machine. To use it again, run `sudo sandboxd rese
 
 1. **Which AerolVM version to pin:** v0.7.0, released 2026-11-10 and the latest on GitHub. Its `install.sh` SHA-256 is `0305d18cb86ef06b11dd6b3cc40f91f8caa6abc8b5975895231ff894b9848d33`.
 2. **Checksum for `install.sh`:** the release's `checksums.txt` lists it, so other versions are verified against upstream.
-3. **Routes behind `aerolvm upgrade`:** found (§4.3); not used yet.
+3. **Routes behind `aerolvm upgrade`:** found and used (§4.3); the plan is computed by Lewbox because v0.7.0 has no server-side plan route.
 4. **Are installer edits kept?** Lewbox no longer edits the installer's files; it uses its own env file and systemd drop-in (§3.1).
 5. **Can a node that booted alone join later?** It can become a seed (`sandboxd init`) but not join. Starting every node with `init` covers both.
 

@@ -32,6 +32,9 @@ compose() { "$HERE/dev.sh" compose "$@"; }
 lb() { local n="$1"; shift; compose exec -T -u lewbox "$n" lewbox "$@"; }
 API="http://127.0.0.1:${LEWBOX_DEV_PORT:-8080}"
 CLUSTER="${LEWBOX_DEV_CLUSTER:-lab}"
+# The release the rolling-upgrade step moves to; it must be a published v0.7.x
+# newer than the cluster's v0.7.0 (nodes download it from SB_RELEASE_URL).
+UPGRADE_VERSION="${LEWBOX_DEV_UPGRADE_VERSION:-v0.7.1}"
 STEP=0
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
@@ -201,6 +204,91 @@ compose exec -T node-1 systemctl start sandboxd
 compose exec -T node-2 systemctl start sandboxd
 for i in $(seq 60); do c=$(lb node-1 cluster check "$CLUSTER" --json 2>/dev/null || true); jq -e '.status == "ready"' >/dev/null <<<"$c" 2>/dev/null && break; sleep 2; done
 expect "ready again" '.status == "ready"' "$c"
+
+step "a rolling AerolVM upgrade keeps a running sandbox, Lewbox's files and identity, then rolls back"
+# One sandbox stays running across both node restarts.
+s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' \
+	http://127.0.0.1:21202/v1/sandboxes -d "{\"name\":\"e2e-upgrade\",\"image\":\"alpine:3.20\",\"runtime\":\"$RUNTIME\"}")
+expect "sandbox e2e-upgrade started before the upgrade" '.status == "started"' "$s"
+up_id=$(jq -r .id <<<"$s")
+
+# --check shows the plan and starts nothing.
+out=$(lb node-1 cluster upgrade "$CLUSTER" --version "$UPGRADE_VERSION" --check --json) || fail "cluster upgrade --check"
+expect "the plan is allowed and untested" '.allowed and (.tested | not) and .target_version == "'"$UPGRADE_VERSION"'"' "$out"
+expect "the plan has both nodes" '.nodes | length == 2' "$out"
+if lb node-1 cluster upgrade status "$CLUSTER" --json >/dev/null 2>&1; then fail "--check created a rollout"; else pass "--check changed nothing"; fi
+
+# Two mixed nodes are two voters, so the API is down while each restarts.
+out=$(lb node-1 cluster upgrade "$CLUSTER" --version "$UPGRADE_VERSION" --allow-downtime --hold --yes --json) \
+	|| fail "cluster upgrade"
+expect "the rollout started" '(.phase == "staging" or .phase == "running") and .target_version == "'"$UPGRADE_VERSION"'"' "$out"
+phase() { lb node-1 cluster upgrade status "$CLUSTER" --json 2>/dev/null | jq -r '.phase' || true; }
+wait_phase() {
+	local want="$1"
+	for i in $(seq 300); do [[ $(phase) == "$want" ]] && return 0; sleep 2; done
+	echo "last status: $(lb node-1 cluster upgrade status "$CLUSTER" --json 2>&1 || true)" >&2
+	return 1
+}
+wait_phase done || fail "the rollout did not reach done"
+pass "both nodes moved to $UPGRADE_VERSION (held at done)"
+
+c=$(lb node-1 cluster check "$CLUSTER" --json)
+expect "cluster check passes on the new version" ".status == \"ready\" and .version == \"$UPGRADE_VERSION\"" "$c"
+expect "both nodes report $UPGRADE_VERSION" "[.node_list[] | select(.version == \"$UPGRADE_VERSION\")] | length == 2" "$c"
+curl -fsS -H "Authorization: Bearer $runner" "http://127.0.0.1:21202/v1/sandboxes/$up_id" | jq -e '.status == "started"' >/dev/null \
+	&& pass "sandbox survived the upgrade" || fail "sandbox did not survive the upgrade"
+for n in node-1 node-2; do
+	compose exec -T "$n" grep -qx SB_IDENTITY_ENABLED=true /etc/sandboxd/lewbox.env && pass "$n identity still on" || fail "$n identity after upgrade"
+	compose exec -T "$n" grep -Fqx "runtimes: [$RUNTIME]" /etc/sandboxd/lewbox-create-policy.yaml && pass "$n create policy still in place" || fail "$n create policy after upgrade"
+	compose exec -T "$n" test -f /etc/systemd/system/sandboxd.service.d/lewbox.conf && pass "$n drop-in still in place" || fail "$n drop-in after upgrade"
+done
+# A token write needs the leader. Try each node's own PAT until one answers.
+created=""
+for n in node-1 node-2; do
+	pat=$(compose exec -T "$n" sh -c "grep ^SB_PAT_TOKEN= /etc/sandboxd/sandboxd.env | cut -d= -f2")
+	for i in $(seq 30); do
+		code=$(compose exec -T "$n" curl -s -o /dev/null -w '%{http_code}' -X POST \
+			-H "Authorization: Bearer $pat" -H 'Content-Type: application/json' \
+			http://127.0.0.1:21212/v1/tokens \
+			-d '{"name":"e2e-after-upgrade","role":"admin","team":"*","expires_in":"1d"}')
+		[[ $code == 201 ]] && { created="$n"; break; }
+		sleep 2
+	done
+	[[ -n $created ]] && break
+done
+[[ -n $created ]] && pass "a token write succeeds after the upgrade ($created is leader)" || fail "no token write succeeded after the upgrade"
+# AerolVM v0.7.1 re-renders node.json with ingress_proxy_routing "auto", and
+# its host apply then passes "auto" to install.sh as a value, which v0.7.1
+# refuses. A later upgrade or rollback on an IP-mode node would fail there.
+# Pin the (already off) setting to false for the rest of the run.
+for n in node-1 node-2; do
+	compose exec -T "$n" sed -i 's/"ingress_proxy_routing": "auto"/"ingress_proxy_routing": false/' /etc/sandboxd/node.json
+done
+
+out=$(lb node-1 cluster upgrade rollback "$CLUSTER" --yes --json) || fail "rollback after a held upgrade"
+expect "rollback was accepted" '.direction == "rollback"' "$out"
+wait_phase rolled_back || fail "the rollout did not reach rolled_back"
+c=$(lb node-1 cluster check "$CLUSTER" --json)
+expect "the cluster is back on v0.7.0" '.status == "ready" and .version == "v0.7.0"' "$c"
+curl -fsS -H "Authorization: Bearer $runner" "http://127.0.0.1:21202/v1/sandboxes/$up_id" | jq -e '.status == "started"' >/dev/null \
+	&& pass "sandbox survived the rollback" || fail "sandbox did not survive the rollback"
+# The rollback's install.sh derived "auto" again; pin it for the next upgrade.
+for n in node-1 node-2; do
+	compose exec -T "$n" sed -i 's/"ingress_proxy_routing": "auto"/"ingress_proxy_routing": false/' /etc/sandboxd/node.json
+done
+
+# Start once more and stop it: the nodes in progress finish, no more start.
+out=$(lb node-1 cluster upgrade "$CLUSTER" --version "$UPGRADE_VERSION" --allow-downtime --yes --json) || fail "second cluster upgrade"
+expect "the second rollout started" '(.phase == "staging" or .phase == "running")' "$out"
+lb node-1 cluster upgrade stop "$CLUSTER" --json >/dev/null || fail "cluster upgrade stop"
+wait_phase stopped || fail "the rollout did not reach stopped"
+pass "stop left the rollout stopped"
+# Restore v0.7.0 for the rest of the run (a stop may have restarted one node).
+lb node-1 cluster upgrade rollback "$CLUSTER" --yes --json >/dev/null || fail "rollback after stop"
+wait_phase rolled_back || fail "the stopped rollout did not roll back"
+c=$(lb node-1 cluster check "$CLUSTER" --json)
+expect "cluster is ready on v0.7.0 after the stop test" '.status == "ready" and .version == "v0.7.0"' "$c"
+curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$up_id" || true
 
 step "destructive commands want --yes"
 if lb node-1 node remove node-2 >/dev/null 2>&1; then fail "remove without --yes was allowed"; else pass "remove without --yes refused"; fi

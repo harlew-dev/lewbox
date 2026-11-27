@@ -14,9 +14,10 @@ CLUSTER="${LEWBOX_DEV_CLUSTER:-lab}"
 # cluster and e2e sets it; e2e.sh, customers.sh and archives.sh read it.
 RUNTIME="${LEWBOX_DEV_RUNTIME:-docker}"
 
-# LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" makes the nodes forward outside lookups to
-# those servers instead of the host's resolver, for networks whose resolver
-# fails on some names (the AerolVM installer needs archive.ubuntu.com).
+# LEWBOX_DEV_DNS="1.1.1.1 8.8.8.8" makes the containers forward outside
+# lookups to those servers instead of the host's resolver, for networks whose
+# resolver fails on some names (the AerolVM installer needs
+# archive.ubuntu.com, and the rolling upgrade reads GitHub for the release).
 # Container names still resolve through Docker's embedded DNS.
 compose() {
 	local files=(-f "$HERE/compose.yaml")
@@ -25,7 +26,7 @@ compose() {
 		mkdir -p "$HERE/.cache"
 		{
 			echo "services:"
-			for s in node-1 node-2 node-3; do
+			for s in orchestrator node-1 node-2 node-3; do
 				echo "  $s:"
 				echo "    dns:"
 				for d in $LEWBOX_DEV_DNS; do echo "      - $d"; done
@@ -119,7 +120,12 @@ login() {
 }
 
 # install <node> installs AerolVM on a node in IP mode.
-install() { lb "$1" install --public-host "$(node_ip "$1")" --runtime "$RUNTIME" --yes; }
+# --no-ingress-proxy-routing is saved as false instead of the derived "auto".
+# AerolVM v0.7.x's host apply (upgrade) passes "auto" to install.sh as if it
+# were a value, which v0.7.1..v0.7.7 refuse; an IP-mode node has routing off
+# either way, so this avoids that upstream bug in the e2e. Domain-mode nodes
+# save true and are unaffected.
+install() { lb "$1" install --public-host "$(node_ip "$1")" --runtime "$RUNTIME" --yes -- --no-ingress-proxy-routing; }
 
 # The whole flow from docs/clusters/start-a-cluster.md: node-1 starts a cluster,
 # the other nodes join it.

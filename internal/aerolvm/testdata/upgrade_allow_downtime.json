@@ -1,0 +1,1 @@
+{"error":"needs_allow_downtime","reason":"this cluster has two Raft voters: while either one restarts, one of two is up, which is no majority, so the API is down for each server restart (sandboxes keep running)","hint":"apply again with allow_downtime (aerolvm upgrade apply --allow-downtime)"}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,7 @@ type Service struct {
 	keyring        *secrets.Keyring
 	csrfKey        []byte
 	aerolvmOptions []aerolvm.Option
+	aerolvmRelease string
 	cloudflareURL  string
 
 	limiter       *loginLimiter
@@ -94,6 +96,13 @@ func WithAerolVMOptions(opts ...aerolvm.Option) Option {
 // such as a test server. An empty u keeps Cloudflare's API.
 func WithCloudflareURL(u string) Option {
 	return func(s *Service) { s.cloudflareURL = u }
+}
+
+// WithAerolVMReleaseURL reads AerolVM releases from u instead of GitHub's
+// release download base, for a mirror or a test. The pinned release is still
+// checked against the checksums hash built into this binary.
+func WithAerolVMReleaseURL(u string) Option {
+	return func(s *Service) { s.aerolvmRelease = strings.TrimSpace(u) }
 }
 
 // WithClock replaces the service's clock, which tests use for fixed times.

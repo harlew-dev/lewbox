@@ -41,6 +41,13 @@ type Backend interface {
 	ResolveCluster(ctx context.Context, ref string) (service.Cluster, error)
 	CreateJoinToken(ctx context.Context, ref string, req service.JoinTokenRequest) (service.JoinToken, error)
 	ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error)
+	GetClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error)
+	PlanClusterUpgrade(ctx context.Context, ref string, req service.PlanClusterUpgradeRequest) (service.ClusterUpgradePlan, error)
+	StartClusterUpgrade(ctx context.Context, ref string, req service.StartClusterUpgradeRequest) (service.ClusterUpgrade, error)
+	StopClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error)
+	ResumeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error)
+	RollbackClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error)
+	FinalizeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error)
 
 	AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error)
 	ListNodes(ctx context.Context, req service.ListNodesRequest) (service.NodeList, error)
@@ -251,6 +258,41 @@ func (l Local) CreateJoinToken(ctx context.Context, ref string, req service.Join
 // profiles' secrets.
 func (l Local) ClusterNodeSettings(ctx context.Context, ref string) (service.NodeSettings, error) {
 	return l.Svc.ClusterNodeSettings(l.withPrincipal(ctx), ref)
+}
+
+// GetClusterUpgrade returns the cluster's current rollout.
+func (l Local) GetClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return l.Svc.GetClusterUpgrade(l.withPrincipal(ctx), ref)
+}
+
+// PlanClusterUpgrade says what an upgrade would do, and changes nothing.
+func (l Local) PlanClusterUpgrade(ctx context.Context, ref string, req service.PlanClusterUpgradeRequest) (service.ClusterUpgradePlan, error) {
+	return l.Svc.PlanClusterUpgrade(l.withPrincipal(ctx), ref, req)
+}
+
+// StartClusterUpgrade starts a rolling upgrade.
+func (l Local) StartClusterUpgrade(ctx context.Context, ref string, req service.StartClusterUpgradeRequest) (service.ClusterUpgrade, error) {
+	return l.Svc.StartClusterUpgrade(l.withPrincipal(ctx), ref, req)
+}
+
+// StopClusterUpgrade finishes the nodes in progress and starts no more.
+func (l Local) StopClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return l.Svc.StopClusterUpgrade(l.withPrincipal(ctx), ref)
+}
+
+// ResumeClusterUpgrade goes on after a pause.
+func (l Local) ResumeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return l.Svc.ResumeClusterUpgrade(l.withPrincipal(ctx), ref)
+}
+
+// RollbackClusterUpgrade puts every node back on the previous version.
+func (l Local) RollbackClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return l.Svc.RollbackClusterUpgrade(l.withPrincipal(ctx), ref)
+}
+
+// FinalizeClusterUpgrade turns the new version on for good.
+func (l Local) FinalizeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return l.Svc.FinalizeClusterUpgrade(l.withPrincipal(ctx), ref)
 }
 
 // AddNode registers a node.

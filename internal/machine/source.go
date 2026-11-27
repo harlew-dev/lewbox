@@ -15,11 +15,13 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/harlew-dev/lewbox/internal/aerolvm"
 )
 
 const (
 	// PinnedVersion is the AerolVM version this Lewbox release was tested with.
-	PinnedVersion = "v0.7.0"
+	PinnedVersion = aerolvm.PinnedVersion
 	// PinnedInstallSHA256 is the checksum of that release's install.sh.
 	PinnedInstallSHA256 = "0305d18cb86ef06b11dd6b3cc40f91f8caa6abc8b5975895231ff894b9848d33"
 	// ReleaseBaseURL is where AerolVM publishes its installer and binaries.

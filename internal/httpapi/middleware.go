@@ -253,6 +253,7 @@ var queryAllowLists = map[string][]string{
 	"DELETE " + Prefix + "/clusters/{cluster}":           {"force"},
 	"GET " + Prefix + "/clusters/{cluster}/health":       {"days"},
 	"GET " + Prefix + "/clusters/{cluster}/metrics":      {"range"},
+	"GET " + Prefix + "/clusters/{cluster}/upgrade/plan": {"version", "batch", "pause_after"},
 	"GET " + Prefix + "/clusters/resolve":                {"cluster"},
 	"GET " + Prefix + "/events":                          {"before", "actor", "organization", "action", "from", "to", "limit"},
 	"GET " + Prefix + "/members":                         {"role", "page", "per_page", "q", "sort"},

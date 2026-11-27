@@ -185,7 +185,8 @@ func (a *app) service(ctx context.Context) (*service.Service, error) {
 		return nil, err
 	}
 	a.svc = service.New(conn, service.WithKeyring(keyring),
-		service.WithCloudflareURL(os.Getenv("LEWBOX_CLOUDFLARE_API_URL")))
+		service.WithCloudflareURL(os.Getenv("LEWBOX_CLOUDFLARE_API_URL")),
+		service.WithAerolVMReleaseURL(os.Getenv("LEWBOX_AEROLVM_RELEASE_URL")))
 	return a.svc, nil
 }
 
@@ -861,7 +862,7 @@ func newClusterCmd(a *app) *cobra.Command {
 	}
 	metrics.Flags().StringVar(&metricsRange, "range", "24h", "24h, 7d or 30d")
 
-	cluster.AddCommand(add, list, get, check, set, health, metrics, remove, joinCommand, nodeSettings)
+	cluster.AddCommand(add, list, get, check, set, health, metrics, remove, joinCommand, nodeSettings, newClusterUpgradeCmd(a))
 	return cluster
 }
 

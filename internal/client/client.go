@@ -304,6 +304,63 @@ func (c *Client) ClusterNodeSettings(ctx context.Context, ref string) (service.N
 	return out, err
 }
 
+// GetClusterUpgrade returns the cluster's current rollout.
+func (c *Client) GetClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	var out service.ClusterUpgrade
+	err := c.do(ctx, http.MethodGet, "/v0/clusters/"+url.PathEscape(ref)+"/upgrade", nil, &out, defaultTimeout)
+	return out, err
+}
+
+// PlanClusterUpgrade says what an upgrade would do, and changes nothing.
+func (c *Client) PlanClusterUpgrade(ctx context.Context, ref string, req service.PlanClusterUpgradeRequest) (service.ClusterUpgradePlan, error) {
+	query := url.Values{}
+	if req.Version != "" {
+		query.Set("version", req.Version)
+	}
+	if req.Batch != "" {
+		query.Set("batch", req.Batch)
+	}
+	if req.PauseAfter > 0 {
+		query.Set("pause_after", strconv.Itoa(req.PauseAfter))
+	}
+	var out service.ClusterUpgradePlan
+	err := c.do(ctx, http.MethodGet, withQuery("/v0/clusters/"+url.PathEscape(ref)+"/upgrade/plan", query), nil, &out, longTimeout)
+	return out, err
+}
+
+// StartClusterUpgrade starts a rolling upgrade.
+func (c *Client) StartClusterUpgrade(ctx context.Context, ref string, req service.StartClusterUpgradeRequest) (service.ClusterUpgrade, error) {
+	var out service.ClusterUpgrade
+	err := c.do(ctx, http.MethodPost, "/v0/clusters/"+url.PathEscape(ref)+"/upgrade", req, &out, longTimeout)
+	return out, err
+}
+
+// StopClusterUpgrade finishes the nodes in progress and starts no more.
+func (c *Client) StopClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return c.upgradeCommand(ctx, ref, "stop")
+}
+
+// ResumeClusterUpgrade goes on after a pause.
+func (c *Client) ResumeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return c.upgradeCommand(ctx, ref, "resume")
+}
+
+// RollbackClusterUpgrade puts every node back on the previous version.
+func (c *Client) RollbackClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return c.upgradeCommand(ctx, ref, "rollback")
+}
+
+// FinalizeClusterUpgrade turns the new version on for good.
+func (c *Client) FinalizeClusterUpgrade(ctx context.Context, ref string) (service.ClusterUpgrade, error) {
+	return c.upgradeCommand(ctx, ref, "finalize")
+}
+
+func (c *Client) upgradeCommand(ctx context.Context, ref, command string) (service.ClusterUpgrade, error) {
+	var out service.ClusterUpgrade
+	err := c.do(ctx, http.MethodPost, "/v0/clusters/"+url.PathEscape(ref)+"/upgrade/"+command, nil, &out, longTimeout)
+	return out, err
+}
+
 // AddNode registers a node.
 func (c *Client) AddNode(ctx context.Context, req service.AddNodeRequest) (service.Node, error) {
 	var out service.Node

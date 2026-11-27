@@ -2,6 +2,11 @@ Real responses from AerolVM v0.7.0, captured 2026-11-11 from a two-node
 cluster (`proto-a` leader, `proto-b` joined) running in Docker. Secrets are
 replaced with `REDACTED`.
 
+The `upgrade_*` files were captured 2026-11-27 from another two-node
+`mixed` v0.7.0 cluster in Docker while it rolled to v0.7.1 (the response
+shapes are the same on v0.7.0). `created_at`/`updated_at` and node IDs are
+the dev cluster's; the caller is a token ID, not the token.
+
 | File | Request | Status |
 |---|---|---|
 | `health.json` | `GET /health` (no auth) | 200 |
@@ -12,6 +17,12 @@ replaced with `REDACTED`.
 | `tokens_list.json` | `GET /v1/tokens` | 200 |
 | `join_token_create.json` | `POST /v1/cluster/join-tokens {"role":"server","ttl":"15m"}` | 201 |
 | `err_unauthorized.json` | any route with a bad token | 401 |
+| `upgrade_get_none.json` | `GET /v1/cluster/upgrade` on a cluster that never upgraded | 404 |
+| `upgrade_allow_downtime.json` | `POST /v1/cluster/upgrade` on a two-voter cluster without `allow_downtime` | 409 |
+| `upgrade_status_running.json` | `GET /v1/cluster/upgrade` while nodes restart | 200 |
+| `upgrade_status_done.json` | `GET /v1/cluster/upgrade` at `done` (started with `hold`) | 200 |
+| `upgrade_status_rolling_back.json` | `GET /v1/cluster/upgrade` after `rollback` | 200 |
+| `upgrade_status_rolled_back.json` | `GET /v1/cluster/upgrade` at `rolled-back` | 200 |
 
 Other answers seen, not saved as files:
 

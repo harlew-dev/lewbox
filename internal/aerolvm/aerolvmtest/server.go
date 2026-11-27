@@ -55,6 +55,9 @@ type Server struct {
 	quotas       map[string]aerolvm.TeamQuota
 	quotaPushes  map[string][]aerolvm.TeamQuota
 	quotaDeletes map[string]int
+
+	rollout        *aerolvm.UpgradeRollout
+	upgradeApplies []aerolvm.UpgradeApplyRequest
 }
 
 type failure struct {
@@ -355,6 +358,12 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/snapshots/{name}", s.handleGetSnapshot)
 	mux.HandleFunc("DELETE /v1/snapshots/{name}", s.handleDeleteSnapshot)
 	mux.HandleFunc("GET /v1/cluster/sandbox-index", s.handleSandboxIndex)
+	mux.HandleFunc("GET /v1/cluster/upgrade", s.handleUpgradeStatus)
+	mux.HandleFunc("POST /v1/cluster/upgrade", s.handleUpgradeStart)
+	mux.HandleFunc("POST /v1/cluster/upgrade/stop", s.handleUpgradeCommand("stop"))
+	mux.HandleFunc("POST /v1/cluster/upgrade/resume", s.handleUpgradeCommand("resume"))
+	mux.HandleFunc("POST /v1/cluster/upgrade/rollback", s.handleUpgradeCommand("rollback"))
+	mux.HandleFunc("POST /v1/cluster/upgrade/finalize", s.handleUpgradeCommand("finalize"))
 	mux.HandleFunc("GET /v1/teams/{team}/quota", s.handleGetTeamQuota)
 	mux.HandleFunc("PUT /v1/teams/{team}/quota", s.handlePutTeamQuota)
 	mux.HandleFunc("DELETE /v1/teams/{team}/quota", s.handleDeleteTeamQuota)
@@ -1024,6 +1033,146 @@ func (s *Server) handleDeleteTeamQuota(w http.ResponseWriter, r *http.Request) {
 	s.quotaDeletes[team]++
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetUpgrade replaces the fake's current rollout. Nil means the cluster
+// never upgraded.
+func (s *Server) SetUpgrade(r *aerolvm.UpgradeRollout) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r == nil {
+		s.rollout = nil
+		return
+	}
+	c := *r
+	c.Nodes = append([]aerolvm.UpgradeNode(nil), r.Nodes...)
+	s.rollout = &c
+}
+
+// Upgrade returns the fake's current rollout, if any.
+func (s *Server) Upgrade() (aerolvm.UpgradeRollout, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.rollout == nil {
+		return aerolvm.UpgradeRollout{}, false
+	}
+	c := *s.rollout
+	c.Nodes = append([]aerolvm.UpgradeNode(nil), s.rollout.Nodes...)
+	return c, true
+}
+
+// UpgradeApplies returns every apply request the fake received.
+func (s *Server) UpgradeApplies() []aerolvm.UpgradeApplyRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]aerolvm.UpgradeApplyRequest(nil), s.upgradeApplies...)
+}
+
+func (s *Server) handleUpgradeStatus(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	r := s.rollout
+	var out aerolvm.UpgradeRollout
+	if r != nil {
+		out = *r
+		out.Nodes = append([]aerolvm.UpgradeNode(nil), r.Nodes...)
+	}
+	s.mu.Unlock()
+	if r == nil {
+		s.writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "not_found", "reason": "this cluster never had a rollout",
+		})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleUpgradeStart(w http.ResponseWriter, r *http.Request) {
+	var req aerolvm.UpgradeApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	s.mu.Lock()
+	voters := 0
+	for _, m := range s.members {
+		if m.Voter {
+			voters++
+		}
+	}
+	if voters < 3 && !req.AllowDowntime {
+		s.mu.Unlock()
+		s.writeJSON(w, http.StatusConflict, map[string]string{
+			"error":  "needs_allow_downtime",
+			"reason": "this cluster has two Raft voters: while either one restarts, one of two is up, which is no majority",
+			"hint":   "apply again with allow_downtime",
+		})
+		return
+	}
+	if s.rollout != nil && s.rollout.TargetVersion == req.Version &&
+		s.rollout.State != aerolvm.UpgradeStateFinalized && s.rollout.State != aerolvm.UpgradeStateRolledBack {
+		out := *s.rollout
+		out.Nodes = append([]aerolvm.UpgradeNode(nil), s.rollout.Nodes...)
+		s.mu.Unlock()
+		s.writeJSON(w, http.StatusOK, out)
+		return
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	out := aerolvm.UpgradeRollout{
+		ID: "r-test", State: aerolvm.UpgradeStateRunning, Direction: aerolvm.UpgradeDirectionUpgrade,
+		TargetVersion: req.Version, Source: req.Source, Hold: req.Hold, Batch: req.Batch,
+		PauseAfter: req.PauseAfter, AllowDowntime: req.AllowDowntime,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	for i, m := range s.members {
+		if out.PreviousVersion == "" {
+			out.PreviousVersion = m.Version
+		}
+		n := aerolvm.UpgradeNode{
+			NodeID: m.NodeID, Role: m.Role, State: aerolvm.UpgradeNodePending,
+			Version: m.Version, Order: i + 1, UpdatedAt: now,
+		}
+		if m.Version == req.Version {
+			n.State = aerolvm.UpgradeNodeDone
+		}
+		out.Nodes = append(out.Nodes, n)
+	}
+	s.rollout = &out
+	s.upgradeApplies = append(s.upgradeApplies, req)
+	s.mu.Unlock()
+	s.writeJSON(w, http.StatusCreated, out)
+}
+
+func (s *Server) handleUpgradeCommand(command string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		if s.rollout == nil {
+			s.mu.Unlock()
+			s.writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "not_found", "reason": "this cluster never had a rollout",
+			})
+			return
+		}
+		state, direction := s.rollout.State, s.rollout.Direction
+		switch command {
+		case "stop":
+			state = aerolvm.UpgradeStateStopped
+		case "resume":
+			state = aerolvm.UpgradeStateRunning
+		case "rollback":
+			direction = aerolvm.UpgradeDirectionRollback
+			state = aerolvm.UpgradeStateRolledBack
+		case "finalize":
+			state = aerolvm.UpgradeStateFinalized
+		}
+		if state != s.rollout.State || direction != s.rollout.Direction {
+			s.rollout.State, s.rollout.Direction = state, direction
+			s.rollout.UpdatedAt = time.Now().UTC().Truncate(time.Second)
+		}
+		out := *s.rollout
+		out.Nodes = append([]aerolvm.UpgradeNode(nil), s.rollout.Nodes...)
+		s.mu.Unlock()
+		s.writeJSON(w, http.StatusOK, out)
+	}
 }
 
 func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {

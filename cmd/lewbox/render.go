@@ -86,6 +86,14 @@ func renderAt(w io.Writer, v any, now time.Time) error {
 		return renderClusterHealth(w, data)
 	case service.ClusterMetrics:
 		return renderClusterMetrics(w, data)
+	case service.ClusterUpgrade:
+		return renderClusterUpgrade(w, data)
+	case *service.ClusterUpgrade:
+		return renderClusterUpgrade(w, *data)
+	case service.ClusterUpgradePlan:
+		return renderClusterUpgradePlan(w, data)
+	case *service.ClusterUpgradePlan:
+		return renderClusterUpgradePlan(w, *data)
 	case service.NodeSettings:
 		return renderNodeSettings(w, data, now)
 	case service.Overview:
@@ -729,6 +737,91 @@ func aliveText(alive *bool) string {
 		return "-"
 	}
 	return yesNo(*alive)
+}
+
+// renderClusterUpgrade prints one rollout: its phase and each node's move.
+func renderClusterUpgrade(w io.Writer, u service.ClusterUpgrade) error {
+	target := u.TargetVersion
+	if u.Direction == "rollback" {
+		target = u.PreviousVersion
+	}
+	fmt.Fprintf(w, "Upgrade %s: %s, %s to %s\n", u.Cluster, u.Phase, u.Direction, target)
+	if u.Error != "" {
+		fmt.Fprintf(w, "Error: %s\n", u.Error)
+	}
+	tw := newTable(w)
+	fmt.Fprintln(tw, "ORDER\tNODE\tROLE\tFROM\tTO\tSTATE")
+	for _, n := range u.Nodes {
+		order := "-"
+		if n.Order > 0 {
+			order = fmt.Sprint(n.Order)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			order, n.Node, dash(n.Role), dash(n.FromVersion), dash(n.ToVersion), n.State)
+	}
+	return tw.Flush()
+}
+
+// renderClusterUpgradePlan prints what an upgrade would do.
+func renderClusterUpgradePlan(w io.Writer, p service.ClusterUpgradePlan) error {
+	alive := 0
+	for _, n := range p.Nodes {
+		if n.Alive {
+			alive++
+		}
+	}
+	fmt.Fprintf(w, "Upgrade plan: %s (cluster %s, %d node(s), %d up)\n", p.TargetVersion, p.Cluster, len(p.Nodes), alive)
+	fmt.Fprintf(w, "Source: %s\n\n", p.Source)
+	tw := newTable(w)
+	fmt.Fprintln(tw, "ORDER\tNODE\tROLE\tVERSION\tSTATUS\tACTION")
+	for _, n := range p.Nodes {
+		order := "-"
+		if n.Order > 0 {
+			order = fmt.Sprint(n.Order)
+		}
+		status := "NotReady"
+		if n.Alive {
+			status = "Ready"
+		}
+		if n.Leader {
+			status += ",Leader"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			order, n.Node, dash(n.Role), dash(n.Version), status, n.Action)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w)
+	switch {
+	case len(p.Skew.Below) > 0:
+		fmt.Fprintf(w, "Version skew: REFUSED (needs %s or later)\n", p.Skew.UpgradeFromMin)
+	case p.Skew.UpgradeFromMin != "":
+		fmt.Fprintf(w, "Version skew: allowed (upgrade_from_min %s)\n", p.Skew.UpgradeFromMin)
+	default:
+		fmt.Fprintln(w, "Version skew: not checked")
+	}
+	if len(p.OneWayMigrations) > 0 {
+		fmt.Fprintf(w, "One-way migrations: finalize runs %v; after finalize there is no rollback\n", p.OneWayMigrations)
+	} else {
+		fmt.Fprintln(w, "One-way migrations: none: rollback works until finalize")
+	}
+	if p.Batch != "" {
+		fmt.Fprintf(w, "Batch: %s (%d worker(s) per batch)\n", p.Batch, p.BatchSize)
+	}
+	if len(p.Refusals) > 0 {
+		fmt.Fprintln(w, "Refused:")
+		for _, r := range p.Refusals {
+			fmt.Fprintf(w, "  ! %s\n", r)
+		}
+	}
+	if len(p.Warnings) > 0 {
+		fmt.Fprintln(w, "Warnings:")
+		for _, warning := range p.Warnings {
+			fmt.Fprintf(w, "  ! %s\n", warning)
+		}
+	}
+	return nil
 }
 
 // renderClusterHealth prints one compact bar per cluster or node.

@@ -119,6 +119,7 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	var (
 		clusters            = Clusters{s}
 		clusterNodeSettings = ClusterNodeSettings{s}
+		clusterUpgrade      = ClusterUpgrade{s}
 		joinTokens          = JoinTokens{s}
 	)
 	mux.HandleFunc("GET "+Prefix+"/clusters", clusters.Index)
@@ -132,6 +133,13 @@ func NewRouter(svc *service.Service, log *slog.Logger, options ...RouterOption) 
 	mux.HandleFunc("GET "+Prefix+"/clusters/{cluster}/metrics", clusters.Metrics)
 	mux.HandleFunc("GET "+Prefix+"/clusters/{cluster}/node-settings", clusterNodeSettings.Show)
 	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/join-tokens", joinTokens.Store)
+	mux.HandleFunc("GET "+Prefix+"/clusters/{cluster}/upgrade", clusterUpgrade.Show)
+	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/upgrade", clusterUpgrade.Store)
+	mux.HandleFunc("GET "+Prefix+"/clusters/{cluster}/upgrade/plan", clusterUpgrade.Plan)
+	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/upgrade/stop", clusterUpgrade.Stop)
+	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/upgrade/resume", clusterUpgrade.Resume)
+	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/upgrade/rollback", clusterUpgrade.Rollback)
+	mux.HandleFunc("POST "+Prefix+"/clusters/{cluster}/upgrade/finalize", clusterUpgrade.Finalize)
 
 	// Nodes and what they report.
 	var (

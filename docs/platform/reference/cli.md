@@ -301,6 +301,27 @@ Prints a command that joins a machine without the Lewbox CLI, with a fresh singl
 | `--role ROLE` | `mixed` | The new node's role |
 | `--ttl DURATION` | `15m` | How long the token is valid |
 
+### `lewbox cluster upgrade ID|SLUG [--version TAG] [--batch N|N%] [--pause-after N] [--hold] [--allow-downtime] [--check] [--yes]`
+
+Rolling AerolVM upgrade of every node, driven through the cluster's admin token. It fetches and prints the plan first, then confirms and starts one node or worker batch at a time. Running sandboxes keep running; each node's API is down for a few seconds. On a cluster with one or two Raft voters the API has no majority while a server restarts, so AerolVM needs `--allow-downtime`. The default version is the AerolVM release this Lewbox release was tested with; any other release tag works with an "untested" warning, and `latest` is refused. Before starting, Lewbox reads the release's `checksums.txt` and `release.json` over HTTPS, checks `release.json` against its checksum, and refuses when the plan cannot be read or the version jump is not allowed.
+
+| Flag | |
+|---|---|
+| `--version TAG` | The AerolVM release to move to (default: the tested one) |
+| `--batch N\|N%` | Worker nodes per batch (default 10%) |
+| `--pause-after N` | Pause after the first N workers |
+| `--hold` | Stop at `done`, before finalize, so a rollback stays possible |
+| `--allow-downtime` | Accept the API being down while one of one or two Raft voters restarts |
+| `--check` | Show the plan and change nothing |
+
+### `lewbox cluster upgrade status ID|SLUG`
+
+The current rollout: its phase, direction, target and previous versions, and each node's role, from/to version, state, order and error. A cluster that never upgraded answers `not_found`.
+
+### `lewbox cluster upgrade stop|resume|rollback|finalize ID|SLUG`
+
+`stop` finishes the nodes in progress and starts no more; `resume` goes on after a pause; `rollback` puts every node back on the previous release; `finalize` turns the new release on for good. Rollback works while the rollout is `paused`, `stopped` or `failed`, and at `done` after `--hold`. It asks to confirm for `rollback` and `finalize`.
+
 ### `lewbox cluster remove ID|SLUG [--force]`
 
 Stops managing the cluster: revokes Lewbox's admin token and the organization keys on it, then forgets it and its nodes. The cluster keeps running. If the keys cannot all be revoked it refuses, so no live token is left behind; `--force` removes it anyway. Asks to confirm.
