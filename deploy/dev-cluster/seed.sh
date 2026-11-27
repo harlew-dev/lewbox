@@ -191,14 +191,14 @@ ensure_workspace() {
 	fi
 
 	# The customer owns the workspace, whether it was just created or not.
-	members=$(admin_org GET /v0/profilembers)
+	members=$(admin_org GET /v0/members)
 	member=$(jq -c --arg e "$CUSTOMER_EMAIL" '[.data[] | select(.email == $e)] | first // empty' <<<"$members")
 	if [[ -z $member ]]; then
-		admin_org POST /v0/profilembers "$(jq -n --arg e "$CUSTOMER_EMAIL" '{email: $e, role: "owner"}')" >/dev/null
+		admin_org POST /v0/members "$(jq -n --arg e "$CUSTOMER_EMAIL" '{email: $e, role: "owner"}')" >/dev/null
 		say "made $CUSTOMER_EMAIL an owner of $ORG_SLUG"
 	elif [[ $(jq -r '.role' <<<"$member") != owner ]]; then
 		mid=$(jq -r '.id' <<<"$member")
-		admin_org PATCH "/v0/profilembers/$mid" '{"role":"owner"}' >/dev/null
+		admin_org PATCH "/v0/members/$mid" '{"role":"owner"}' >/dev/null
 		say "made $CUSTOMER_EMAIL an owner of $ORG_SLUG"
 	fi
 }
