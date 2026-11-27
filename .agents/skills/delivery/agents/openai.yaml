@@ -1,0 +1,3 @@
+interface:
+  display_name: "Delivery"
+  short_description: "Take a feature from notes to a merged commit with agents"

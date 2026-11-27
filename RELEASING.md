@@ -1,6 +1,6 @@
 # Releasing Lewbox
 
-Every release follows the generic `release` skill (from [harrisonclewis/skills](https://github.com/harrisonclewis/skills): `/skills:release` as the Claude Code plugin, `/release` through `npx skills add`), with the facts below. Never publish by hand.
+Every release follows the generic `release` skill in `.agents/skills/release` (copied from [harrisonclewis/skills](https://github.com/harrisonclewis/skills); `/release` in Claude Code), with the facts below. Never publish by hand.
 
 ## What a release is
 

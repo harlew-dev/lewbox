@@ -1,0 +1,3 @@
+interface:
+  display_name: "Naming"
+  short_description: "Name routes, pages, permissions and events consistently"

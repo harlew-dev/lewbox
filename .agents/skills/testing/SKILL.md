@@ -7,8 +7,6 @@ description: Testing strategy and rules for any stack. Covers what is worth test
 
 Tests show that the product behaves, that its security boundaries hold and that data really persists. A test that cannot fail, or that fails on every harmless change, costs maintenance and protects nothing. Skip a rule here and you get a production bug that a green suite never saw.
 
-A project's `AGENTS.md` may record deliberate deviations from this skill; where it does, the project's deviations win.
-
 ## When to use
 
 - Writing or reviewing any test, or setting up a test harness for a new stack.
@@ -119,7 +117,7 @@ Details: [references/security-tests.md#performance-budgets](references/security-
 
 ## Architecture and naming checks
 
-Naming and layout rules (routes, permissions, events, rate limits, file and page names, doc links) are **ordinary tests** that fail the suite. `conventions-and-docs` owns them. When one fails, **rename your code, never loosen the check**. Never add an exception, skip or delete a check without the user's agreement. The usual shape: a pure function, a table of names it must accept and refuse, a run on the real code that fails if it finds suspiciously few names, and exceptions listed in the test with reasons.
+Naming and layout rules (routes, permissions, events, rate limits, file and page names, doc links) are **ordinary tests** that fail the suite. `conventions` owns them. When one fails, **rename your code, never loosen the check**. Never add an exception, skip or delete a check without the user's agreement. The usual shape: a pure function, a table of names it must accept and refuse, a run on the real code that fails if it finds suspiciously few names, and exceptions listed in the test with reasons.
 
 ## Organisation
 

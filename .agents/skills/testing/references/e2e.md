@@ -7,13 +7,13 @@ Read this when you set up or change the e2e harness, write a browser test for a 
 - **The real production build:** the e2e harness builds the app exactly as it ships (server binary or container with the built frontend) and starts it itself. The dev server lacks the production security headers, CSP, server-side page gating, prerendered pages and the 404 behaviour for unknown URLs, so e2e on the dev server misses whole classes of bugs.
 - **Its own database,** named after its port (`app_test_<port>`), dropped and migrated from scratch at every start. Hand-made accounts on it vanish at the next run.
 - **Never reuse a server already listening on the port,** because it may be someone else's run. Offer an explicit opt-in (`E2E_REUSE=1`) for iterating against a test server you started yourself.
-- **Settings come from the committed test config,** never the developer's `.env`, however the runner is started. How the file is loaded and per-run keys are generated: `dev-environment` (`references/env-files.md`).
+- **Settings come from the committed test config,** never the developer's `.env`, however the runner is started. How the file is loaded and per-run keys are generated: `tooling` (`references/env-files.md`).
 - **Rate limits off** for the main e2e server (one run signs up many users from one IP), quotas still on. A dedicated spec starts a second server with limits on to test challenges and 429s.
 - **Second servers for other settings:** a flow needing other configuration (feature flag on, verification required) starts another instance of the same build on a second reserved port, sharing the run's database when it needs the same data. Each step uses its own browser context, because cookies are shared across ports.
 
 ## Isolation for concurrent runs
 
-Ports, locks, per-port databases, the preflight and clash messages: `dev-environment` (§7 and `references/test-databases-and-parallel-e2e.md`). For the tests themselves:
+Ports, locks, per-port databases, the preflight and clash messages: `tooling` (§7 and `references/test-databases-and-parallel-e2e.md`). For the tests themselves:
 
 - Use the URL and database the run prints (`E2E run: app http://localhost:3104 · database app_test_3104`). Never guess or hard-code them.
 - The mail catcher is shared by every run, so tests find their own mail by unique recipient ([Mail](#mail)).

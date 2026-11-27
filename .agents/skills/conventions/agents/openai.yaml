@@ -1,0 +1,3 @@
+interface:
+  display_name: "Conventions"
+  short_description: "Keep conventions enforced, documented and deliberately changed"

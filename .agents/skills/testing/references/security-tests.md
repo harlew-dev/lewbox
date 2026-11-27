@@ -1,6 +1,6 @@
 # Security, concurrency, leak and performance tests
 
-Read this when a change adds a lock, a uniqueness or quota guarantee, a "same answer for everyone" promise, a secret-bearing field, a log line, a metric, a rate limit, an outbound call, or a query on a growing table. What to protect and how is owned by `security-defaults` and `production-hardening`. This file is how you prove it.
+Read this when a change adds a lock, a uniqueness or quota guarantee, a "same answer for everyone" promise, a secret-bearing field, a log line, a metric, a rate limit, an outbound call, or a query on a growing table. What to protect and how is owned by `security` and `ops`. This file is how you prove it.
 
 ## Race tests
 

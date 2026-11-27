@@ -1,0 +1,3 @@
+interface:
+  display_name: "Structure"
+  short_description: "Decide where code goes and how it is layered"

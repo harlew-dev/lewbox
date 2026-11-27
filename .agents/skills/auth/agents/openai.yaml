@@ -1,0 +1,3 @@
+interface:
+  display_name: "Auth"
+  short_description: "Build account flows that never reveal whether an account exists"

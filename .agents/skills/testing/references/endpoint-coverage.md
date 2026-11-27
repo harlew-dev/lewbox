@@ -1,6 +1,6 @@
 # Endpoint coverage and matrices
 
-Read this when you add or change an endpoint, a permission, a role, an API-key scope or an event, or review someone else's endpoint tests. Every case below is mandatory for every endpoint. Route and action names follow `resource-naming`. Status codes and error shapes follow `api-design`.
+Read this when you add or change an endpoint, a permission, a role, an API-key scope or an event, or review someone else's endpoint tests. Every case below is mandatory for every endpoint. Route and action names follow `naming`. Status codes and error shapes follow `api`.
 
 ## The ten cases
 

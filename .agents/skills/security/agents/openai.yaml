@@ -1,0 +1,3 @@
+interface:
+  display_name: "Security"
+  short_description: "Apply default security rules to every endpoint and page"

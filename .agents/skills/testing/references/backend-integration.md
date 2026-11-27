@@ -29,7 +29,7 @@ openTestDB(t):
 
 ### The test configuration file
 
-- The committed `.env.testing`, its strict `KEY=value` format, the emptied environment test targets run in, and the database guard's exact rules: `dev-environment` (`references/env-files.md`, `references/test-databases-and-parallel-e2e.md`).
+- The committed `.env.testing`, its strict `KEY=value` format, the emptied environment test targets run in, and the database guard's exact rules: `tooling` (`references/env-files.md`, `references/test-databases-and-parallel-e2e.md`).
 - The harness's part: direct runs (`<test-runner> ./pkg -run TestX`) find the file by walking up from the working directory, and the DB URL is read from it, never from the process environment, with no fallback.
 - Tests that guard the guards:
   - `TestLocalTestDatabase`: non-local hosts and non-`_test` names are refused.

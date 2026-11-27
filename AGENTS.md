@@ -14,19 +14,20 @@ Generic "how I build apps" skills live in `.agents/skills/` (committed, unlike t
 
 | Skill | Load it when |
 |---|---|
-| `api-design` | Adding or changing an endpoint, list, table, migration, seeder or event; reviewing API or data-layer code |
-| `authentication` | Any sign-up, sign-in, password, session, invitation, deletion or credential flow; any endpoint taking an unproven email, ID, token or key |
-| `conventions-and-docs` | Before starting any change (find and read the docs); adding a check, doc or plan; renaming; before saying "done" |
-| `delivery-workflow` | The user hands over notes or an idea, asks for a plan or "build this"; orchestrating agents; closing a plan, committing, PR |
-| `dev-environment` | The Makefile, env files, compose, the dev server, running tests or e2e locally, CI |
-| `production-hardening` | An endpoint that creates rows or checks a secret; logging, metrics, alerts, admin features, config and secrets, a release or first deploy, an incident |
-| `project-structure` | Creating a file, package, module, component, page or endpoint; adding a dependency; deciding where code goes |
-| `resource-naming` | Before adding or renaming a route, handler, page, client method, permission, event or rate limit |
-| `security-defaults` | Before adding or changing an endpoint, an auth flow, a permission, a token or secret, a cookie, a redirect, a log line, a template or a config variable |
+| `api` | Adding or changing an endpoint, list, table, migration, seeder or event; reviewing API or data-layer code |
+| `auth` | Any sign-up, sign-in, password, session, invitation, deletion or credential flow; any endpoint taking an unproven email, ID, token or key |
+| `conventions` | Before starting any change (find and read the docs); adding a check, doc or plan; renaming; before saying "done" |
+| `delivery` | The user hands over notes or an idea, asks for a plan or "build this"; orchestrating agents; closing a plan, committing, PR |
+| `frontend` | Adding or changing a page, route, list, form, dialog, component, chart or UI text; reviewing frontend code |
+| `naming` | Before adding or renaming a route, handler, page, client method, permission, event or rate limit |
+| `ops` | An endpoint that creates rows or checks a secret; logging, metrics, alerts, admin features, config and secrets, a release or first deploy, an incident |
+| `release` | Cutting, tagging or publishing a Lewbox release, with the facts in [`RELEASING.md`](RELEASING.md). Every release follows it; never publish by hand |
+| `security` | Before adding or changing an endpoint, an auth flow, a permission, a token or secret, a cookie, a redirect, a log line, a template or a config variable |
+| `structure` | Creating a file, package, module, component, page or endpoint; adding a dependency; deciding where code goes |
 | `testing` | Writing or reviewing tests; adding an endpoint, page, table, permission, event or rate limit; before saying "done" |
-| `ui-patterns` | Adding or changing a page, route, list, form, dialog, component, chart or UI text; reviewing frontend code |
+| `tooling` | The Makefile, env files, compose, the dev server, running tests or e2e locally, CI |
 
-**Releases** follow the generic `release` skill from [harrisonclewis/skills](https://github.com/harrisonclewis/skills) (`/skills:release` as the Claude Code plugin), with Lewbox's checks, assets, version rules and upgrade notes in [`RELEASING.md`](RELEASING.md). Never publish by hand.
+The skills are copied from [harrisonclewis/skills](https://github.com/harrisonclewis/skills); update them by copying its `skills/` folder over `.agents/skills/`, not by editing them here. **Releases** follow the `release` skill (`/release` in Claude Code, via the `.claude/skills/release` symlink), with Lewbox's checks, assets, version rules and upgrade notes in [`RELEASING.md`](RELEASING.md). Never publish by hand.
 
 **Where Lewbox deviates (recorded; these win over the skills):**
 
@@ -37,7 +38,7 @@ Generic "how I build apps" skills live in `.agents/skills/` (committed, unlike t
 - No email (D4): email verification, account lock and unlock links, invitations (D18), email blocks, the mail outbox and CAPTCHA don't apply. Sign-up approval and rate limits are the abuse defence.
 - One web build with `/admin` (D13): no hidden admin door, no separate admin bundle; instance admin is an account role.
 - Passwords use PBKDF2-SHA256 (stdlib), not Argon2id.
-- Plans live in `.agents/plans/` as phase briefs plus `DECISIONS.md`/`STATUS.md`; new plans follow the delivery-workflow plan template.
+- Plans live in `.agents/plans/` as phase briefs plus `DECISIONS.md`/`STATUS.md`; new plans follow the delivery skill's plan template.
 
 ## Layout
 
