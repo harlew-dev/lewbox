@@ -1,14 +1,10 @@
+<h1>Lewbox</h1>
+
+<p>Run your own sandbox cloud on AerolVM: a self-hosted E2B.</p>
+
 <p align="center">
-  <img src="docs/logo.svg" width="96" height="96" alt="Lewbox logo">
+  <img src="docs/screenshot.png" alt="The Lewbox operator dashboard in dark mode">
 </p>
-
-<h1 align="center">Lewbox</h1>
-
-<p align="center">Run your own sandbox cloud on AerolVM: a self-hosted E2B.</p>
-
-<p align="center"><img src="docs/screenshot.png" alt="The Lewbox operator console dashboard"></p>
-
----
 
 ### Installation
 
