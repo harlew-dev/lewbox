@@ -29,6 +29,8 @@ Open http://127.0.0.1:8080 and sign in as `admin@example.com` (the operator cons
 
 Changes that touch a machine also need the end-to-end test against real AerolVM in Docker: [deploy/dev-cluster](deploy/dev-cluster/README.md).
 
+With the seeded dev cluster running, `npm run screenshot` in `web/` regenerates `docs/screenshot.png`, the README image of the operator dashboard.
+
 ## Releasing
 
 Releases follow [RELEASING.md](RELEASING.md). Never publish by hand.

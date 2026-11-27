@@ -9,7 +9,8 @@
     "lint": "eslint src",
     "test": "vitest run",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "screenshot": "node scripts/readme-screenshot.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
