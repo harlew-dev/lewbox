@@ -45,7 +45,7 @@ A node that isn't in cluster mode (a local-mode install) counts as a one-node cl
 
 ## Nodes follow the cluster
 
-Every check also syncs the node list from AerolVM. New members appear, members that left disappear, and each node's role, version and alive state is updated. You don't add or remove node records by hand.
+Every check also syncs the node list from AerolVM. New members appear, and each node's role, version and alive state is updated. Lewbox never forgets a node on its own. A member missing from AerolVM's list is shown down and keeps the settings it reported: it is usually restarting (an upgrade, a rollback, a firewall change), and comes back as it was. A node you removed with AerolVM's own tools stays listed, down, until you run `lewbox node remove`.
 
 ## History and uptime
 

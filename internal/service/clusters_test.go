@@ -480,7 +480,8 @@ func TestCheckClusterStatus(t *testing.T) {
 }
 
 func TestNodeSync(t *testing.T) {
-	s := newClusterService(t)
+	clock := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	s := newClusterService(t, WithClock(func() time.Time { return clock }))
 	fake := newClusterFake(t)
 	setMembers(fake, "node-a", "node-b")
 
@@ -499,16 +500,63 @@ func TestNodeSync(t *testing.T) {
 		t.Errorf("adopted node = %+v", adopted)
 	}
 
+	if _, err := s.ReportNodeSettings(localCtx(), "node-b", ReportNodeSettingsRequest{PolicyRuntime: ptrString("docker")}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A member missing from one list is usually restarting: its record and
+	// the settings it reported stay, marked down.
 	setMembers(fake, "node-a")
+	clock = clock.Add(time.Minute)
 	checked, err := s.CheckCluster(localCtx(), "eu-west")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(checked.NodeList) != 1 || checked.NodeList[0].Name != "node-a" {
-		t.Errorf("after member left: %+v", checked.NodeList)
+	if len(checked.NodeList) != 2 {
+		t.Fatalf("right after member left: %+v", checked.NodeList)
+	}
+	kept, err := s.GetNode(localCtx(), "node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.Alive == nil || *kept.Alive {
+		t.Errorf("missing node alive = %v, want down", kept.Alive)
+	}
+	if kept.Settings == nil || containsString(kept.Settings.Reasons, "create policy runtime is docker; this node applied none") {
+		t.Errorf("missing node lost its reported settings: %+v", kept.Settings)
+	}
+
+	// Back again, it is the same node with its settings.
+	setMembers(fake, "node-a", "node-b")
+	clock = clock.Add(time.Minute)
+	if _, err := s.CheckCluster(localCtx(), "eu-west"); err != nil {
+		t.Fatal(err)
+	}
+	back, err := s.GetNode(localCtx(), "node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.ID != kept.ID || back.Alive == nil || !*back.Alive || back.Settings == nil || back.Settings.Outdated {
+		t.Errorf("returning node = %+v, want the same record, alive and up to date", back)
+	}
+
+	// Gone for a long time, it is still known, down, until it is removed.
+	setMembers(fake, "node-a")
+	clock = clock.Add(24 * time.Hour)
+	checked, err = s.CheckCluster(localCtx(), "eu-west")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(checked.NodeList) != 2 {
+		t.Errorf("a day after member left: %+v", checked.NodeList)
+	}
+	if _, err := s.RemoveNode(localCtx(), "node-b", RemoveNodeRequest{}); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.GetNode(localCtx(), "node-b"); err != nil {
 		wantCode(t, err, CodeNotFound)
+	} else {
+		t.Error("node-b is still known after node remove")
 	}
 }
 

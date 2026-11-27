@@ -1303,8 +1303,25 @@ func (s *Service) syncNodes(ctx context.Context, cluster db.Cluster, members []a
 		if seen[row.Name] {
 			continue
 		}
-		if _, err := s.queries(ctx).DeleteNode(ctx, row.ID); err != nil {
-			return nil, fmt.Errorf("delete node %q: %w", row.Name, err)
+		// Lewbox never forgets a node on its own. A member missing from the
+		// list is usually restarting (an upgrade, a rollback, a firewall
+		// change), and one AerolVM removed stays until `lewbox node remove`.
+		// Either way it is shown down, and keeps the settings it reported.
+		if row.Alive.Valid && row.Alive.Int64 == 0 {
+			continue
+		}
+		if _, err := s.queries(ctx).UpsertClusterNode(ctx, db.UpsertClusterNodeParams{
+			ID:         row.ID,
+			Name:       row.Name,
+			URL:        row.URL,
+			ClusterID:  row.ClusterID,
+			Role:       row.Role,
+			Version:    row.Version,
+			Alive:      sql.NullInt64{Int64: 0, Valid: true},
+			LastSeenAt: row.LastSeenAt,
+			CreatedAt:  row.CreatedAt,
+		}); err != nil {
+			return nil, fmt.Errorf("mark node %q down: %w", row.Name, err)
 		}
 	}
 	return conflicts, nil

@@ -340,7 +340,7 @@ One node.
 
 ### `lewbox node remove ID|NAME`
 
-Drains the node, removes it from its cluster in AerolVM, and forgets it. Asks to confirm. `--force` removes a node that still owns sandboxes. Refuses a cluster's last node and the node behind its admin URL. See [Remove nodes and clusters](../clusters/remove-nodes-and-clusters.md).
+Drains the node, removes it from its cluster in AerolVM, and forgets it. For a node AerolVM already removed, it only forgets it: Lewbox never forgets a node on its own. Asks to confirm. `--force` removes a node that still owns sandboxes. Refuses a cluster's last node and the node behind its admin URL. See [Remove nodes and clusters](../clusters/remove-nodes-and-clusters.md).
 
 ### `lewbox node configure [--dry-run]`
 
