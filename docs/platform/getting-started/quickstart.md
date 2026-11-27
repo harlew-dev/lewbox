@@ -9,55 +9,11 @@ You need a Linux machine with systemd (a VM is fine), and a **normal user that c
 
 ## 1. Install the CLI
 
-Download the latest release, check it against the release's checksums and put it in `~/.local/bin`. Run these in one terminal, in order:
+```bash
+curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh
+```
 
-1. Go to an empty temporary folder:
-
-   ```bash
-   cd "$(mktemp -d)"
-   ```
-
-2. Find this machine's architecture, `amd64` or `arm64`:
-
-   ```bash
-   ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-   ```
-
-3. Download the binary and the release's checksums:
-
-   ```bash
-   curl -fsSL -O "https://github.com/harlew-dev/lewbox/releases/latest/download/lewbox_linux_$ARCH" -O https://github.com/harlew-dev/lewbox/releases/latest/download/checksums.txt
-   ```
-
-4. Check the binary. It must print `lewbox_linux_…: OK`; if it doesn't, stop:
-
-   ```bash
-   sha256sum --check --ignore-missing checksums.txt
-   ```
-
-5. Install it into `~/.local/bin`:
-
-   ```bash
-   install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox
-   ```
-
-6. Keep `~/.local/bin` on your `PATH` after you log out and back in:
-
-   ```bash
-   for f in ~/.profile ~/.bashrc; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$f" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$f"; done
-   ```
-
-7. Put it on the `PATH` of this shell too:
-
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
-
-8. Check that it runs:
-
-   ```bash
-   lewbox version
-   ```
+It downloads the latest release, checks it against the release's checksums and installs `lewbox` into `~/.local/bin`. If that folder isn't on your `PATH`, it adds it to `~/.profile` and `~/.bashrc` and prints the line to run in this shell. Run that line, or open a new terminal, before the next step. See [Install the CLI](../setup/install-the-cli.md) for a pinned version and the manual download.
 
 The release includes the web console, which this machine needs because it runs the orchestrator. Install it the same way on every node. `go install` also works on nodes, but only with Go 1.21 or later, which Ubuntu 22.04's `golang-go` isn't (see [Install the CLI](../setup/install-the-cli.md#with-go)).
 

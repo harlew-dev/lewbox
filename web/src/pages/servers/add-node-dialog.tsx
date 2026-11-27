@@ -28,6 +28,7 @@ import { useState } from 'react'
 import * as api from '../../lib/api'
 import {
   installCommand,
+  installScriptCommand,
   joinClusterCommand,
   nodeConfigureCommand,
   validHost,
@@ -264,14 +265,16 @@ function AddNode({
               title="Install the Lewbox CLI on the machine"
               description={
                 <>
-                  Follow{' '}
+                  Run this as your own user, not root. For other ways, see{' '}
                   <TextLink href={routes.platformDocs('setup/install-the-cli')} target="_blank" rel="noreferrer">
                     Install the CLI
                   </TextLink>
                   .
                 </>
               }
-            />
+            >
+              <CodeBlock code={installScriptCommand} />
+            </Step>
             <SignInStep tokenName={`Node ${node}`} />
             <Step title="Install AerolVM" description={`With the cluster's runtime, ${runtime}.`}>
               <CodeBlock code={install} />

@@ -31,6 +31,7 @@ import {
   dnsRecordsOffCommand,
   emptyAdvancedForm,
   installCommand,
+  installScriptCommand,
   newClusterCommand,
   validDomain,
   validEmail,
@@ -160,14 +161,16 @@ function StartCluster({ onClose }: { onClose: () => void }) {
               title="Install the Lewbox CLI on the machine"
               description={
                 <>
-                  Follow{' '}
+                  Run this as your own user, not root. For other ways, see{' '}
                   <TextLink href={routes.platformDocs('setup/install-the-cli')} target="_blank" rel="noreferrer">
                     Install the CLI
                   </TextLink>
-                  . Run the next commands as your own user, not root.
+                  .
                 </>
               }
-            />
+            >
+              <CodeBlock code={installScriptCommand} />
+            </Step>
             <SignInStep tokenName={`Node ${node}`} />
             <Step title="Install AerolVM" description="It checks the machine first, then installs a pinned, verified release.">
               <CodeBlock code={install} />

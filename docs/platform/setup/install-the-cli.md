@@ -44,57 +44,58 @@ In a terminal, `sudo` asks for the password once per command. Scripts have no te
 > [!NOTE]
 > To run as root anyway, put the variable on the same command: `LEWBOX_ALLOW_ROOT=1 lewbox install …`. `LEWBOX_ALLOW_ROOT=1 && lewbox install …` doesn't work: `&&` makes it a separate command, so `lewbox` never sees it.
 
-## Download a release
+## One-line install
 
-Each release has prebuilt binaries for Linux `amd64` and `arm64`, with the web console included. You don't need Go. Run these in one terminal, in order: later steps use the `ARCH` that step 2 sets.
+Each release has prebuilt binaries for Linux `amd64` and `arm64`, with the web console included. You don't need Go. The install script downloads the latest, checks it against the release's `checksums.txt`, and installs it. Run it as your normal user, not root:
 
-1. Go to an empty temporary folder:
+```bash
+curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh
+```
 
-   ```bash
-   cd "$(mktemp -d)"
-   ```
+It installs to `~/.local/bin`. If that folder isn't on your `PATH`, it adds `export PATH="$HOME/.local/bin:$PATH"` to `~/.profile` and `~/.bashrc` (only once), says so, and prints the line to run in the current shell. On zsh, add that line to `~/.zshrc` too. It ends by printing the installed `lewbox version`. Run it again to upgrade.
 
-2. Find this machine's architecture, `amd64` or `arm64`:
+| Setting | Default | Change it |
+|---|---|---|
+| Install folder | `~/.local/bin` | `LEWBOX_INSTALL_DIR=/path` |
+| A specific release | latest | `LEWBOX_VERSION=0.5.0` (or `v0.5.0`) |
+| Release base URL | GitHub | `LEWBOX_RELEASE_URL=https://…` (a mirror) |
 
-   ```bash
-   ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-   ```
+Put a setting before `sh`:
 
-3. Download the latest release's binary and its checksums:
+```bash
+curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | LEWBOX_VERSION=0.5.0 sh
+```
 
-   ```bash
-   curl -fsSL -O "https://github.com/harlew-dev/lewbox/releases/latest/download/lewbox_linux_$ARCH" -O https://github.com/harlew-dev/lewbox/releases/latest/download/checksums.txt
-   ```
+To run it as root anyway, put `LEWBOX_ALLOW_ROOT=1` before `sh` the same way.
 
-4. Check the binary against the checksums. It must print `lewbox_linux_…: OK`. If it doesn't, stop and don't install it:
+It needs `curl` or `wget`, and `sha256sum` or `shasum`. It refuses to install if the checksum doesn't match or `checksums.txt` has no line for the binary.
 
-   ```bash
-   sha256sum --check --ignore-missing checksums.txt
-   ```
+## Manual download
 
-5. Install it into `~/.local/bin`:
+Download the file for this machine from the [latest release](https://github.com/harlew-dev/lewbox/releases/latest), check it against `checksums.txt`, and install it.
 
-   ```bash
-   install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox
-   ```
+| Platform | File |
+|---|---|
+| Linux `amd64` | `lewbox_linux_amd64` |
+| Linux `arm64` | `lewbox_linux_arm64` |
 
-6. Keep `~/.local/bin` on your `PATH` for good. `~/.profile` covers SSH logins and `~/.bashrc` covers new terminals. It adds the line only once, so running it again is safe. Without it, `lewbox` is `command not found` after you reconnect. On zsh, add the same line to `~/.zshrc`:
+```bash
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+base=https://github.com/harlew-dev/lewbox/releases/latest/download
+curl -fsSL -O "$base/lewbox_linux_$ARCH" -O "$base/checksums.txt"
+sha256sum --check --ignore-missing checksums.txt     # must print lewbox_linux_…: OK
+install -D -m 755 "lewbox_linux_$ARCH" ~/.local/bin/lewbox
+```
 
-   ```bash
-   for f in ~/.profile ~/.bashrc; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$f" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$f"; done
-   ```
+For a specific release, use `https://github.com/harlew-dev/lewbox/releases/download/v0.5.0` as `base`.
 
-7. Put it on the `PATH` of this shell too:
+Then keep `~/.local/bin` on your `PATH` and check that it runs:
 
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   ```
-
-8. Check that it runs:
-
-   ```bash
-   lewbox version
-   ```
+```bash
+for f in ~/.profile ~/.bashrc; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$f" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$f"; done
+export PATH="$HOME/.local/bin:$PATH"
+lewbox version
+```
 
 ## With Go
 

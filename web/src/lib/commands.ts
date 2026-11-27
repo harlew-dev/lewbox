@@ -5,6 +5,10 @@
 // A DNS label: node names and cluster slugs.
 export const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
+// The published one-line installer, as shown in the console.
+export const installScriptCommand =
+  'curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh'
+
 // A hostname or an IPv4 or IPv6 address.
 const HOST = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$|^[0-9A-Fa-f:]{2,39}$/
 

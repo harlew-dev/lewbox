@@ -87,6 +87,7 @@ describe('StartClusterDialog', () => {
 
     expect(await screen.findByText('Install AerolVM')).toBeInTheDocument()
     const commands = code()
+    expect(commands).toContain('raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh')
     expect(commands).toContain(
       'lewbox install --domain eu.api.example.com --dns-profile cf-prod --runtime docker --name node-1',
     )
@@ -168,6 +169,7 @@ describe('AddNodeDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     await screen.findByText('Join the cluster')
     const commands = code()
+    expect(commands).toContain('raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh')
     expect(commands).toContain('lewbox install --domain eu.api.example.com --dns-profile cf-prod --runtime docker --name node-2')
     expect(commands).toContain('lewbox node add node-2 --cluster eu-west --role mixed')
     expect(screen.getByText(/applies the cluster’s storage settings/)).toBeInTheDocument()

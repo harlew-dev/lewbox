@@ -80,11 +80,18 @@ release/lewbox_linux_amd64 release/lewbox_linux_arm64 release/release.json relea
 
 No registry: the GitHub release is the only place Lewbox is published.
 
+`install.sh` at the repo root is served from `main` (`https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh`). It downloads `lewbox_linux_<arch>` and `checksums.txt` from the release, so those asset names are part of the contract: rename them and every one-liner already in the docs and the console breaks.
+
 ## After publishing
 
 ```bash
 d=$(mktemp -d) && gh release download vX.Y.Z -D "$d" && (cd "$d" && sha256sum -c checksums.txt && cat release.json)
 XDG_CONFIG_HOME="$d/cfg" XDG_CACHE_HOME="$d/cache" ./release/lewbox_linux_amd64 update --check   # "latest":"vX.Y.Z"
+
+# The one-liner from main installs the new tag, in a temp HOME.
+i=$(mktemp -d) && mkdir -p "$i/home"
+HOME="$i/home" LEWBOX_INSTALL_DIR="$i/bin" sh -c 'curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | LEWBOX_VERSION=vX.Y.Z sh'
+"$i/bin/lewbox" version   # must print vX.Y.Z
 ```
 
 ## Deploying

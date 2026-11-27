@@ -22,7 +22,7 @@ This replaced the first draft ([archive/cli-first-draft.md](archive/cli-first-dr
 **1. One machine, for development.** Run the orchestrator and AerolVM on your laptop.
 
 ```bash
-curl -fsSL https://github.com/harlew-dev/lewbox/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh
 lewbox install --mode local          # AerolVM on 127.0.0.1:21212, no TLS
 lewbox node add                       # starts a one-node cluster named after this host and registers it
 lewbox serve                          # orchestrator on :8080

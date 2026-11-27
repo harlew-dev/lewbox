@@ -35,18 +35,15 @@ The CLI should feel like the [boat.dev CLI](https://docs.boat.dev/quickstart):
 ## 2. Install the CLI
 
 ```bash
-# macOS and Linux
-curl -fsSL https://github.com/harlew-dev/lewbox/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/harlew-dev/lewbox/main/install.sh | sh
 ```
 
 The script:
-1. Picks `linux|darwin` and `amd64|arm64`, and downloads the matching goreleaser archive.
+1. Picks Linux `amd64` or `arm64`, and downloads `lewbox_linux_<arch>`.
 2. Checks it against the release's `checksums.txt`.
-3. Puts `lewbox` in `~/.local/bin`. It adds that folder to `PATH` in your shell's rc file if it isn't already there.
-4. Adds tab completion: `source <(lewbox completion bash)` (zsh and fish work the same way).
-5. Tells you to open a new terminal, or to run `lewbox onboard`.
+3. Puts `lewbox` in `~/.local/bin`. It adds that folder to `PATH` in `~/.profile` and `~/.bashrc` if it isn't already there, and prints the installed version.
 
-It needs no root. `LEWBOX_VERSION=v0.2.0` pins a release, and `LEWBOX_INSTALL_DIR` changes the target folder. After that, `lewbox update` replaces the binary in the same place.
+It needs no root, and refuses to run as root unless `LEWBOX_ALLOW_ROOT=1`. `LEWBOX_VERSION=0.5.0` pins a release, and `LEWBOX_INSTALL_DIR` changes the target folder. After that, `lewbox update` replaces the binary in the same place.
 
 For development, run `go install ./cmd/lewbox` from the repo.
 
