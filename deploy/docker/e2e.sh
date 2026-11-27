@@ -212,6 +212,10 @@ req GET /v0/profile -b "$JAR"
 expect 401 "GET /v0/profile after logout returns 401"
 
 step "sign-in is rate limited"
+# Sign-in budgets count in fixed windows aligned to the minute. Six attempts
+# that straddle :00 split across two windows and never reach the limit, so
+# start the burst at the top of a minute when the current one is nearly over.
+if (( 10#$(date +%S) >= 50 )); then sleep $(( 61 - 10#$(date +%S) )); fi
 limited=0
 for i in 1 2 3 4 5 6; do
 	req POST /v0/auth/session \
