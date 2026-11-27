@@ -39,9 +39,21 @@ tok=$(curl -fsS -X POST "$API/v0/auth/login" -H 'Content-Type: application/json'
 	-d "$(jq -n --arg e "${LEWBOX_ADMIN_EMAIL:-${LEWBOX_DEV_EMAIL:-admin@lewbox.dev}}" --arg p "${LEWBOX_ADMIN_PASSWORD:-${LEWBOX_DEV_PASSWORD:-dev-password-123}}" '{email: $e, password: $p}')" | jq -r .token)
 admin() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' "$API$p" "$@"; }
 
-# Put the operator's settings back however the run ends.
+# Put the operator's settings back however the run ends. Step 8 may cordon the
+# admin node while it forces a sandbox onto the other one; leave it uncordoned.
+CORDONED=""
+uncordon() {
+	[[ -z $CORDONED ]] && return 0
+	curl -sS -o /dev/null -X POST -H "Authorization: Bearer ${LEWBOX_DEV_CLUSTER_ADMIN_TOKEN:-}" \
+		"$EP/v1/cluster/nodes/$CORDONED/uncordon" || echo "could not uncordon $CORDONED" >&2
+}
+cleanup() {
+	uncordon
+	admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not restore settings: $ORIGINAL" >&2
+	rm -rf "$JAR"
+}
 ORIGINAL=$(admin GET /v0/settings | jq -c '{signup, default_plan, default_region}')
-trap 'admin PATCH /v0/settings -d "$ORIGINAL" >/dev/null || echo "could not restore settings: $ORIGINAL" >&2; rm -rf "$JAR"' EXIT
+trap cleanup EXIT
 
 # A customer: a browser session cookie, and their organization in the header.
 declare -A ORG KEY
@@ -176,14 +188,47 @@ expect "b's list doesn't" "[.data[] | select(.id == \"$id1\")] | length == 0" "$
 
 step "a snapshots a sandbox with its key; Lewbox lists it for a, and a deletes it"
 snapname="snap-$RUN"
-sc=$(avm a POST "/v1/sandboxes/$id1/snapshot" -d "{\"name\":\"$snapname\"}" -o "$JAR/snapshot" -w '%{http_code}')
+# The case that failed: the snapshot lives on the node that is not behind the
+# cluster's admin URL, and the fresh delete token is not valid there yet. In
+# the dev cluster, cordon the admin node so the sandbox is placed on the other
+# one. e2e.sh supplies the admin token and the node's URL; a run against a real
+# instance snapshots the sandbox it already has.
+SNAP_ID=$id1
+if [[ -n ${LEWBOX_DEV_CLUSTER_ADMIN_TOKEN:-} && -n ${LEWBOX_DEV_NON_ADMIN_URL:-} ]]; then
+	cb() { local m="$1" p="$2"; shift 2; curl -fsS -X "$m" -H "Authorization: Bearer $LEWBOX_DEV_CLUSTER_ADMIN_TOKEN" -H 'Content-Type: application/json' "$EP$p" "$@"; }
+	members=$(cb GET /v1/cluster/members)
+	admin_node=$(jq -r --arg ep "${EP%/}" '.members[] | select((.api_url | rtrimstr("/")) == $ep) | .node_id' <<<"$members")
+	nonadmin_node=$(jq -r --arg url "${LEWBOX_DEV_NON_ADMIN_URL%/}" '.members[] | select((.api_url | rtrimstr("/")) == $url) | .node_id' <<<"$members")
+	[[ -n $admin_node && -n $nonadmin_node ]] || fail "could not identify the admin and non-admin nodes"
+	cb POST "/v1/cluster/nodes/$admin_node/cordon" >/dev/null || fail "could not cordon $admin_node"
+	CORDONED=$admin_node
+	create_ok a && pass "a dedicated sandbox started while $admin_node was cordoned" || { cat "$JAR/created" >&2; fail "create on the non-admin node"; }
+	SNAP_ID=$(jq -r .id "$JAR/created")
+	placement=$(cb GET "/v1/cluster/sandbox-index?limit=5000" | jq -r --arg id "$SNAP_ID" '.placements[] | select(.sandbox_id == $id) | .owner_node_id')
+	[[ $placement == "$nonadmin_node" ]] && pass "it runs on ${LEWBOX_DEV_NON_ADMIN_NODE:-the non-admin node}" \
+		|| fail "the dedicated sandbox landed on $placement, want $nonadmin_node"
+	cb POST "/v1/cluster/nodes/$admin_node/uncordon" >/dev/null && CORDONED="" && pass "$admin_node uncordoned" \
+		|| fail "could not uncordon $admin_node"
+fi
+sc=$(avm a POST "/v1/sandboxes/$SNAP_ID/snapshot" -d "{\"name\":\"$snapname\"}" -o "$JAR/snapshot" -w '%{http_code}')
 [[ $sc == 201 ]] && pass "a took a snapshot with its key" || { cat "$JAR/snapshot" >&2; fail "snapshot got $sc, want 201"; }
 has_snapshot() { cust "$1" GET "/v0/snapshots?region=$CLUSTER" | jq -e "[.data[] | select(.name == \"$snapname\" and .region == \"$CLUSTER\")] | length == 1"; }
 eventually 60 "Lewbox lists it for a" has_snapshot a
 expect "b's snapshot list doesn't have it" "[.data[] | select(.name == \"$snapname\")] | length == 0" "$(cust b GET "/v0/snapshots?region=$CLUSTER")"
-cust a DELETE "/v0/snapshots/$snapname?region=$CLUSTER" >/dev/null && pass "a deleted it through Lewbox"
+del_code=$(curl -s -o "$JAR/deleted" -w '%{http_code}' -X DELETE -b "$JAR/a" -c "$JAR/a" \
+	-H "Lewbox-Organization: ${ORG[a]}" -H "X-CSRF-Token: $(csrf a)" "$API/v0/snapshots/$snapname?region=$CLUSTER")
+[[ $del_code == 200 ]] && pass "a deleted it through Lewbox" || { cat "$JAR/deleted" >&2; fail "delete got $del_code, want 200"; }
 snapshot_gone() { avm a GET /v1/snapshots | jq -e "[.snapshots[] | select(.name == \"$snapname\")] | length == 0"; }
 eventually 30 "the cluster no longer lists it" snapshot_gone
+if [[ -n ${LEWBOX_DEV_NON_ADMIN_URL:-} ]]; then
+	holding_gone() { curl -sS -H "Authorization: Bearer ${KEY[a]}" "$LEWBOX_DEV_NON_ADMIN_URL/v1/snapshots?limit=500" |
+		jq -e --arg n "$snapname" '[.snapshots[] | select(.name == $n)] | length == 0'; }
+	eventually 30 "the node that held it no longer lists it" holding_gone
+fi
+if [[ $SNAP_ID != "$id1" ]]; then
+	cust a DELETE "/v0/sandboxes/$SNAP_ID?region=$CLUSTER" >/dev/null || fail "delete the dedicated sandbox"
+	pass "the dedicated sandbox is gone"
+fi
 
 step "the plan's limit (2 sandboxes) is enforced by AerolVM"
 eventually 60 "the quota reached the cluster" quota_pushed a 2

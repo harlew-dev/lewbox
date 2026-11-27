@@ -273,6 +273,212 @@ func TestDeleteSnapshotOnAnotherNode(t *testing.T) {
 	}
 }
 
+// TestDeleteSnapshotEveryNodeHoldingIt covers a name recorded on more than one
+// node: deleting only the first match leaves the other node's copy behind.
+func TestDeleteSnapshotEveryNodeHoldingIt(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	first := newClusterFake(t)
+	second := newClusterFake(t)
+	members := []aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: first.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: second.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	}
+	first.SetMembers(members)
+	second.SetMembers(members)
+	addTestCluster(t, s, first, "eu-west")
+	org, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	first.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
+	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
+
+	// The viewer token is minted on the admin node; let the other node see it.
+	if _, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range first.Tokens() {
+		second.AcceptToken(token)
+	}
+
+	if _, err := s.DeleteSnapshot(root, "ckpt-b", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Snapshots(org.Team)) != 0 {
+		t.Errorf("snapshot left on node-a = %+v", first.Snapshots(org.Team))
+	}
+	if len(second.Snapshots(org.Team)) != 0 {
+		t.Errorf("snapshot left on node-b = %+v", second.Snapshots(org.Team))
+	}
+}
+
+// TestDeleteSnapshotRetriesFreshDeleteToken covers the node-local token write
+// race: the node answers the mint before its own state machine has the token,
+// so the first DELETE is a 401.
+func TestDeleteSnapshotRetriesFreshDeleteToken(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	first := newClusterFake(t)
+	second := newClusterFake(t)
+	members := []aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: first.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: second.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	}
+	first.SetMembers(members)
+	second.SetMembers(members)
+	addTestCluster(t, s, first, "eu-west")
+	org, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	second.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
+
+	if _, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range first.Tokens() {
+		second.AcceptToken(token)
+	}
+	second.FailNext("/v1/snapshots/ckpt-b", 401, "", 1)
+
+	if _, err := s.DeleteSnapshot(root, "ckpt-b", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Snapshots(org.Team)) != 0 {
+		t.Errorf("snapshot left on node-b = %+v", second.Snapshots(org.Team))
+	}
+}
+
+// TestDeleteSnapshotSucceedsWithAnUnreachableNode covers a node Lewbox keeps
+// in its list (down, or removed from AerolVM but not yet removed by an
+// operator): it must not block a delete that found the snapshot elsewhere.
+func TestDeleteSnapshotSucceedsWithAnUnreachableNode(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	first := newClusterFake(t)
+	first.SetMembers([]aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: first.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: deadURL(t), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	})
+	addTestCluster(t, s, first, "eu-west")
+	org, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	first.AddSnapshot(org.Team, testSnapshot("ckpt-b"))
+
+	if _, err := s.DeleteSnapshot(root, "ckpt-b", RegionScope{Org: "acme", Region: "eu-west"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Snapshots(org.Team)) != 0 {
+		t.Errorf("snapshot left on node-a = %+v", first.Snapshots(org.Team))
+	}
+}
+
+// TestDeleteSnapshotMissingWithAnUnreachableNode covers the fail-closed half:
+// with no match on any reachable node, a node that could not be checked means
+// the snapshot may still exist, so the answer is 503 and names that node.
+func TestDeleteSnapshotMissingWithAnUnreachableNode(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	first := newClusterFake(t)
+	first.SetMembers([]aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: first.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: deadURL(t), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	})
+	addTestCluster(t, s, first, "eu-west")
+	org, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	// Lewbox keeps a node that is down (commit 71f7d81); it is skipped for
+	// the list, but still means the snapshot could be there.
+	if _, err := s.database.ExecContext(context.Background(), `UPDATE nodes SET alive = 0 WHERE name = 'node-b'`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.DeleteSnapshot(root, "missing", RegionScope{Org: "acme", Region: "eu-west"})
+	de := wantCode(t, err, CodeUnavailable)
+	if !strings.Contains(de.Message, "node-b") {
+		t.Errorf("the error does not name the node that was not checked: %q", de.Message)
+	}
+}
+
+// TestDeleteSnapshotMissingEverywhereIsNotFound covers the third case: no
+// match and every node answered is a plain 404.
+func TestDeleteSnapshotMissingEverywhereIsNotFound(t *testing.T) {
+	s := newClusterService(t)
+	createUser(t, s, "root@example.com", true)
+	root := userCtx(t, s, "root@example.com")
+
+	first := newClusterFake(t)
+	second := newClusterFake(t)
+	members := []aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: first.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: second.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	}
+	first.SetMembers(members)
+	second.SetMembers(members)
+	addTestCluster(t, s, first, "eu-west")
+	org, err := s.CreateOrganization(root, CreateOrganizationRequest{Slug: "acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetSubscription(root, org.Slug, "eu-west", SetSubscriptionRequest{Plan: "free"}); err != nil {
+		t.Fatal(err)
+	}
+	// The viewer token is minted on the admin node; let the other node see it.
+	if _, err := s.ListSnapshots(root, ListSnapshotsRequest{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range first.Tokens() {
+		second.AcceptToken(token)
+	}
+
+	_, err = s.DeleteSnapshot(root, "missing", RegionScope{Org: "acme", Region: "eu-west"})
+	wantCode(t, err, CodeNotFound)
+}
+
+// TestDeleteSnapshotDoesNotReportASurvivingCopy covers a delete that answers
+// success without removing the record: the verification must refuse it.
+func TestDeleteSnapshotDoesNotReportASurvivingCopy(t *testing.T) {
+	f := newSandboxFixture(t)
+	pointAtFake(t, f)
+	f.fake.AddSnapshot(f.org.Team, testSnapshot("ckpt-a"))
+	if _, err := f.s.ListSnapshots(f.root, ListSnapshotsRequest{Org: "acme"}); err != nil {
+		t.Fatal(err)
+	}
+	// A 204 that never reaches the handler: the snapshot survives.
+	f.fake.FailNext("/v1/snapshots/ckpt-a", 204, "", 1)
+
+	_, err := f.s.DeleteSnapshot(f.root, "ckpt-a", RegionScope{Org: "acme", Region: "eu-west"})
+	wantCode(t, err, CodeUnavailable)
+	if len(f.fake.Snapshots(f.org.Team)) == 0 {
+		t.Error("the delete reported success and the snapshot is gone; the test proved nothing")
+	}
+}
+
 func TestDeleteSnapshot(t *testing.T) {
 	f := newSandboxFixture(t)
 	pointAtFake(t, f)

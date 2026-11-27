@@ -184,7 +184,33 @@ code=$(fetch_in http://google.com)
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
 step "the customer journey (customers.sh)"
+# customers.sh step 8 puts the snapshotted sandbox on the node that is not the
+# cluster's admin URL, then deletes its snapshot through Lewbox. That is the
+# case a stale delete token used to leave behind on the other node.
+pat=$(compose exec -T node-1 sh -c "grep ^SB_PAT_TOKEN= /etc/sandboxd/sandboxd.env | cut -d= -f2")
+snapshot_body=$(jq -nc --arg name "e2e-snap-$$-$(date +%s)" '{name: $name, role: "admin", team: "*", expires_in: "1h"}')
+snapshot_admin=""
+for _ in $(seq 30); do
+	snapshot_admin=$(compose exec -T node-1 curl -sS -X POST -H "Authorization: Bearer $pat" -H 'Content-Type: application/json' \
+		http://127.0.0.1:21212/v1/tokens -d "$snapshot_body" | jq -r '.token // empty')
+	[[ -n $snapshot_admin ]] && break
+	sleep 2
+done
+[[ -n $snapshot_admin ]] && pass "a cluster admin token for the snapshot placement check" || fail "no cluster admin token"
+export LEWBOX_DEV_CLUSTER_ADMIN_TOKEN="$snapshot_admin"
+export LEWBOX_DEV_NON_ADMIN_URL="http://172.30.0.12:21212"
+export LEWBOX_DEV_NON_ADMIN_NODE="node-2"
 "$HERE/customers.sh" || fail "customer journey"
+
+step "no customer snapshot image is left on the node that held it"
+for n in node-1 node-2; do
+	left=$(compose exec -T "$n" docker images --format '{{.Repository}}' | grep -c '^aerolvm-snapshot/' || true)
+	if [[ $left != 0 ]]; then
+		compose exec -T "$n" docker images --format '{{.Repository}}:{{.Tag}}' | grep '^aerolvm-snapshot/' >&2 || true
+		fail "$n: $left local snapshot image(s) left after the customer delete"
+	fi
+	pass "$n: no local snapshot image left"
+done
 
 step "storage profiles and archived sandboxes (archives.sh)"
 "$HERE/archives.sh" || fail "archives"

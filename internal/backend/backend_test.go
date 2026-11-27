@@ -785,6 +785,13 @@ func TestSandboxAndUsageBackendsAgree(t *testing.T) {
 func TestSnapshotBackendsAgree(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
+	// A delete now checks every node, so the harness's placeholder second
+	// member (an unreachable name) would turn every delete into a region
+	// error. A real cluster's members answer; point both at the fake.
+	h.fake.SetMembers([]aerolvm.Member{
+		{NodeID: "node-a", NodeName: "node-a", APIURL: h.fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+		{NodeID: "node-b", NodeName: "node-b", APIURL: h.fake.URL(), Alive: true, Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"docker"}}},
+	})
 	if _, err := h.local.AddCluster(ctx, service.AddClusterRequest{
 		Slug:        "eu-west",
 		AdminURL:    h.fake.URL(),

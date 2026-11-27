@@ -26,6 +26,14 @@ const (
 	snapshotCacheTTL    = 30 * time.Second
 	snapshotNodeTimeout = 5 * time.Second
 	snapshotWorkers     = 4
+	// A delete token is minted on the node doing the delete. On a follower
+	// the token write is committed through the leader, and the node can
+	// answer before its own state machine applies it, so the first DELETE can
+	// be a 401. Retry that; a delete also gets a brief verification window
+	// because a forwarded delete can take a moment to show on every list.
+	snapshotDeleteTries = 5
+	snapshotVerifyTries = 6
+	snapshotVerifyWait  = 1 * time.Second
 )
 
 // Snapshot is a sandbox snapshot or an archived sandbox, owned by one
@@ -522,66 +530,57 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	if err != nil {
 		return Snapshot{}, err
 	}
-	type match struct {
-		target   snapshotTarget
-		snapshot Snapshot
-		node     snapshotNode
+	// A snapshot is node-local, but more than one node can list the same
+	// name (a duplicated record, or a cluster that copied it). Delete it
+	// everywhere it is recorded, not just on the first node that answered.
+	type foundTarget struct {
+		target snapshotTarget
+		search snapshotSearch
 	}
-	matches := make([]match, 0, 1)
+	matches := make([]foundTarget, 0, 1)
+	unreachable := make([]string, 0, 1)
 	for _, target := range targets {
-		snapshot, node, ok, err := s.findSnapshotOnNodes(ctx, target, name)
+		found, err := s.findSnapshotsOnNodes(ctx, target, name)
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if ok {
-			matches = append(matches, match{target: target, snapshot: snapshot, node: node})
+		if len(found.matches) > 0 {
+			matches = append(matches, foundTarget{target: target, search: found})
+		} else {
+			unreachable = append(unreachable, found.unreachable...)
 		}
 	}
 	switch len(matches) {
 	case 0:
+		// Found nowhere, but a node we could not read might hold it. That is
+		// not "not found"; a down node must not make a delete lie.
+		if len(unreachable) > 0 {
+			return Snapshot{}, unavailable("snapshot %q was not found on the nodes that answered, and node(s) %s could not be checked", name, strings.Join(unreachable, ", "))
+		}
 		return Snapshot{}, notFound("snapshot %q not found", name)
 	case 1:
 	default:
 		return Snapshot{}, invalidField("region", "snapshot %q exists in more than one region or workspace; choose a region", name)
 	}
 	found := matches[0]
+	first := found.search.matches[0]
 
-	// Snapshots are node-local, so mint the token on the member that holds
-	// this one and delete it there.
+	// Snapshots are node-local, so mint the token on each member that lists
+	// this one and delete it there. Minting on the member keeps the token
+	// valid locally; the retry inside deleteSnapshotOnNode covers the gap
+	// before a follower's own state machine applies the write.
 	adminToken, err := s.clusterToken(found.target.cluster)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	admin := s.aerolvmClient(found.node.url, adminToken)
 	team := found.target.org.Team.String
-	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
-	token, err := mintSandboxToken(mintCtx, admin, aerolvm.CreateTokenRequest{
-		Name:      tempTokenName("del", found.target.org.ID, s.now()),
-		Role:      "runner",
-		Team:      team,
-		ExpiresIn: "1h",
-	})
-	cancel()
-	if err != nil {
-		return Snapshot{}, s.regionUnavailable(ctx, found.target.cluster.Slug, err)
-	}
-	if token.Token == "" {
-		return Snapshot{}, unavailable("region %q returned no token", found.target.cluster.Slug)
-	}
-	deleteCtx, cancelDelete := context.WithTimeout(ctx, requestCallTimeout)
-	deleteErr := s.aerolvmClient(found.node.url, token.Token).DeleteSnapshot(deleteCtx, name)
-	cancelDelete()
-	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
-	revokeErr := admin.RevokeToken(cleanup, token.ID)
-	cancelCleanup()
-	if revokeErr != nil {
-		s.log.Warn("revoke snapshot token failed", "region", found.target.cluster.Slug, "err", revokeErr)
-	}
-	if deleteErr != nil {
-		if apiErr, ok := errors.AsType[*aerolvm.APIError](deleteErr); ok && apiErr.Status == http.StatusNotFound {
-			return Snapshot{}, notFound("snapshot %q not found", name)
+	for _, match := range found.search.matches {
+		if err := s.deleteSnapshotOnNode(ctx, found.target, match.node, adminToken, name); err != nil {
+			return Snapshot{}, err
 		}
-		return Snapshot{}, s.regionUnavailable(ctx, found.target.cluster.Slug, deleteErr)
+	}
+	if err := s.verifySnapshotGone(ctx, found.target, name, found.search.answered); err != nil {
+		return Snapshot{}, err
 	}
 	s.snapshotMu.Lock()
 	delete(s.snapshotCache, snapshotKey{found.target.cluster.ID, team})
@@ -595,7 +594,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, name string, req RegionSco
 	}); err != nil {
 		return Snapshot{}, err
 	}
-	return forPrincipal(found.snapshot, found.target.org, p.InstanceAdmin), nil
+	return forPrincipal(first.snapshot, found.target.org, p.InstanceAdmin), nil
 }
 
 // snapshotTargets lists the workspaces and regions a single-region command
@@ -655,9 +654,11 @@ func (s *Service) snapshotTargetsFor(ctx context.Context, org *db.Organization, 
 }
 
 // snapshotNode is one member's address, for reaching node-local snapshots.
+// Alive is false for a node Lewbox has marked down.
 type snapshotNode struct {
-	name string
-	url  string
+	name  string
+	url   string
+	alive bool
 }
 
 // snapshotNodes lists the addresses snapshots can live at, from the members
@@ -669,46 +670,168 @@ func (s *Service) snapshotNodes(ctx context.Context, cluster db.Cluster) ([]snap
 	}
 	nodes := make([]snapshotNode, 0, len(rows))
 	for _, row := range rows {
-		if row.URL != "" {
-			nodes = append(nodes, snapshotNode{name: row.Name, url: row.URL})
-		}
+		nodes = append(nodes, snapshotNode{
+			name:  row.Name,
+			url:   row.URL,
+			alive: !row.Alive.Valid || row.Alive.Int64 != 0,
+		})
 	}
 	if len(nodes) == 0 {
-		nodes = append(nodes, snapshotNode{name: cluster.Slug, url: cluster.AdminURL})
+		nodes = append(nodes, snapshotNode{name: cluster.Slug, url: cluster.AdminURL, alive: true})
 	}
 	return nodes, nil
 }
 
-// findSnapshotOnNodes returns one snapshot and the node that holds it. A node
-// that failed to answer is reported as a region error, never as "not found".
-func (s *Service) findSnapshotOnNodes(ctx context.Context, target snapshotTarget, name string) (Snapshot, snapshotNode, bool, error) {
+// snapshotMatch is one snapshot record and the node that listed it.
+type snapshotMatch struct {
+	snapshot Snapshot
+	node     snapshotNode
+}
+
+// snapshotSearch is what one find pass learned: the nodes that listed the
+// snapshot, the nodes that answered (for the post-delete check), and the nodes
+// that could not be checked.
+type snapshotSearch struct {
+	matches     []snapshotMatch
+	answered    []snapshotNode
+	unreachable []string
+}
+
+// findSnapshotsOnNodes returns every node that lists the named snapshot. A
+// node Lewbox marked down, or one that failed to answer, is recorded as
+// unreachable instead of failing the find: a delete still succeeds on a node
+// that does list the snapshot, and only a find with no match on any reachable
+// node reports the unreachable ones.
+func (s *Service) findSnapshotsOnNodes(ctx context.Context, target snapshotTarget, name string) (snapshotSearch, error) {
 	token, err := s.snapshotToken(ctx, target.cluster, target.org)
 	if err != nil {
-		return Snapshot{}, snapshotNode{}, false, err
+		return snapshotSearch{}, err
 	}
 	nodes, err := s.snapshotNodes(ctx, target.cluster)
 	if err != nil {
-		return Snapshot{}, snapshotNode{}, false, err
+		return snapshotSearch{}, err
 	}
-	var firstErr error
+	found := snapshotSearch{matches: make([]snapshotMatch, 0, 1)}
 	for _, node := range nodes {
-		snapshots, err := s.listNodeSnapshots(ctx, node.url, token)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		if !node.alive || node.url == "" {
+			found.unreachable = append(found.unreachable, node.name)
 			continue
 		}
+		snapshots, err := s.listNodeSnapshots(ctx, node.url, token)
+		if err != nil {
+			s.log.Warn("snapshot list failed", "region", target.cluster.Slug, "node", node.name, "err", err)
+			found.unreachable = append(found.unreachable, node.name)
+			continue
+		}
+		found.answered = append(found.answered, node)
 		for _, snapshot := range snapshots {
 			if snapshot.Name == name {
-				return toSnapshot(snapshot, target.cluster.Slug, node.name), node, true, nil
+				found.matches = append(found.matches, snapshotMatch{
+					snapshot: toSnapshot(snapshot, target.cluster.Slug, node.name),
+					node:     node,
+				})
+				break
 			}
 		}
 	}
-	if firstErr != nil {
-		return Snapshot{}, snapshotNode{}, false, s.regionUnavailable(ctx, target.cluster.Slug, firstErr)
+	return found, nil
+}
+
+// deleteSnapshotOnNode mints a temporary runner token on the node and deletes
+// the snapshot there. A token minted on a follower is committed through the
+// leader, and the follower can answer before its own state machine applies the
+// write, so the first DELETE can be a 401; retry it like a fresh viewer token.
+// A 404 means the snapshot is already gone, which is success for a delete.
+func (s *Service) deleteSnapshotOnNode(ctx context.Context, target snapshotTarget, node snapshotNode, adminToken, name string) error {
+	admin := s.aerolvmClient(node.url, adminToken)
+	mintCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+	token, err := mintSandboxToken(mintCtx, admin, aerolvm.CreateTokenRequest{
+		Name:      tempTokenName("del", target.org.ID, s.now()),
+		Role:      "runner",
+		Team:      target.org.Team.String,
+		ExpiresIn: "1h",
+	})
+	cancel()
+	if err != nil {
+		return s.regionUnavailable(ctx, target.cluster.Slug, err)
 	}
-	return Snapshot{}, snapshotNode{}, false, nil
+	if token.Token == "" {
+		return unavailable("region %q returned no token", target.cluster.Slug)
+	}
+	deleteErr := s.deleteSnapshotRetrying(ctx, node.url, token.Token, name)
+	cleanup, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), requestCallTimeout)
+	revokeErr := admin.RevokeToken(cleanup, token.ID)
+	cancelCleanup()
+	if revokeErr != nil {
+		s.log.Warn("revoke snapshot token failed", "region", target.cluster.Slug, "node", node.name, "err", revokeErr)
+	}
+	if deleteErr == nil {
+		return nil
+	}
+	if apiErr, ok := errors.AsType[*aerolvm.APIError](deleteErr); ok && apiErr.Status == http.StatusNotFound {
+		return nil
+	}
+	return s.regionUnavailable(ctx, target.cluster.Slug, deleteErr)
+}
+
+// deleteSnapshotRetrying retries a 401 while a freshly minted token reaches
+// the node. Any other error, including 404, ends the loop.
+func (s *Service) deleteSnapshotRetrying(ctx context.Context, url, token, name string) error {
+	var err error
+	for attempt := 0; attempt < snapshotDeleteTries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(snapshotTokenWait):
+			}
+		}
+		reqCtx, cancel := context.WithTimeout(ctx, requestCallTimeout)
+		err = s.aerolvmClient(url, token).DeleteSnapshot(reqCtx, name)
+		cancel()
+		if err == nil || !isUnauthorized(err) {
+			return err
+		}
+	}
+	return err
+}
+
+// verifySnapshotGone re-lists the nodes that answered the find until the name
+// is absent everywhere. The delete itself is synchronous, but a forwarded one
+// can take a moment to apply (and a node's list can lag), so retry briefly
+// before saying it failed. A node that was unreachable is not checked, and
+// does not turn a successful delete into an error.
+func (s *Service) verifySnapshotGone(ctx context.Context, target snapshotTarget, name string, answered []snapshotNode) error {
+	token, err := s.snapshotToken(ctx, target.cluster, target.org)
+	if err != nil {
+		return err
+	}
+	still := make([]string, 0, len(answered))
+	for attempt := 0; attempt < snapshotVerifyTries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(snapshotVerifyWait):
+			}
+		}
+		still = still[:0]
+		for _, node := range answered {
+			snapshots, err := s.listNodeSnapshots(ctx, node.url, token)
+			if err != nil {
+				return s.regionUnavailable(ctx, target.cluster.Slug, err)
+			}
+			if slices.ContainsFunc(snapshots, func(snapshot aerolvm.Snapshot) bool {
+				return snapshot.Name == name
+			}) {
+				still = append(still, node.name)
+			}
+		}
+		if len(still) == 0 {
+			return nil
+		}
+	}
+	return unavailable("region %q: snapshot %q is still on node %s after the delete", target.cluster.Slug, name, strings.Join(still, ", "))
 }
 
 // listNodeSnapshots reads one node's snapshots. A freshly minted token may not
@@ -765,6 +888,9 @@ func (s *Service) workspaceSnapshots(ctx context.Context, target snapshotTarget)
 		partial []string
 	)
 	for _, n := range nodes {
+		if n.url == "" {
+			continue
+		}
 		wg.Add(1)
 		go func(n snapshotNode) {
 			defer wg.Done()
