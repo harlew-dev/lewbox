@@ -1,10 +1,10 @@
+<p align="center">
+  <img src="docs/logo.svg" width="96" height="96" alt="Lewbox logo">
+</p>
+
 <h1 align="center">Lewbox</h1>
 
 <p align="center">Run your own sandbox cloud on AerolVM: a self-hosted E2B.</p>
-
-<p align="center">
-  <img src="docs/diagram.png" width="100%" alt="Lewbox architecture: the operator (lewbox CLI and /admin) and customers (the portal at /) use the orchestrator, lewbox serve, which serves the API, console and docs from one SQLite file and manages cluster eu-west (nodes eu-west-1 and eu-west-2) with an admin token. Customers' apps call the cluster endpoint directly with the AerolVM or E2B SDK.">
-</p>
 
 ---
 
