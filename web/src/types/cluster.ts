@@ -7,7 +7,20 @@ export type ArchiveRetention = 'instant' | '1h' | '1d' | '7d' | 'never'
 // How archive snapshots are named: archive-<id> or archive-<name>-<id>.
 export type ArchiveSnapshotName = 'id' | 'name'
 
-export interface Cluster {
+// The AerolVM tuning every node of a cluster applies. A null value is off,
+// or AerolVM's own default; docker_timeout always has a value.
+export interface AdvancedSettings {
+  docker_timeout: string
+  max_sandbox_cpu: number | null
+  max_sandbox_memory_mb: number | null
+  max_sandbox_disk_gb: number | null
+  idle_stop_minutes: number | null
+  destroy_if_idle_for: string
+  max_age: string
+  firecracker_vm_slots: number | null
+}
+
+export interface Cluster extends AdvancedSettings {
   id: string
   slug: string
   name: string
@@ -70,4 +83,13 @@ export interface ClusterUpdate {
   stop_policy?: 'keep' | 'archive'
   archive_local_retention?: ArchiveRetention
   archive_snapshot_name?: ArchiveSnapshotName
+  // Advanced settings: null clears one; an absent field is unchanged.
+  docker_timeout?: string | null
+  max_sandbox_cpu?: number | null
+  max_sandbox_memory_mb?: number | null
+  max_sandbox_disk_gb?: number | null
+  idle_stop_minutes?: number | null
+  destroy_if_idle_for?: string | null
+  max_age?: string | null
+  firecracker_vm_slots?: number | null
 }

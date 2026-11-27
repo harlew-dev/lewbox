@@ -24,7 +24,7 @@ Joining cluster "eu-west"
   → sudo bash …/install.sh join https://10.0.0.5:7003 --token ****** --ca-cert-hash sha256:0d1d8c… --node-id node-2 --role mixed
 [join] node-2 joined the cluster as a mixed node, with a server token
 Lewbox settings
-  ✓ wrote /etc/sandboxd/lewbox.env and /etc/systemd/system/sandboxd.service.d/lewbox.conf, restarted sandboxd
+  ✓ wrote /etc/sandboxd/lewbox-create-policy.yaml, /etc/sandboxd/lewbox.env and /etc/systemd/system/sandboxd.service.d/lewbox.conf, restarted sandboxd
   ✓ sandboxd healthy at http://127.0.0.1:21212/health
   → waiting for "node-2" to appear in cluster "eu-west"
   ✓ node "node-2" joined cluster "eu-west"

@@ -35,6 +35,16 @@ When a sandbox would exceed a limit, the region refuses the create request with 
 
 If the workspace is pending or suspended, creating sandboxes is refused as well. Ask your provider to approve or restore it.
 
+## Your region's rules for its own sandboxes
+
+Your provider can set region-wide defaults that apply when you do not set your own:
+
+- **Idle sandboxes may stop.** A sandbox with no lifecycle timer of its own may be stopped after the region's idle period.
+- **Old or idle sandboxes may be deleted.** A sandbox with no delete timer of its own may be deleted when it has been idle or old enough for the region's default.
+- **Sandboxes may have a maximum size.** A create or resize above the region's CPU, memory or disk cap is refused with `403` and the code `create_policy_denied`; the message names the rule that refused it. A sandbox that already runs is never changed by a new cap.
+
+Timers you set on the sandbox take precedence over these defaults. Set your own lifecycle timers when you create a sandbox if it must not be stopped or deleted for a while. Resizing or recreating is the way to change a sandbox whose size the cap now refuses.
+
 ## Also see
 
 - [Sandboxes and snapshots](../sandboxes/sandboxes-and-snapshots.md): free capacity by deleting what you no longer use.

@@ -52,6 +52,7 @@ Each creation path also has an aligned hourly budget, checked before anything is
 - Secrets never go in flag values. Tokens and passwords are read from stdin (`--password-stdin`, `--admin-token-stdin`, `--dns-api-token-stdin`).
 - Secrets are masked in everything Lewbox prints, including the installer's own output (which prints the operator token).
 - Outside local mode, AerolVM is installed with `--pat-scope host`, so its operator token only works from the node itself and its cluster peers. In local mode AerolVM listens on `127.0.0.1` only.
+- Every node runs AerolVM with a create policy that allows only its cluster's runtime. A Docker cluster therefore refuses a Firecracker create, and a Firecracker cluster refuses a Docker container on the host kernel, even though the customers' SDKs call the cluster directly. The policy is reloaded by AerolVM within 10 seconds of a change.
 
 > [!WARNING]
 > AerolVM's installer takes the DNS token and the join token as command-line arguments. While it runs, other users on the same machine could see them with `ps`. Lewbox can't avoid this hand-off. Join tokens are single use and short-lived, which limits the risk. Run nodes on machines without untrusted local users.

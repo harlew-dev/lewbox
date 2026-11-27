@@ -3,6 +3,7 @@ import { Route } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { choose, json, renderAt, stubAPI } from '../../test/render'
 import { AddNodeDialog } from './add-node-dialog'
+import { RegisterClusterDialog } from './register-dialogs'
 import { StartClusterDialog } from './start-cluster-dialog'
 import type { Cluster } from '../../lib/api'
 import { waitTiming } from './wait-step'
@@ -42,6 +43,32 @@ function text(label: string) {
 function code() {
   return [...document.querySelectorAll('pre, code')].map((node) => node.textContent).join('\n')
 }
+
+describe('RegisterClusterDialog', () => {
+  it('shows a server field error on the matching advanced setting', async () => {
+    stubAPI({
+      'POST /v0/clusters': () =>
+        json(422, {
+          error: {
+            code: 'invalid_request',
+            message: 'max_sandbox_cpu must be at least 1: AerolVM’s default size is 1 CPU.',
+            details: { field: 'max_sandbox_cpu' },
+          },
+        }),
+    })
+    renderAt('/', <Route path="/" element={<RegisterClusterDialog open onClose={() => {}} />} />)
+    fireEvent.change(await screen.findByLabelText('Slug'), { target: { value: 'lab' } })
+    fireEvent.change(screen.getByLabelText('Admin URL'), { target: { value: 'http://10.0.0.5:21212' } })
+    fireEvent.change(screen.getByLabelText('Admin token'), { target: { value: 'avm_token' } })
+    fireEvent.click(screen.getByText('Advanced'))
+    fireEvent.change(await screen.findByLabelText('Maximum CPUs per sandbox'), { target: { value: '0.5' } })
+    const submit = screen.getByRole('button', { name: 'Register cluster' })
+    fireEvent.submit(submit.closest('form')!)
+    expect(
+      await screen.findByText('max_sandbox_cpu must be at least 1: AerolVM’s default size is 1 CPU.'),
+    ).toBeInTheDocument()
+  })
+})
 
 describe('StartClusterDialog', () => {
   it('builds domain, DNS profile, storage and archive commands in two steps', async () => {
@@ -97,11 +124,16 @@ describe('StartClusterDialog', () => {
     fireEvent.change(text('Public host'), { target: { value: '10.0.0.5' } })
     fireEvent.click(screen.getByText('Advanced'))
     fireEvent.change(await screen.findByLabelText('Extra installer flags'), { target: { value: '--lb-health-port=8081' } })
+    fireEvent.change(screen.getByLabelText('Docker call timeout'), { target: { value: '1h' } })
+    fireEvent.change(screen.getByLabelText('Maximum CPUs per sandbox'), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText('Stop after idle minutes'), { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: /Next/ }))
     await screen.findByText('Install AerolVM')
     const commands = code()
     expect(commands).toContain('lewbox install --public-host 10.0.0.5 --runtime docker --name node-1 -- --lb-health-port=8081')
-    expect(commands).toContain('lewbox node add node-1 --new-cluster lab')
+    expect(commands).toContain(
+      'lewbox node add node-1 --new-cluster lab --docker-timeout 1h --max-sandbox-cpu 4 --idle-stop-minutes 30',
+    )
     expect(commands).not.toContain('--stop-policy')
     expect(commands).not.toContain('--archive-')
   })

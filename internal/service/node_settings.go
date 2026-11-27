@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,20 +12,24 @@ import (
 	"github.com/harlew-dev/lewbox/internal/db"
 )
 
-// NodeSettings is everything a node of a cluster must apply: its storage
-// profile (the registry in front of the cluster's bucket) and its DNS profile.
-// It is the only response besides the profiles' own credentials that carries
-// secrets. Instance admins only.
+// NodeSettings is everything a node of a cluster must apply: its advanced
+// AerolVM settings, its storage profile (the registry in front of the
+// cluster's bucket) and its DNS profile. It is the only response besides the
+// profiles' own credentials that carries secrets. Instance admins only.
 type NodeSettings struct {
 	ClusterID  string `json:"cluster_id"`
 	Cluster    string `json:"cluster"` // slug
+	Runtime    string `json:"runtime"`
 	StopPolicy string `json:"stop_policy"`
 	// ArchiveLocalRetention is how long the node keeps local copies of
 	// archived sandboxes before its cleanup timer removes them: instant, 1h,
 	// 1d, 7d or never (no cleanup timer).
-	ArchiveLocalRetention string               `json:"archive_local_retention"`
-	Storage               *NodeStorageSettings `json:"storage"` // null: no storage profile
-	DNS                   *NodeDNSSettings     `json:"dns"`     // null: no domain or no DNS profile
+	ArchiveLocalRetention string `json:"archive_local_retention"`
+	// AdvancedSettings are the per-cluster AerolVM settings every node
+	// applies. They are flattened into the response.
+	AdvancedSettings
+	Storage *NodeStorageSettings `json:"storage"` // null: no storage profile
+	DNS     *NodeDNSSettings     `json:"dns"`     // null: no domain or no DNS profile
 }
 
 // NodeStorageSettings is the bucket a node's registry stores snapshots in.
@@ -61,6 +66,12 @@ type ReportNodeSettingsRequest struct {
 	// ArchiveRetention is the archive_local_retention the node applied with
 	// its storage settings; null with no storage profile.
 	ArchiveRetention *string `json:"archive_retention"`
+	// PolicyRuntime is the runtime the node's AerolVM create policy allows;
+	// null when it applied none.
+	PolicyRuntime *string `json:"policy_runtime"`
+	// Advanced is the advanced settings the node applied; null when it
+	// applied none (a node configured before Lewbox managed them).
+	Advanced *AdvancedSettings `json:"advanced"`
 }
 
 // NodeSettingsState is what a node last reported. Reasons is never null.
@@ -97,8 +108,10 @@ func (s *Service) ClusterNodeSettings(ctx context.Context, ref string) (NodeSett
 	out := NodeSettings{
 		ClusterID:             row.ID,
 		Cluster:               row.Slug,
+		Runtime:               row.Runtime,
 		StopPolicy:            row.StopPolicy,
 		ArchiveLocalRetention: row.ArchiveLocalRetention,
+		AdvancedSettings:      advancedFromRow(row),
 	}
 
 	if row.StorageProfileID.Valid {
@@ -173,6 +186,30 @@ func (s *Service) ReportNodeSettings(ctx context.Context, ref string, req Report
 		}
 		retention = sql.NullString{String: value, Valid: true}
 	}
+	var policyRuntime sql.NullString
+	if req.PolicyRuntime != nil && strings.TrimSpace(*req.PolicyRuntime) != "" {
+		value := strings.ToLower(strings.TrimSpace(*req.PolicyRuntime))
+		if value != "docker" && value != "firecracker" {
+			return Node{}, invalidField("policy_runtime", "policy_runtime must be docker or firecracker")
+		}
+		policyRuntime = sql.NullString{String: value, Valid: true}
+	}
+	var advancedJSON sql.NullString
+	if req.Advanced != nil {
+		cluster, err := s.queries(ctx).GetClusterByID(ctx, row.ClusterID.String)
+		if err != nil {
+			return Node{}, fmt.Errorf("get cluster: %w", err)
+		}
+		advanced, err := normalizeAdvanced(*req.Advanced, cluster.Runtime, nil)
+		if err != nil {
+			return Node{}, err
+		}
+		data, err := json.Marshal(advanced)
+		if err != nil {
+			return Node{}, fmt.Errorf("encode advanced settings: %w", err)
+		}
+		advancedJSON = sql.NullString{String: string(data), Valid: true}
+	}
 	updated, err := s.queries(ctx).ReportNodeSettings(ctx, db.ReportNodeSettingsParams{
 		SettingsAppliedAt:        sql.NullTime{Time: s.now(), Valid: true},
 		SettingsStorageProfileID: storageID,
@@ -180,6 +217,8 @@ func (s *Service) ReportNodeSettings(ctx context.Context, ref string, req Report
 		SettingsDnsProfileID:     dnsID,
 		SettingsDnsVersion:       dnsVersion,
 		SettingsArchiveRetention: retention,
+		SettingsPolicyRuntime:    policyRuntime,
+		SettingsAdvanced:         advancedJSON,
 		ID:                       row.ID,
 	})
 	if err != nil {
@@ -319,9 +358,34 @@ func (s *Service) applyNodeOutdated(ctx context.Context, n *Node, r db.Node, clu
 		}
 	}
 
+	if reason := policyRuntimeReason(r, cluster); reason != "" {
+		reasons = append(reasons, reason)
+	}
+
+	desired := advancedFromRow(cluster)
+	if advancedSet(desired) || r.SettingsAdvanced.Valid {
+		advancedReasons, err := advancedDriftReasons(desired, r.SettingsAdvanced, cluster.Runtime)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, advancedReasons...)
+	}
+
 	n.Settings.Reasons = reasons
 	n.Settings.Outdated = len(reasons) > 0
 	return nil
+}
+
+// policyRuntimeReason is why a node's applied create policy runtime differs
+// from its cluster's, or "" when it matches.
+func policyRuntimeReason(r db.Node, cluster db.Cluster) string {
+	if !r.SettingsPolicyRuntime.Valid {
+		return fmt.Sprintf("create policy runtime is %s; this node applied none", cluster.Runtime)
+	}
+	if r.SettingsPolicyRuntime.String != cluster.Runtime {
+		return fmt.Sprintf("create policy runtime is %s; this node applied %s", cluster.Runtime, r.SettingsPolicyRuntime.String)
+	}
+	return ""
 }
 
 // storageProfileLabel names the profile a node applied, keeping the stored
@@ -357,21 +421,25 @@ func (s *Service) dnsProfileLabel(ctx context.Context, id sql.NullString) (strin
 }
 
 // nodeSettingsCheck reports nodes whose applied settings are behind their
-// cluster's profiles. It is omitted when the cluster has no storage profile
-// and no node has reported storage settings.
+// cluster's profiles or advanced settings. It is omitted when the cluster has
+// no storage profile, no advanced setting beyond Lewbox's defaults, and no
+// node has reported either.
 func (s *Service) nodeSettingsCheck(ctx context.Context, cluster db.Cluster) (Check, error) {
 	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
 	if err != nil {
 		return Check{}, fmt.Errorf("list cluster nodes: %w", err)
 	}
 	reportedStorage := false
+	reportedAdvanced := false
 	for _, r := range rows {
 		if r.SettingsStorageProfileID.Valid {
 			reportedStorage = true
-			break
+		}
+		if r.SettingsAdvanced.Valid {
+			reportedAdvanced = true
 		}
 	}
-	if !cluster.StorageProfileID.Valid && !reportedStorage {
+	if !cluster.StorageProfileID.Valid && !reportedStorage && !advancedSet(advancedFromRow(cluster)) && !reportedAdvanced {
 		return Check{}, nil
 	}
 
@@ -382,7 +450,7 @@ func (s *Service) nodeSettingsCheck(ctx context.Context, cluster db.Cluster) (Ch
 			return Check{}, err
 		}
 		if n.Settings != nil && n.Settings.Outdated {
-			outdated = append(outdated, fmt.Sprintf("%s: %s", n.Name, n.Settings.Reasons[0]))
+			outdated = append(outdated, fmt.Sprintf("%s: %s", n.Name, strings.Join(n.Settings.Reasons, "; ")))
 		}
 	}
 	if len(outdated) == 0 {
@@ -392,4 +460,65 @@ func (s *Service) nodeSettingsCheck(ctx context.Context, cluster db.Cluster) (Ch
 		Name:   "node settings",
 		Detail: strings.Join(outdated, "; ") + "; run `lewbox node configure` on each",
 	}, nil
+}
+
+// driftSample is how many sandboxes of another runtime a failing check names.
+const driftSample = 5
+
+// createPolicyCheck reports nodes that have not applied the cluster's create
+// policy, and sandboxes in the mirror whose runtime the policy no longer
+// allows. AerolVM has no API to read a node's policy, so the mirror is the
+// live drift signal.
+func (s *Service) createPolicyCheck(ctx context.Context, cluster db.Cluster) (Check, error) {
+	rows, err := s.queries(ctx).ListNodesByCluster(ctx, sql.NullString{String: cluster.ID, Valid: true})
+	if err != nil {
+		return Check{}, fmt.Errorf("list cluster nodes: %w", err)
+	}
+	problems := make([]string, 0)
+
+	outdated := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if reason := policyRuntimeReason(r, cluster); reason != "" {
+			outdated = append(outdated, fmt.Sprintf("%s: %s", r.Name, reason))
+		}
+	}
+	if len(outdated) > 0 {
+		problems = append(problems, strings.Join(outdated, "; ")+"; run `lewbox node configure` on each")
+	}
+
+	drifted, err := s.queries(ctx).CountSandboxesByRuntimeMismatch(ctx, db.CountSandboxesByRuntimeMismatchParams{
+		ClusterID: cluster.ID,
+		Runtime:   cluster.Runtime,
+	})
+	if err != nil {
+		return Check{}, fmt.Errorf("count sandboxes of another runtime: %w", err)
+	}
+	if drifted > 0 {
+		sample, err := s.queries(ctx).ListSandboxesByRuntimeMismatch(ctx, db.ListSandboxesByRuntimeMismatchParams{
+			ClusterID: cluster.ID,
+			Runtime:   cluster.Runtime,
+			Limit:     driftSample,
+		})
+		if err != nil {
+			return Check{}, fmt.Errorf("list sandboxes of another runtime: %w", err)
+		}
+		labels := make([]string, 0, len(sample))
+		for _, row := range sample {
+			node := row.Node
+			if node == "" {
+				node = "an unknown node"
+			}
+			labels = append(labels, fmt.Sprintf("%s (%s) on %s", row.ID, row.Runtime, node))
+		}
+		more := ""
+		if int64(len(sample)) < drifted {
+			more = ", ..."
+		}
+		problems = append(problems, fmt.Sprintf("%d sandbox(es) on this %s cluster run another runtime: %s%s", drifted, cluster.Runtime, strings.Join(labels, ", "), more))
+	}
+
+	if len(problems) > 0 {
+		return Check{Name: "create policy", Detail: strings.Join(problems, "; ")}, nil
+	}
+	return Check{Name: "create policy", OK: true, Detail: fmt.Sprintf("%d node(s) enforce %s", len(rows), cluster.Runtime)}, nil
 }

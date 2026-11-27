@@ -199,7 +199,22 @@ func (a *app) updateAerolVM(ctx context.Context, o *updateOptions) error {
 	if err := a.runInstaller(ctx, a.host().runner, run, false); err != nil {
 		return err
 	}
-	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
+	// The cluster's node settings decide the runtime, advanced settings and
+	// push lines. A node in a cluster must reach the orchestrator: writing
+	// guessed files over the cluster's would be worse than not upgrading.
+	files := defaultNodeFiles(state.Runtime)
+	if state.Cluster != "" {
+		b, _, err := a.resolve(ctx)
+		if err != nil {
+			return err
+		}
+		settings, err := b.ClusterNodeSettings(ctx, state.Cluster)
+		if err != nil {
+			return err
+		}
+		files = machineNodeFiles(settings, state.Mode)
+	}
+	if _, err := a.applySettings(ctx, a.host().runner, files); err != nil {
 		return err
 	}
 	if _, err := machine.WaitHealth(ctx, a.host().localAPIURL, installer.Version, a.host().sleep); err != nil {

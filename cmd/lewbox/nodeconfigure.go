@@ -177,15 +177,16 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 		}
 	}
 
-	// Lewbox's env file carries the push settings when there is storage.
-	envContent := machine.EnvFileContent
-	if settings.Storage != nil && state.Mode != machine.ModeLocal {
-		envContent += machine.PushEnv(settings.ClusterID)
+	// The cluster record names the runtime its create policy allows, and its
+	// advanced settings decide the env file and the policy's size caps.
+	if settings.Runtime == "" {
+		settings.Runtime = state.Runtime
 	}
+	files := machineNodeFiles(settings, state.Mode)
 	if dryRun {
-		a.say("  → would write %s", machine.EnvironmentFile)
+		a.say("  → would write %s and %s", machine.CreatePolicyFile, machine.EnvironmentFile)
 	} else {
-		changed, err := a.applySettings(ctx, runner, envContent)
+		changed, err := a.applySettings(ctx, runner, files)
 		if err != nil {
 			return out, err
 		}
@@ -214,7 +215,10 @@ func (a *app) configureNode(ctx context.Context, b backend.Backend, state *machi
 		return out, nil
 	}
 
-	req := service.ReportNodeSettingsRequest{}
+	req := service.ReportNodeSettingsRequest{
+		PolicyRuntime: &settings.Runtime,
+		Advanced:      &settings.AdvancedSettings,
+	}
 	if settings.Storage != nil && state.Mode != machine.ModeLocal {
 		name := settings.Storage.Profile
 		req.StorageProfile = &name

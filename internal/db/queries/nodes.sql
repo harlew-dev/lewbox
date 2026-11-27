@@ -34,7 +34,9 @@ SET settings_applied_at = ?,
     settings_storage_version = ?,
     settings_dns_profile_id = ?,
     settings_dns_version = ?,
-    settings_archive_retention = ?
+    settings_archive_retention = ?,
+    settings_policy_runtime = ?,
+    settings_advanced = ?
 WHERE id = ?
 RETURNING *;
 

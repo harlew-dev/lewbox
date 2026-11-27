@@ -293,7 +293,7 @@ func (q *Queries) ListNodesPage(ctx context.Context, p NodeListParams) ([]NodeLi
 	}
 	out := make([]NodeListRow, 0)
 	total, err := q.listPage(ctx,
-		"n.id, n.name, n.url, n.created_at, n.cluster_id, n.role, n.version, n.alive, n.last_seen_at, n.settings_applied_at, n.settings_storage_profile_id, n.settings_storage_version, n.settings_dns_profile_id, n.settings_dns_version, n.settings_archive_retention, c.slug",
+		"n.id, n.name, n.url, n.created_at, n.cluster_id, n.role, n.version, n.alive, n.last_seen_at, n.settings_applied_at, n.settings_storage_profile_id, n.settings_storage_version, n.settings_dns_profile_id, n.settings_dns_version, n.settings_archive_retention, n.settings_policy_runtime, n.settings_advanced, c.slug",
 		"FROM nodes n LEFT JOIN clusters c ON c.id = n.cluster_id",
 		&w, p.Order, p.Limit, p.Offset,
 		func(rows *sql.Rows) error {
@@ -303,7 +303,7 @@ func (q *Queries) ListNodesPage(ctx context.Context, p NodeListParams) ([]NodeLi
 				&row.Node.Role, &row.Node.Version, &row.Node.Alive, &row.Node.LastSeenAt,
 				&row.Node.SettingsAppliedAt, &row.Node.SettingsStorageProfileID, &row.Node.SettingsStorageVersion,
 				&row.Node.SettingsDnsProfileID, &row.Node.SettingsDnsVersion, &row.Node.SettingsArchiveRetention,
-				&row.ClusterSlug,
+				&row.Node.SettingsPolicyRuntime, &row.Node.SettingsAdvanced, &row.ClusterSlug,
 			); err != nil {
 				return err
 			}

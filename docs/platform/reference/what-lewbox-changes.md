@@ -32,14 +32,15 @@ Running the installer again is safe: it keeps its saved settings and the node's 
 
 ## Lewbox's settings
 
-Lewbox needs two AerolVM settings on every node: identity mode, so tokens work, and long key lifetimes. It writes them to **its own files**, never to the installer's, so re-running or upgrading AerolVM can't undo them:
+Lewbox needs four AerolVM settings on every node: identity mode, so tokens work; long key lifetimes; a create policy that allows only the cluster's runtime; and a longer HTTP client timeout so sandboxd's Docker client does not time out a snapshot commit of a large container. It writes them to **its own files**, never to the installer's, so re-running or upgrading AerolVM can't undo them:
 
 | File | Contents |
 |---|---|
-| `/etc/sandboxd/lewbox.env` (root, `0600`) | `SB_IDENTITY_ENABLED=true`<br>`SB_TOKEN_MAX_TTL=876000h`<br>On a cluster with storage: `SB_SNAPSHOT_PUSH_ENABLED=true`, `SB_MIRROR_PUSH_HOST=127.0.0.1:5000`, `SB_IMAGE_DISTRIBUTION_AOCR_HOST=127.0.0.1:5000`, `SB_AUTO_IMPORT_CLUSTER_ID=<cluster id>`, `SB_AUTO_IMPORT_CLUSTER_PAT_PATH=/etc/sandboxd/lewbox-registry.token`, `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL=30s` |
+| `/etc/sandboxd/lewbox-create-policy.yaml` (root, `0644`) | `version: 1`<br>`runtimes: [<cluster runtime>]`, so a Docker cluster refuses Firecracker creates and a Firecracker cluster refuses Docker ones<br>When the cluster sets size caps: `limits:` with `max_cpu`, `max_memory_mb` and/or `max_disk_gb` |
+| `/etc/sandboxd/lewbox.env` (root, `0600`) | `SB_IDENTITY_ENABLED=true`<br>`SB_TOKEN_MAX_TTL=876000h`<br>`SB_CREATE_POLICY_FILE=/etc/sandboxd/lewbox-create-policy.yaml`<br>`SB_HTTP_CLIENT_TIMEOUT=<cluster docker_timeout, 15m by default>`<br>When set: `SB_IDLE_TIMEOUT_MIN`, `SB_DEFAULT_DESTROY_IF_IDLE_FOR`, `SB_MAX_AGE`, and on a Firecracker cluster `SB_FIRECRACKER_TAP_POOL_SIZE`<br>On a cluster with storage: `SB_SNAPSHOT_PUSH_ENABLED=true`, `SB_MIRROR_PUSH_HOST=127.0.0.1:5000`, `SB_IMAGE_DISTRIBUTION_AOCR_HOST=127.0.0.1:5000`, `SB_AUTO_IMPORT_CLUSTER_ID=<cluster id>`, `SB_AUTO_IMPORT_CLUSTER_PAT_PATH=/etc/sandboxd/lewbox-registry.token`, `SB_SNAPSHOT_PUSH_RECONCILE_INTERVAL=30s` |
 | `/etc/systemd/system/sandboxd.service.d/lewbox.conf` | `[Service]`<br>`EnvironmentFile=/etc/sandboxd/lewbox.env` |
 
-Then `sudo systemctl daemon-reload` and `sudo systemctl restart sandboxd`, but only if something changed. Then Lewbox waits for `/health`.
+The policy file is written first, so sandboxd never starts pointing at a missing file: a missing or invalid policy refuses every create with `create_policy_invalid`. Then `sudo systemctl daemon-reload` and `sudo systemctl restart sandboxd`, but only if something changed. Then Lewbox waits for `/health`. `lewbox node configure` fetches the cluster's settings each time and writes the same files, so a change reaches a node there. See [Advanced AerolVM settings](../clusters/advanced-settings.md).
 
 ## The snapshot registry
 

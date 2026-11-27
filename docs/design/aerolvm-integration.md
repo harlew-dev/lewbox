@@ -117,10 +117,10 @@ Lewbox settings
 
 1. **Start it.** `sudo bash install.sh init` (the installer's saved options are reused).
 2. **Lewbox settings.** The installer has no flag for identity mode. Lewbox writes **its own files**, which the installer never touches, so re-running the installer can't undo them:
-   - `/etc/sandboxd/lewbox.env` (0600): `SB_IDENTITY_ENABLED=true`, `SB_TOKEN_MAX_TTL=876000h`;
+   - `/etc/sandboxd/lewbox.env` (0600): `SB_IDENTITY_ENABLED=true`, `SB_TOKEN_MAX_TTL=876000h`, `SB_HTTP_CLIENT_TIMEOUT=15m`;
    - `/etc/systemd/system/sandboxd.service.d/lewbox.conf`: `EnvironmentFile=/etc/sandboxd/lewbox.env`.
 
-   Then `systemctl daemon-reload`, `systemctl restart sandboxd`, and wait for `/health`. **Verified:** identity must be on *every* node; a node without it answers 401 to every token, including ones minted elsewhere in the cluster. Still to do: a create policy that allows only this cluster's runtime (MVP §5).
+   Then `systemctl daemon-reload`, `systemctl restart sandboxd`, and wait for `/health`. **Verified:** identity must be on *every* node; a node without it answers 401 to every token, including ones minted elsewhere in the cluster. The same step writes `/etc/sandboxd/lewbox-create-policy.yaml` (`version: 1`, `runtimes: [<cluster runtime>]`) **before** the env file that names it through `SB_CREATE_POLICY_FILE`, because a missing or invalid file refuses every create with `create_policy_invalid`. The node reports the policy runtime it applied, and the cluster's `create policy` check fails on a node that is behind or on a live sandbox of another runtime (AerolVM has no API to read a node's policy).
 3. **Get an admin token.** Read the PAT from `/etc/sandboxd/sandboxd.env` (`SB_PAT_TOKEN`) with sudo, never from the installer's output. Use it over `127.0.0.1:21212` to mint an admin `avm_` token (`--role admin --team '*' --expires-in 36500d`). After that, Lewbox only uses that token (MVP §4 trust boundaries). **Verified:** right after a start, `/health` answers before raft has a leader, and token writes return 503 for 1–3 seconds; Lewbox retries them. With `--pat-scope host` the PAT is refused from any address but loopback (401).
 4. **Register the cluster.** Call `POST /v0/clusters` with the slug, the token, the runtime and the endpoint: `https://<domain>`, `http://<public-host>:21212`, or `http://127.0.0.1:21212`. That runs the normal validation (MVP §7.1). The token goes to the orchestrator once, and is stored there encrypted with the keyring (`keyring.key` next to the database).
 5. Later (planned): print the `cluster setup` snippet for the audit export.
@@ -223,4 +223,4 @@ AerolVM stays installed on the machine. To use it again, run `sudo sandboxd rese
 4. **Are installer edits kept?** Lewbox no longer edits the installer's files; it uses its own env file and systemd drop-in (§3.1).
 5. **Can a node that booted alone join later?** It can become a seed (`sandboxd init`) but not join. Starting every node with `init` covers both.
 
-Still open: a create policy per runtime (§3.1), and the dev cluster only tests IP mode, not domain mode with TLS.
+Still open: the dev cluster only tests IP mode, not domain mode with TLS. The create policy per runtime is built (§3.1); e2e checks that a Firecracker cluster refuses a Docker create with `403 create_policy_denied`.

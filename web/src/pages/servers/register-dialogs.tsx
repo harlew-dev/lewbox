@@ -22,8 +22,9 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import * as api from '../../lib/api'
 import { routes } from '../../lib/routes'
-import type { Runtime } from '../../lib/commands'
+import { emptyAdvancedForm, type AdvancedForm, type Runtime } from '../../lib/commands'
 import { failureMessage } from '../../lib/use-load'
+import { AdvancedOptions, advancedCreateInput, advancedFieldError } from './cluster-settings'
 
 // The checks a failed registration reports in its error details.
 function failedChecks(failure: unknown): api.Check[] {
@@ -55,11 +56,14 @@ function RegisterCluster({ onClose }: { onClose: () => void }) {
   const [endpointURL, setEndpointURL] = useState('')
   const [runtime, setRuntime] = useState<Runtime>('docker')
   const [token, setToken] = useState('')
+  const [advanced, setAdvanced] = useState<AdvancedForm>(emptyAdvancedForm)
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof AdvancedForm, string>>>({})
   const [checks, setChecks] = useState<api.Check[]>([])
 
   const register = useAction(
     async () => {
       setChecks([])
+      setFieldErrors({})
       try {
         return await api.addCluster({
           slug,
@@ -68,13 +72,22 @@ function RegisterCluster({ onClose }: { onClose: () => void }) {
           endpoint_url: endpointURL,
           runtime,
           admin_token: token,
+          ...advancedCreateInput(advanced, runtime),
         })
       } catch (failure) {
         setChecks(failedChecks(failure))
         throw failure
       }
     },
-    { toError: (failure) => ({ message: failureMessage(failure) }) },
+    {
+      onError: (failure) => {
+        const found = advancedFieldError(failure)
+        if (!found) return false
+        setFieldErrors({ [found.field]: found.message })
+        return true
+      },
+      toError: (failure) => ({ message: failureMessage(failure) }),
+    },
   )
 
   async function submit(event: FormEvent) {
@@ -164,6 +177,13 @@ function RegisterCluster({ onClose }: { onClose: () => void }) {
             autoFocus={false}
           />
         </FieldGroup>
+        <AdvancedOptions
+          form={advanced}
+          onChange={(field, value) => setAdvanced((current) => ({ ...current, [field]: value }))}
+          runtime={runtime}
+          disabled={register.busy}
+          errors={fieldErrors}
+        />
       </DialogBody>
       <DialogActions>
         <Button plain onClick={onClose} disabled={register.busy}>

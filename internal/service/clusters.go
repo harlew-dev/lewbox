@@ -60,14 +60,17 @@ type Cluster struct {
 	ArchiveLocalRetention string `json:"archive_local_retention"`
 	// ArchiveSnapshotName is how archive snapshots are named: id
 	// (archive-<sandbox id>) or name (archive-<sandbox name>-<sandbox id>).
-	ArchiveSnapshotName string     `json:"archive_snapshot_name"`
-	AdminTokenLast4     string     `json:"admin_token_last4"`
-	Status              string     `json:"status"`
-	StatusDetail        string     `json:"status_detail,omitempty"`
-	Version             string     `json:"version,omitempty"`
-	Nodes               int        `json:"nodes"`
-	CheckedAt           *time.Time `json:"checked_at,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
+	ArchiveSnapshotName string `json:"archive_snapshot_name"`
+	// AdvancedSettings are the per-cluster AerolVM settings every node
+	// applies. They are flattened into the cluster object.
+	AdvancedSettings
+	AdminTokenLast4 string     `json:"admin_token_last4"`
+	Status          string     `json:"status"`
+	StatusDetail    string     `json:"status_detail,omitempty"`
+	Version         string     `json:"version,omitempty"`
+	Nodes           int        `json:"nodes"`
+	CheckedAt       *time.Time `json:"checked_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // ClusterDetail is a cluster with its last checks and its nodes.
@@ -99,7 +102,18 @@ type AddClusterRequest struct {
 	ArchiveLocalRetention string `json:"archive_local_retention"`
 	// ArchiveSnapshotName is id or name; default id.
 	ArchiveSnapshotName string `json:"archive_snapshot_name"`
-	AdminToken          string `json:"admin_token"`
+	// Advanced AerolVM settings; null means off or the default. A pointer
+	// distinguishes an absent or null value from an explicit zero, which
+	// validation refuses.
+	DockerTimeout      string   `json:"docker_timeout"`
+	MaxSandboxCPU      *float64 `json:"max_sandbox_cpu"`
+	MaxSandboxMemoryMB *int64   `json:"max_sandbox_memory_mb"`
+	MaxSandboxDiskGB   *int64   `json:"max_sandbox_disk_gb"`
+	IdleStopMinutes    *int64   `json:"idle_stop_minutes"`
+	DestroyIfIdleFor   string   `json:"destroy_if_idle_for"`
+	MaxAge             string   `json:"max_age"`
+	FirecrackerVMSlots *int64   `json:"firecracker_vm_slots"`
+	AdminToken         string   `json:"admin_token"`
 	// AdminIP is an IP address at which admin_url's host answers. When the
 	// host doesn't resolve, the checks that register the cluster connect
 	// there, so a new domain whose DNS records Lewbox is about to create can
@@ -119,6 +133,68 @@ type UpdateClusterRequest struct {
 	ArchiveLocalRetention *string `json:"archive_local_retention,omitempty"`
 	// ArchiveSnapshotName is id or name.
 	ArchiveSnapshotName *string `json:"archive_snapshot_name,omitempty"`
+	// Advanced AerolVM settings. A null clears the setting; an absent field
+	// leaves it alone.
+	DockerTimeout      Optional[string]  `json:"docker_timeout,omitempty"`
+	MaxSandboxCPU      Optional[float64] `json:"max_sandbox_cpu,omitempty"`
+	MaxSandboxMemoryMB Optional[int64]   `json:"max_sandbox_memory_mb,omitempty"`
+	MaxSandboxDiskGB   Optional[int64]   `json:"max_sandbox_disk_gb,omitempty"`
+	IdleStopMinutes    Optional[int64]   `json:"idle_stop_minutes,omitempty"`
+	DestroyIfIdleFor   Optional[string]  `json:"destroy_if_idle_for,omitempty"`
+	MaxAge             Optional[string]  `json:"max_age,omitempty"`
+	FirecrackerVMSlots Optional[int64]   `json:"firecracker_vm_slots,omitempty"`
+}
+
+// MarshalJSON omits fields the caller did not set and keeps an explicit null
+// for a field being cleared. The CLI sends only what changed.
+func (r UpdateClusterRequest) MarshalJSON() ([]byte, error) {
+	fields := make(map[string]any, 16)
+	if r.Domain != nil {
+		fields["domain"] = *r.Domain
+	}
+	if r.DNSProfile != nil {
+		fields["dns_profile"] = *r.DNSProfile
+	}
+	if r.DNSRecords != nil {
+		fields["dns_records"] = *r.DNSRecords
+	}
+	if r.StorageProfile != nil {
+		fields["storage_profile"] = *r.StorageProfile
+	}
+	if r.StopPolicy != nil {
+		fields["stop_policy"] = *r.StopPolicy
+	}
+	if r.ArchiveLocalRetention != nil {
+		fields["archive_local_retention"] = *r.ArchiveLocalRetention
+	}
+	if r.ArchiveSnapshotName != nil {
+		fields["archive_snapshot_name"] = *r.ArchiveSnapshotName
+	}
+	if r.DockerTimeout.Set {
+		fields["docker_timeout"] = r.DockerTimeout
+	}
+	if r.MaxSandboxCPU.Set {
+		fields["max_sandbox_cpu"] = r.MaxSandboxCPU
+	}
+	if r.MaxSandboxMemoryMB.Set {
+		fields["max_sandbox_memory_mb"] = r.MaxSandboxMemoryMB
+	}
+	if r.MaxSandboxDiskGB.Set {
+		fields["max_sandbox_disk_gb"] = r.MaxSandboxDiskGB
+	}
+	if r.IdleStopMinutes.Set {
+		fields["idle_stop_minutes"] = r.IdleStopMinutes
+	}
+	if r.DestroyIfIdleFor.Set {
+		fields["destroy_if_idle_for"] = r.DestroyIfIdleFor
+	}
+	if r.MaxAge.Set {
+		fields["max_age"] = r.MaxAge
+	}
+	if r.FirecrackerVMSlots.Set {
+		fields["firecracker_vm_slots"] = r.FirecrackerVMSlots
+	}
+	return json.Marshal(fields)
 }
 
 // JoinTokenRequest is the input to CreateJoinToken.
@@ -225,6 +301,10 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	if err != nil {
 		return ClusterDetail{}, err
 	}
+	advanced, err := normalizeAdvanced(advancedFromAdd(req), runtime, nil)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
 
 	if _, err := s.queries(ctx).GetClusterBySlug(ctx, slug); err == nil {
 		return ClusterDetail{}, conflict("a cluster with slug %q already exists", slug)
@@ -252,6 +332,7 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 	now := s.now()
 	var row db.Cluster
 	err = s.withTx(ctx, func(ctx context.Context) error {
+		dockerTimeout, maxCPU, maxMemory, maxDisk, idleStop, destroyIfIdle, maxAge, vmSlots := advancedParams(advanced)
 		var err error
 		row, err = s.queries(ctx).CreateCluster(ctx, db.CreateClusterParams{
 			ID:                    uuid.NewV7().String(),
@@ -273,6 +354,14 @@ func (s *Service) AddCluster(ctx context.Context, req AddClusterRequest) (Cluste
 			StopPolicy:            stopPolicy,
 			ArchiveLocalRetention: retention,
 			ArchiveSnapshotName:   snapshotName,
+			DockerTimeout:         dockerTimeout,
+			MaxSandboxCpu:         maxCPU,
+			MaxSandboxMemoryMb:    maxMemory,
+			MaxSandboxDiskGb:      maxDisk,
+			IdleStopMinutes:       idleStop,
+			DestroyIfIdleFor:      destroyIfIdle,
+			MaxAge:                maxAge,
+			FirecrackerVmSlots:    vmSlots,
 			Checks:                encodeChecks(checks),
 			CheckedAt:             sql.NullTime{Time: now, Valid: true},
 			CreatedAt:             now,
@@ -370,8 +459,11 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 	}
 	if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
 		req.StorageProfile == nil && req.StopPolicy == nil &&
-		req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil {
-		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention or archive_snapshot_name")
+		req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil &&
+		!req.DockerTimeout.Set && !req.MaxSandboxCPU.Set && !req.MaxSandboxMemoryMB.Set &&
+		!req.MaxSandboxDiskGB.Set && !req.IdleStopMinutes.Set && !req.DestroyIfIdleFor.Set &&
+		!req.MaxAge.Set && !req.FirecrackerVMSlots.Set {
+		return ClusterDetail{}, invalid("nothing to change: set domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name or an advanced setting")
 	}
 	row, err := s.findCluster(ctx, ref)
 	if err != nil {
@@ -453,9 +545,40 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 			return ClusterDetail{}, err
 		}
 	}
+	currentAdvanced := advancedFromRow(row)
+	advanced := currentAdvanced
+	if req.DockerTimeout.Set {
+		advanced.DockerTimeout = optionalStringValue(req.DockerTimeout)
+	}
+	if req.MaxSandboxCPU.Set {
+		advanced.MaxSandboxCPU = req.MaxSandboxCPU.Value
+	}
+	if req.MaxSandboxMemoryMB.Set {
+		advanced.MaxSandboxMemoryMB = req.MaxSandboxMemoryMB.Value
+	}
+	if req.MaxSandboxDiskGB.Set {
+		advanced.MaxSandboxDiskGB = req.MaxSandboxDiskGB.Value
+	}
+	if req.IdleStopMinutes.Set {
+		advanced.IdleStopMinutes = req.IdleStopMinutes.Value
+	}
+	if req.DestroyIfIdleFor.Set {
+		advanced.DestroyIfIdleFor = optionalStringValue(req.DestroyIfIdleFor)
+	}
+	if req.MaxAge.Set {
+		advanced.MaxAge = optionalStringValue(req.MaxAge)
+	}
+	if req.FirecrackerVMSlots.Set {
+		advanced.FirecrackerVMSlots = req.FirecrackerVMSlots.Value
+	}
+	advanced, err = normalizeAdvanced(advanced, row.Runtime, &currentAdvanced)
+	if err != nil {
+		return ClusterDetail{}, err
+	}
 
 	var updated db.Cluster
 	err = s.withTx(ctx, func(ctx context.Context) error {
+		dockerTimeout, maxCPU, maxMemory, maxDisk, idleStop, destroyIfIdle, maxAge, vmSlots := advancedParams(advanced)
 		var err error
 		updated, err = s.queries(ctx).UpdateClusterSettings(ctx, db.UpdateClusterSettingsParams{
 			Domain:                domain,
@@ -465,6 +588,14 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 			StopPolicy:            stopPolicy,
 			ArchiveLocalRetention: retention,
 			ArchiveSnapshotName:   snapshotName,
+			DockerTimeout:         dockerTimeout,
+			MaxSandboxCpu:         maxCPU,
+			MaxSandboxMemoryMb:    maxMemory,
+			MaxSandboxDiskGb:      maxDisk,
+			IdleStopMinutes:       idleStop,
+			DestroyIfIdleFor:      destroyIfIdle,
+			MaxAge:                maxAge,
+			FirecrackerVmSlots:    vmSlots,
 			ID:                    row.ID,
 		})
 		if err != nil {
@@ -492,6 +623,7 @@ func (s *Service) UpdateCluster(ctx context.Context, ref string, req UpdateClust
 		if row.ArchiveSnapshotName != updated.ArchiveSnapshotName {
 			changes["archive_snapshot_name"] = Change{From: row.ArchiveSnapshotName, To: updated.ArchiveSnapshotName}
 		}
+		advancedAuditChanges(changes, advancedFromRow(row), advancedFromRow(updated))
 		if len(changes) == 0 {
 			return nil
 		}
@@ -564,6 +696,15 @@ func (s *Service) CheckCluster(ctx context.Context, ref string) (ClusterDetail, 
 		}
 	}
 	if check, err := s.nodeSettingsCheck(ctx, row); err != nil {
+		return ClusterDetail{}, err
+	} else if check.Name != "" {
+		checks = append(checks, check)
+		status, detail = summarizeChecks(checks)
+		if healthFailed(checks) {
+			status = "unreachable"
+		}
+	}
+	if check, err := s.createPolicyCheck(ctx, row); err != nil {
 		return ClusterDetail{}, err
 	} else if check.Name != "" {
 		checks = append(checks, check)
@@ -1444,6 +1585,7 @@ func toCluster(r db.Cluster, nodes int, profile, storage *string) Cluster {
 		StopPolicy:            r.StopPolicy,
 		ArchiveLocalRetention: r.ArchiveLocalRetention,
 		ArchiveSnapshotName:   r.ArchiveSnapshotName,
+		AdvancedSettings:      advancedFromRow(r),
 		AdminTokenLast4:       r.AdminTokenLast4,
 		Status:                r.Status,
 		StatusDetail:          r.StatusDetail,

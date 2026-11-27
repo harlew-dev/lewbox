@@ -57,6 +57,10 @@ If `which` still finds nothing, check that the binary exists with `ls -l ~/.loca
 
 **`token_ttl` fails**: set `SB_TOKEN_MAX_TTL=876000h` on every node, or keys you create will expire.
 
+## Snapshots
+
+**`commit snapshot: … Client.Timeout exceeded while awaiting headers`**: sandboxd's Docker client gave up before a large container's snapshot commit finished. Its default timeout is 180 seconds. Lewbox's `/etc/sandboxd/lewbox.env` sets `SB_HTTP_CLIENT_TIMEOUT=15m`; a node without that line, or configured before it was added, needs `lewbox node configure` there (it restarts sandboxd when the file changes).
+
 ## Removing
 
 **`node "x" serves cluster "y"'s admin URL`**: the orchestrator reaches the cluster through that node. Register the cluster through another node first, then remove it.

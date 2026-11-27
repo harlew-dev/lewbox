@@ -58,6 +58,7 @@ func newDNSRecordsFixtureBefore(t *testing.T, before func(fake *cloudflaretest.F
 	if err != nil {
 		t.Fatalf("AddCluster: %v", err)
 	}
+	reportPolicy(t, s, detail.ID, detail.Runtime)
 	return s, fake, clusterFake, zoneID, detail
 }
 

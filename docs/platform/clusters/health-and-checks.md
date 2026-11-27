@@ -34,6 +34,10 @@ They run in this order. The first three are **required**: when you register a cl
 | `token_ttl` | A 100-year key can be created | Set `SB_TOKEN_MAX_TTL=876000h` on every node, or keys will expire |
 | `endpoint` | The customer endpoint answers `/health` | Check the endpoint URL and its DNS |
 | `dns records` | The cluster's domain points at every live ingress member | Only present for a cluster with a domain and a DNS profile and `dns_records` on. Check the profile's token for DNS:Edit and its zone. See [DNS profiles](dns-profiles.md#the-records-lewbox-keeps) |
+| `node settings` | Every node has applied the cluster's storage, DNS and [advanced AerolVM settings](advanced-settings.md) | Run `lewbox node configure` on the nodes it names; the detail names each setting that differs |
+| `create policy` | Every node has applied the cluster's create policy, and the sandbox mirror holds no live sandbox of another runtime | Run `lewbox node configure` on the nodes it names, and destroy the sandboxes of the other runtime |
+
+The policy is the runtime guard customers can't bypass: their SDKs call the cluster directly, so Lewbox writes a create policy on every node that allows only the cluster's runtime ([What Lewbox changes](../reference/what-lewbox-changes.md#lewboxs-settings)). AerolVM has no API to read a node's policy back, so the check also looks at the sandbox mirror: a live sandbox whose runtime differs means a node let it through. A node shows as far behind as its last `lewbox node configure`; a node upgraded, joined before the policy existed, or dropped and re-added by the cluster is `outdated` until that command runs there.
 
 AerolVM node certificates last 90 days and renew at two-thirds of their life, so a certificate with 14 days left means renewal has failed and the node will leave the cluster at day 90. `node certificates` reads each member's `aerolvm_cluster_mtls_cert_not_after_unix` metric from `GET /v1/metrics`. A node that does not answer is skipped, and the check stays ok when no node reports an expiry.
 

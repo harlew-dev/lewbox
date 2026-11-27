@@ -212,12 +212,12 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | Route | Who | |
 |---|---|---|
 | `GET /v0/clusters` | admin | `{data: [Cluster]}` |
-| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, admin_token, admin_ip}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `admin_ip` (optional) is an IP at which `admin_url`'s host answers, used for the registration checks only when that host doesn't resolve yet (TLS is still verified against the host name; `422` if `admin_url` already names an IP). With a domain and a DNS profile, registering creates the domain's records; `stop_policy` is `keep` or `archive`; `archive_local_retention` is `instant` (default), `1h`, `1d`, `7d` or `never`; `archive_snapshot_name` is `id` (default) or `name`. A failed required check → `422` with the checks in `details`, or `503` when the cluster can't be reached; `archive` without a storage profile, or a bad policy, retention or name style, → `422` |
-| `PATCH /v0/clusters/{cluster}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. An empty body, a domain outside the profile's zone, a bad record mode, policy, retention or name style, `archive` without a profile, or clearing the profile while `archive` is set → `422`. → ClusterDetail |
+| `POST /v0/clusters` | admin | Register: `{slug, name, admin_url, endpoint_url, runtime, domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots, admin_token, admin_ip}` → `201` ClusterDetail. `domain`, `dns_profile` and `storage_profile` (IDs or names) and `dns_records` are optional; `admin_ip` (optional) is an IP at which `admin_url`'s host answers, used for the registration checks only when that host doesn't resolve yet (TLS is still verified against the host name; `422` if `admin_url` already names an IP). With a domain and a DNS profile, registering creates the domain's records; `stop_policy` is `keep` or `archive`; `archive_local_retention` is `instant` (default), `1h`, `1d`, `7d` or `never`; `archive_snapshot_name` is `id` (default) or `name`. The advanced settings are optional and described under `PATCH` below. A failed required check → `422` with the checks in `details`, or `503` when the cluster can't be reached; `archive` without a storage profile, or a bad policy, retention, name style or advanced setting, → `422` with the field in `details` |
+| `PATCH /v0/clusters/{cluster}` | admin | `{domain, dns_profile, dns_records, storage_profile, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots}`: change the settings; a profile `""` or `"none"` clears it, `dns_records` is `auto` or `off`, `stop_policy` is `keep` or `archive`. For an advanced setting, absent leaves it alone, `null` clears it (and `docker_timeout: null` restores `15m`). `docker_timeout` is 1m–2h; the size caps are at least 1 CPU, 1024 MB and 10 GB; `idle_stop_minutes` is a whole number; `destroy_if_idle_for` and `max_age` are durations of at most 720h; `firecracker_vm_slots` is 256–1024, Firecracker only, and at least the current value. An empty body, a domain outside the profile's zone, a bad record mode, policy, retention, name style or advanced setting, `archive` without a profile, or clearing the profile while `archive` is set → `422`. → ClusterDetail |
 | `GET /v0/clusters/{cluster}` | admin | ClusterDetail, from the last check |
 | `DELETE /v0/clusters/{cluster}?force=true` | admin | Stop managing it → the Cluster. Refuses with `503` if its sandbox keys cannot be revoked, unless `force` is true |
 | `POST /v0/clusters/{cluster}/check` | admin | Run the checks now → ClusterDetail |
-| `GET /v0/clusters/{cluster}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, stop_policy, archive_local_retention, storage, dns}`. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
+| `GET /v0/clusters/{cluster}/node-settings` | admin | What every node must apply, with secrets: `{cluster_id, cluster, runtime, stop_policy, archive_local_retention, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots, storage, dns}`. `runtime` is the create policy the node writes (`docker` or `firecracker`). The advanced settings are the values the node writes; `null` is off. `storage` is `null` or `{profile, version, endpoint, region, bucket, path_style, root_directory, access_key_id, secret_access_key}`; `dns` is `null` or `{profile, version, zone, domain, api_token, acme_email}` |
 | `GET /v0/clusters/{cluster}/health?days=30` | admin | `{cluster: {uptime, days}, nodes: [{name, uptime, days}]}`. A day has `date`, `uptime` (`null` with no samples), `samples` and `down_minutes`; `days` is 1–31 |
 | `GET /v0/clusters/{cluster}/metrics?range=24h` | admin | `{range, bucket_seconds, nodes: [{name, data}]}`. A bucket has `start`, averaged `sandboxes`, `cpu_cores`, `cpu_reserved`, `memory_total_mb`, `memory_used_mb`, `disk_free_gb` and the `alive` fraction. `range` is `24h`, `7d` or `30d` |
 | `GET /v0/overview` | admin | `{customers, sandboxes, capacity, clusters, running, top_customers}` for the console home |
@@ -232,7 +232,7 @@ Instance admins only. A storage profile is a saved S3-compatible bucket and acce
 | `GET /v0/nodes/{node}` | admin | Node |
 | `DELETE /v0/nodes/{node}?force=true` | admin | Drain, remove from the cluster, forget → the Node |
 | `POST /v0/nodes` | admin | `{name, url}`: record a node by URL only → `201` Node |
-| `PATCH /v0/nodes/{node}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention}`: the versions a node applied, a name or `null` for each profile, and the `archive_local_retention` it applied with its storage (`null` counts as `instant`). A version below 1 with a profile → `422`; a node in no cluster → `409`. → the Node |
+| `PATCH /v0/nodes/{node}/settings` | admin | `{storage_profile, storage_version, dns_profile, dns_version, archive_retention, policy_runtime, advanced}`: the versions a node applied, a name or `null` for each profile, the `archive_local_retention` it applied with its storage (`null` counts as `instant`), the runtime its create policy allows (`docker`, `firecracker` or `null`), and `advanced` (`null` or the advanced settings it applied). A version below 1 with a profile, an unknown `policy_runtime`, or a bad advanced setting, → `422`; a node in no cluster → `409`. → the Node |
 
 ### Access tokens
 
@@ -367,6 +367,14 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
   "stop_policy": "archive",
   "archive_local_retention": "1d",
   "archive_snapshot_name": "id",
+  "docker_timeout": "15m",
+  "max_sandbox_cpu": 4,
+  "max_sandbox_memory_mb": 8192,
+  "max_sandbox_disk_gb": 50,
+  "idle_stop_minutes": 30,
+  "destroy_if_idle_for": "24h",
+  "max_age": "168h",
+  "firecracker_vm_slots": null,
   "admin_token_last4": "9f3a",
   "status": "ready",
   "version": "v0.7.0",
@@ -402,7 +410,7 @@ The API lives only under `/v0`. `GET /` (and any other page route) serves the we
 }
 ```
 
-`settings` is `null` for a node in no cluster. Otherwise `applied_at` is the last report (`null` when it never reported), `outdated` says its applied profile versions are behind its cluster's, and `reasons` (never `null`) lists why.
+`settings` is `null` for a node in no cluster. Otherwise `applied_at` is the last report (`null` when it never reported), `outdated` says its applied create policy or profile versions are behind its cluster's, and `reasons` (never `null`) lists why, including a missing or different policy runtime.
 
 **User**: `{id, email, instance_admin, disabled, created_at}`. Passwords and hashes are never returned.
 

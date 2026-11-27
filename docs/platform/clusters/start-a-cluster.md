@@ -69,12 +69,14 @@ AerolVM is installed but **not started yet**. That's on purpose: a node has to s
 lewbox node add node-1 --new-cluster eu-west
 ```
 
+Set the cluster's [advanced AerolVM settings](advanced-settings.md) on the same command, such as `--max-sandbox-cpu 4 --idle-stop-minutes 30`; otherwise they keep their defaults.
+
 ```text
 Starting a cluster
   → sudo bash …/install.sh --version v0.7.0 --pat-scope host init --role mixed --node-id node-1 --advertise 10.0.0.5
 The cluster is up. This node, node-1, is its first server and its leader.
 Lewbox settings
-  ✓ wrote /etc/sandboxd/lewbox.env and /etc/systemd/system/sandboxd.service.d/lewbox.conf, restarted sandboxd
+  ✓ wrote /etc/sandboxd/lewbox-create-policy.yaml, /etc/sandboxd/lewbox.env and /etc/systemd/system/sandboxd.service.d/lewbox.conf, restarted sandboxd
   ✓ sandboxd healthy at http://127.0.0.1:21212/health
   ✓ admin token "lewbox-eu-west" minted over http://127.0.0.1:21212
   ✓ cluster "eu-west" registered, node "node-1" added
@@ -83,7 +85,7 @@ Lewbox settings
 In order, Lewbox:
 
 1. starts AerolVM as the first node of a new cluster;
-2. turns on the AerolVM settings Lewbox needs (identity and long-lived keys);
+2. turns on the AerolVM settings Lewbox needs (identity, long-lived keys, and a create policy that allows only this cluster's runtime);
 3. creates an admin token for Lewbox on the machine itself, over `127.0.0.1`;
 4. registers the cluster with the orchestrator, which checks it and stores the token encrypted. In domain mode with a DNS profile, it sends this node's public IP too: the domain has no DNS records yet, so the orchestrator reaches the node at that IP, then creates the records ([DNS profiles](dns-profiles.md#the-records-lewbox-keeps)).
 
@@ -109,14 +111,15 @@ slug             : eu-west
 status           : ready
 version          : v0.7.0
 
-CHECK        OK   DETAIL
-health       yes  v0.7.0, 1 node(s)
-version      yes  v0.7.0
-admin_token  yes  admin on team *
-members      yes  1 member(s)
-runtime      yes  members support docker
-token_ttl    yes  a 36500d runner token was created and revoked
-endpoint     yes  same as admin_url
+CHECK         OK   DETAIL
+health        yes  v0.7.0, 1 node(s)
+version       yes  v0.7.0
+admin_token   yes  admin on team *
+members       yes  1 member(s)
+runtime       yes  members support docker
+token_ttl     yes  a 36500d runner token was created and revoked
+endpoint      yes  same as admin_url
+create policy yes  1 node(s) enforce docker
 
 NAME    CLUSTER  ROLE   VERSION  ALIVE  URL
 node-1  eu-west  mixed  v0.7.0   yes    http://10.0.0.5:21212
@@ -137,5 +140,6 @@ lewbox node add node-1 --new-cluster eu-west --endpoint-url https://eu-west.api.
 ## Next
 
 - [Add nodes](add-nodes.md): grow the cluster to three nodes.
+- [Advanced AerolVM settings](advanced-settings.md): size caps, lifecycle timers and the Firecracker pool.
 - [Health and checks](health-and-checks.md): what each check means.
 - [Register an existing cluster](register-an-existing-cluster.md): for clusters you set up without Lewbox.

@@ -126,7 +126,7 @@ func TestReportNodeSettingsRetention(t *testing.T) {
 	// A node configured before the setting existed reports no retention: it
 	// removes copies at once, which matches the default.
 	node, err := s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		StorageProfile: ptrString("s3-main"), StorageVersion: 1,
+		StorageProfile: ptrString("s3-main"), StorageVersion: 1, PolicyRuntime: ptrString("docker"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestReportNodeSettingsRetention(t *testing.T) {
 	}
 
 	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		StorageProfile: ptrString("s3-main"), StorageVersion: 1, ArchiveRetention: ptrString("1d"),
+		StorageProfile: ptrString("s3-main"), StorageVersion: 1, ArchiveRetention: ptrString("1d"), PolicyRuntime: ptrString("docker"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestReportNodeSettingsRetention(t *testing.T) {
 	}
 
 	if _, err := s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		StorageProfile: ptrString("s3-main"), StorageVersion: 1, ArchiveRetention: ptrString("2d"),
+		StorageProfile: ptrString("s3-main"), StorageVersion: 1, ArchiveRetention: ptrString("2d"), PolicyRuntime: ptrString("docker"),
 	}); err == nil {
 		t.Error("an unknown retention was recorded")
 	}
@@ -167,7 +167,7 @@ func TestReportNodeSettingsRetention(t *testing.T) {
 	if _, err := s.UpdateCluster(localCtx(), "lab", UpdateClusterRequest{StorageProfile: ptrString("none")}); err != nil {
 		t.Fatal(err)
 	}
-	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{ArchiveRetention: ptrString("1d")})
+	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{ArchiveRetention: ptrString("1d"), PolicyRuntime: ptrString("docker")})
 	if err != nil {
 		t.Fatal(err)
 	}

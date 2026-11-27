@@ -48,9 +48,12 @@ INSERT INTO clusters (id, slug, name, admin_url, endpoint_url, runtime, admin_to
                       admin_token_id, admin_token_last4, status, status_detail, version,
                       domain, dns_profile_id, dns_records, storage_profile_id, stop_policy,
                       archive_local_retention, archive_snapshot_name,
+                      docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb,
+                      max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age,
+                      firecracker_vm_slots,
                       checks, checked_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots
 `
 
 type CreateClusterParams struct {
@@ -73,6 +76,14 @@ type CreateClusterParams struct {
 	StopPolicy            string
 	ArchiveLocalRetention string
 	ArchiveSnapshotName   string
+	DockerTimeout         string
+	MaxSandboxCpu         sql.NullFloat64
+	MaxSandboxMemoryMb    sql.NullInt64
+	MaxSandboxDiskGb      sql.NullInt64
+	IdleStopMinutes       sql.NullInt64
+	DestroyIfIdleFor      sql.NullString
+	MaxAge                sql.NullString
+	FirecrackerVmSlots    sql.NullInt64
 	Checks                string
 	CheckedAt             sql.NullTime
 	CreatedAt             time.Time
@@ -99,6 +110,14 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		arg.StopPolicy,
 		arg.ArchiveLocalRetention,
 		arg.ArchiveSnapshotName,
+		arg.DockerTimeout,
+		arg.MaxSandboxCpu,
+		arg.MaxSandboxMemoryMb,
+		arg.MaxSandboxDiskGb,
+		arg.IdleStopMinutes,
+		arg.DestroyIfIdleFor,
+		arg.MaxAge,
+		arg.FirecrackerVmSlots,
 		arg.Checks,
 		arg.CheckedAt,
 		arg.CreatedAt,
@@ -129,6 +148,14 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.StopPolicy,
 		&i.ArchiveLocalRetention,
 		&i.ArchiveSnapshotName,
+		&i.DockerTimeout,
+		&i.MaxSandboxCpu,
+		&i.MaxSandboxMemoryMb,
+		&i.MaxSandboxDiskGb,
+		&i.IdleStopMinutes,
+		&i.DestroyIfIdleFor,
+		&i.MaxAge,
+		&i.FirecrackerVmSlots,
 	)
 	return i, err
 }
@@ -146,7 +173,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id string) (int64, error) {
 }
 
 const getClusterByID = `-- name: GetClusterByID :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters WHERE id = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots FROM clusters WHERE id = ?
 `
 
 func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error) {
@@ -177,12 +204,20 @@ func (q *Queries) GetClusterByID(ctx context.Context, id string) (Cluster, error
 		&i.StopPolicy,
 		&i.ArchiveLocalRetention,
 		&i.ArchiveSnapshotName,
+		&i.DockerTimeout,
+		&i.MaxSandboxCpu,
+		&i.MaxSandboxMemoryMb,
+		&i.MaxSandboxDiskGb,
+		&i.IdleStopMinutes,
+		&i.DestroyIfIdleFor,
+		&i.MaxAge,
+		&i.FirecrackerVmSlots,
 	)
 	return i, err
 }
 
 const getClusterBySlug = `-- name: GetClusterBySlug :one
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters WHERE slug = ?
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots FROM clusters WHERE slug = ?
 `
 
 func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, error) {
@@ -213,12 +248,20 @@ func (q *Queries) GetClusterBySlug(ctx context.Context, slug string) (Cluster, e
 		&i.StopPolicy,
 		&i.ArchiveLocalRetention,
 		&i.ArchiveSnapshotName,
+		&i.DockerTimeout,
+		&i.MaxSandboxCpu,
+		&i.MaxSandboxMemoryMb,
+		&i.MaxSandboxDiskGb,
+		&i.IdleStopMinutes,
+		&i.DestroyIfIdleFor,
+		&i.MaxAge,
+		&i.FirecrackerVmSlots,
 	)
 	return i, err
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name FROM clusters ORDER BY slug
+SELECT id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots FROM clusters ORDER BY slug
 `
 
 func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
@@ -255,6 +298,14 @@ func (q *Queries) ListClusters(ctx context.Context) ([]Cluster, error) {
 			&i.StopPolicy,
 			&i.ArchiveLocalRetention,
 			&i.ArchiveSnapshotName,
+			&i.DockerTimeout,
+			&i.MaxSandboxCpu,
+			&i.MaxSandboxMemoryMb,
+			&i.MaxSandboxDiskGb,
+			&i.IdleStopMinutes,
+			&i.DestroyIfIdleFor,
+			&i.MaxAge,
+			&i.FirecrackerVmSlots,
 		); err != nil {
 			return nil, err
 		}
@@ -327,9 +378,12 @@ func (q *Queries) UpdateClusterCheck(ctx context.Context, arg UpdateClusterCheck
 const updateClusterSettings = `-- name: UpdateClusterSettings :one
 UPDATE clusters
 SET domain = ?, dns_profile_id = ?, dns_records = ?, storage_profile_id = ?, stop_policy = ?,
-    archive_local_retention = ?, archive_snapshot_name = ?
+    archive_local_retention = ?, archive_snapshot_name = ?,
+    docker_timeout = ?, max_sandbox_cpu = ?, max_sandbox_memory_mb = ?,
+    max_sandbox_disk_gb = ?, idle_stop_minutes = ?, destroy_if_idle_for = ?, max_age = ?,
+    firecracker_vm_slots = ?
 WHERE id = ?
-RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name
+RETURNING id, slug, name, admin_url, endpoint_url, runtime, admin_token_enc, admin_token_id, admin_token_last4, status, status_detail, version, checks, checked_at, created_at, synced_at, sync_error, domain, dns_profile_id, dns_records, storage_profile_id, stop_policy, archive_local_retention, archive_snapshot_name, docker_timeout, max_sandbox_cpu, max_sandbox_memory_mb, max_sandbox_disk_gb, idle_stop_minutes, destroy_if_idle_for, max_age, firecracker_vm_slots
 `
 
 type UpdateClusterSettingsParams struct {
@@ -340,6 +394,14 @@ type UpdateClusterSettingsParams struct {
 	StopPolicy            string
 	ArchiveLocalRetention string
 	ArchiveSnapshotName   string
+	DockerTimeout         string
+	MaxSandboxCpu         sql.NullFloat64
+	MaxSandboxMemoryMb    sql.NullInt64
+	MaxSandboxDiskGb      sql.NullInt64
+	IdleStopMinutes       sql.NullInt64
+	DestroyIfIdleFor      sql.NullString
+	MaxAge                sql.NullString
+	FirecrackerVmSlots    sql.NullInt64
 	ID                    string
 }
 
@@ -352,6 +414,14 @@ func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSe
 		arg.StopPolicy,
 		arg.ArchiveLocalRetention,
 		arg.ArchiveSnapshotName,
+		arg.DockerTimeout,
+		arg.MaxSandboxCpu,
+		arg.MaxSandboxMemoryMb,
+		arg.MaxSandboxDiskGb,
+		arg.IdleStopMinutes,
+		arg.DestroyIfIdleFor,
+		arg.MaxAge,
+		arg.FirecrackerVmSlots,
 		arg.ID,
 	)
 	var i Cluster
@@ -380,6 +450,14 @@ func (q *Queries) UpdateClusterSettings(ctx context.Context, arg UpdateClusterSe
 		&i.StopPolicy,
 		&i.ArchiveLocalRetention,
 		&i.ArchiveSnapshotName,
+		&i.DockerTimeout,
+		&i.MaxSandboxCpu,
+		&i.MaxSandboxMemoryMb,
+		&i.MaxSandboxDiskGb,
+		&i.IdleStopMinutes,
+		&i.DestroyIfIdleFor,
+		&i.MaxAge,
+		&i.FirecrackerVmSlots,
 	)
 	return i, err
 }

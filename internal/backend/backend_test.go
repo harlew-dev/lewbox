@@ -1343,9 +1343,9 @@ func TestNodeSettingsBackendsAgree(t *testing.T) {
 		return b.ClusterNodeSettings(ctx, "eu-west")
 	}
 	report := func(ctx context.Context, b backend.Backend) (any, error) {
-		name := "s3-main"
+		name, runtime := "s3-main", "docker"
 		return b.ReportNodeSettings(ctx, "node-a", service.ReportNodeSettingsRequest{
-			StorageProfile: &name, StorageVersion: 1,
+			StorageProfile: &name, StorageVersion: 1, PolicyRuntime: &runtime,
 		})
 	}
 	getNode := func(ctx context.Context, b backend.Backend) (any, error) {

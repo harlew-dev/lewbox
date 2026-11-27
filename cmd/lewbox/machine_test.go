@@ -619,6 +619,34 @@ func TestInstallRefusesRoot(t *testing.T) {
 	}
 }
 
+// Every path that applies files uses machineNodeFiles, so it must carry the
+// cluster's runtime, advanced settings and, with storage, snapshot push.
+func TestMachineNodeFiles(t *testing.T) {
+	settings := service.NodeSettings{
+		ClusterID:        "01ABC-DEF",
+		Cluster:          "lab",
+		Runtime:          "firecracker",
+		AdvancedSettings: service.DefaultAdvancedSettings(),
+		Storage:          &service.NodeStorageSettings{Profile: "s3-main"},
+	}
+	files := machineNodeFiles(settings, machine.ModePublicHost)
+	if files.Runtime != "firecracker" {
+		t.Errorf("runtime = %q", files.Runtime)
+	}
+	env := files.EnvFileContent()
+	if !strings.Contains(env, "SB_SNAPSHOT_PUSH_ENABLED=true\n") || !strings.Contains(env, machine.PushEnv("01ABC-DEF")) {
+		t.Errorf("env has no snapshot push:\n%s", env)
+	}
+	if !strings.Contains(env, "SB_HTTP_CLIENT_TIMEOUT=15m\n") {
+		t.Errorf("env has no cluster timeout:\n%s", env)
+	}
+	// Local mode has no cluster to push to.
+	local := machineNodeFiles(settings, machine.ModeLocal)
+	if strings.Contains(local.EnvFileContent(), "SB_SNAPSHOT_PUSH_ENABLED") {
+		t.Errorf("local env has snapshot push:\n%s", local.EnvFileContent())
+	}
+}
+
 func TestNodeAddNewCluster(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)
@@ -667,11 +695,33 @@ func TestNodeAddNewCluster(t *testing.T) {
 	if !h.runner.Ran("cat", "/etc/sandboxd/sandboxd.env") {
 		t.Error("PAT was not read with sudo cat")
 	}
-	if h.files[machine.EnvironmentFile] != machine.EnvFileContent {
+	if h.files[machine.EnvironmentFile] != (machine.NodeFiles{Runtime: "docker"}).EnvFileContent() {
 		t.Errorf("%s = %q", machine.EnvironmentFile, h.files[machine.EnvironmentFile])
+	}
+	if !strings.Contains(h.files[machine.EnvironmentFile], "SB_CREATE_POLICY_FILE="+machine.CreatePolicyFile) {
+		t.Errorf("%s does not point at the create policy", machine.EnvironmentFile)
+	}
+	if h.files[machine.CreatePolicyFile] != (machine.NodeFiles{Runtime: "docker"}).CreatePolicyContent() {
+		t.Errorf("%s = %q", machine.CreatePolicyFile, h.files[machine.CreatePolicyFile])
 	}
 	if h.files[machine.DropInFile] != machine.DropInContent {
 		t.Errorf("%s = %q", machine.DropInFile, h.files[machine.DropInFile])
+	}
+	// The policy is written before the env file that points sandboxd at it.
+	policyAt, envAt := -1, -1
+	for i, line := range h.runner.Displays() {
+		if !strings.Contains(line, "install") {
+			continue
+		}
+		if strings.Contains(line, machine.CreatePolicyFile) {
+			policyAt = i
+		}
+		if strings.Contains(line, machine.EnvironmentFile) {
+			envAt = i
+		}
+	}
+	if policyAt == -1 || envAt == -1 || policyAt > envAt {
+		t.Errorf("policy written at %d, env at %d: %v", policyAt, envAt, h.runner.Displays())
 	}
 	if _, ok := h.files["/etc/sandboxd/sandboxd.env"]; ok {
 		t.Error("Lewbox wrote the installer's sandboxd.env")
@@ -692,6 +742,85 @@ func TestNodeAddNewCluster(t *testing.T) {
 	}
 	if detail.AdminTokenLast4 != minted.Token[len(minted.Token)-4:] {
 		t.Errorf("cluster token last4 = %q, minted %q", detail.AdminTokenLast4, minted.Token)
+	}
+	nodeOut, errOut, code := e.cli("node", "get", "node-1")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"outdated":false`) || !strings.Contains(nodeOut, `"applied_at":"`) {
+		t.Errorf("node add did not report the policy: %s", nodeOut)
+	}
+}
+
+func TestNodeAddNewClusterAdvanced(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	h := newHarness(t, fake.URL())
+	fake.AdminToken = h.pat
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"firecracker"}},
+	}})
+	from := writeMirror(t, "v0.7.0", testScript)
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "firecracker", AerolVMVersion: "v0.7.0", From: from,
+	})
+
+	out, errOut, code := e.cliWith(h, "", "node", "add", "node-1", "--new-cluster", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(),
+		"--docker-timeout", "1h", "--max-sandbox-cpu", "4", "--max-sandbox-memory-mb", "4096",
+		"--max-sandbox-disk-gb", "50", "--idle-stop-minutes", "30",
+		"--destroy-if-idle-for", "24h", "--max-age", "168h", "--firecracker-vm-slots", "512")
+	if code != 0 {
+		t.Fatalf("node add: exit %d: %s", code, errOut)
+	}
+	var detail service.ClusterDetail
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.DockerTimeout != "1h" || detail.MaxSandboxCPU == nil || *detail.MaxSandboxCPU != 4 ||
+		detail.MaxSandboxMemoryMB == nil || *detail.MaxSandboxMemoryMB != 4096 ||
+		detail.MaxSandboxDiskGB == nil || *detail.MaxSandboxDiskGB != 50 ||
+		detail.IdleStopMinutes == nil || *detail.IdleStopMinutes != 30 ||
+		detail.DestroyIfIdleFor != "24h" || detail.MaxAge != "168h" ||
+		detail.FirecrackerVMSlots == nil || *detail.FirecrackerVMSlots != 512 {
+		t.Errorf("cluster settings = %+v", detail.AdvancedSettings)
+	}
+
+	cpu, memory, disk := 4.0, int64(4096), int64(50)
+	idle, slots := int64(30), int64(512)
+	want := machine.NodeFiles{
+		Runtime: "firecracker",
+		Advanced: machine.AdvancedSettings{
+			DockerTimeout:      "1h",
+			MaxSandboxCPU:      &cpu,
+			MaxSandboxMemoryMB: &memory,
+			MaxSandboxDiskGB:   &disk,
+			IdleStopMinutes:    &idle,
+			DestroyIfIdleFor:   "24h",
+			MaxAge:             "168h",
+			FirecrackerVMSlots: &slots,
+		},
+	}
+	if got := h.files[machine.CreatePolicyFile]; got != want.CreatePolicyContent() {
+		t.Errorf("%s = %q, want %q", machine.CreatePolicyFile, got, want.CreatePolicyContent())
+	}
+	if got := h.files[machine.EnvironmentFile]; got != want.EnvFileContent() {
+		t.Errorf("%s = %q, want %q", machine.EnvironmentFile, got, want.EnvFileContent())
+	}
+	nodeOut, errOut, code := e.cli("node", "get", "node-1")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"outdated":false`) {
+		t.Errorf("the first node is outdated right after creation: %s", nodeOut)
+	}
+
+	// The same flags on a join are refused.
+	_, errOut, code = e.cliWith(h, "", "node", "add", "node-2", "--cluster", "lab", "--max-sandbox-cpu", "4")
+	if code != 2 || !strings.Contains(errOut, "only apply to a new cluster") {
+		t.Errorf("advanced flag with --cluster: exit %d: %s", code, errOut)
 	}
 }
 
@@ -1096,6 +1225,9 @@ func TestUpdateAerolVMOnly(t *testing.T) {
 	if state := loadState(t); state.AerolVMVersion != "v0.7.1" {
 		t.Errorf("state version = %q", state.AerolVMVersion)
 	}
+	if h.files[machine.CreatePolicyFile] != (machine.NodeFiles{Runtime: "docker"}).CreatePolicyContent() {
+		t.Errorf("%s = %q", machine.CreatePolicyFile, h.files[machine.CreatePolicyFile])
+	}
 }
 
 func TestUpdateAerolVMNoState(t *testing.T) {
@@ -1194,6 +1326,43 @@ func storageEnv(t *testing.T, e *env, fake *aerolvmtest.Server) string {
 	return detail.ID
 }
 
+// The cluster record names the runtime, even when this install's saved
+// runtime is stale: the policy is the cluster's, not the install's.
+func TestNodeConfigureTakesRuntimeFromTheCluster(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "avm_cluster_token"
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"firecracker"}},
+	}})
+	if _, errOut, code := e.cliIn(fake.AdminToken+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(),
+		"--runtime", "firecracker", "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab",
+	})
+
+	if _, errOut, code := e.cliWith(h, "", "node", "configure"); code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+	if got, want := h.files[machine.CreatePolicyFile], (machine.NodeFiles{Runtime: "firecracker"}).CreatePolicyContent(); got != want {
+		t.Errorf("%s = %q, want %q", machine.CreatePolicyFile, got, want)
+	}
+	nodeOut, errOut, code := e.cli("node", "get", "node-1")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"outdated":false`) {
+		t.Errorf("node settings = %s", nodeOut)
+	}
+}
+
 func TestNodeConfigureStorage(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)
@@ -1220,9 +1389,12 @@ func TestNodeConfigureStorage(t *testing.T) {
 		t.Errorf("configure = %+v", got)
 	}
 
-	wantEnv := machine.EnvFileContent + machine.PushEnv(clusterID)
+	wantEnv := machine.NodeFiles{Runtime: "docker", PushEnv: machine.PushEnv(clusterID)}.EnvFileContent()
 	if h.files[machine.EnvironmentFile] != wantEnv {
 		t.Errorf("%s = %q, want %q", machine.EnvironmentFile, h.files[machine.EnvironmentFile], wantEnv)
+	}
+	if h.files[machine.CreatePolicyFile] != (machine.NodeFiles{Runtime: "docker"}).CreatePolicyContent() {
+		t.Errorf("%s = %q", machine.CreatePolicyFile, h.files[machine.CreatePolicyFile])
 	}
 	config := h.files[machine.RegistryConfigFile]
 	for _, want := range []string{
@@ -1377,6 +1549,82 @@ func TestNodeAddArchiveFlagsOnlyForANewCluster(t *testing.T) {
 	}
 }
 
+func TestNodeConfigureAdvancedSettings(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	fake.AdminToken = "avm_advanced_token"
+	fake.SetVersion("v0.7.0")
+	fake.SetMembers([]aerolvm.Member{{
+		NodeID: "node-1", NodeName: "node-1", APIURL: fake.URL(), Alive: true,
+		Role: "mixed", Version: "v0.7.0", Capacity: aerolvm.Capacity{SupportedRuntimes: []string{"firecracker"}},
+	}})
+	if _, errOut, code := e.cliIn(fake.AdminToken+"\n", "cluster", "add", "lab",
+		"--admin-url", fake.URL(), "--endpoint-url", fake.URL(),
+		"--runtime", "firecracker", "--admin-token-stdin"); code != 0 {
+		t.Fatalf("cluster add: exit %d: %s", code, errOut)
+	}
+	if _, errOut, code := e.cli("cluster", "set", "lab",
+		"--docker-timeout", "1h", "--max-sandbox-cpu", "4", "--max-sandbox-memory-mb", "4096",
+		"--max-sandbox-disk-gb", "50", "--idle-stop-minutes", "30",
+		"--destroy-if-idle-for", "24h", "--max-age", "168h", "--firecracker-vm-slots", "512"); code != 0 {
+		t.Fatalf("cluster set: exit %d: %s", code, errOut)
+	}
+
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab",
+	})
+	if _, errOut, code := e.cliWith(h, "", "node", "configure"); code != 0 {
+		t.Fatalf("node configure: exit %d: %s", code, errOut)
+	}
+
+	cpu, memory, disk := 4.0, int64(4096), int64(50)
+	idle, slots := int64(30), int64(512)
+	want := machine.NodeFiles{
+		Runtime: "firecracker",
+		Advanced: machine.AdvancedSettings{
+			DockerTimeout:      "1h",
+			MaxSandboxCPU:      &cpu,
+			MaxSandboxMemoryMB: &memory,
+			MaxSandboxDiskGB:   &disk,
+			IdleStopMinutes:    &idle,
+			DestroyIfIdleFor:   "24h",
+			MaxAge:             "168h",
+			FirecrackerVMSlots: &slots,
+		},
+	}
+	if got := h.files[machine.CreatePolicyFile]; got != want.CreatePolicyContent() {
+		t.Errorf("%s = %q, want %q", machine.CreatePolicyFile, got, want.CreatePolicyContent())
+	}
+	if got := h.files[machine.EnvironmentFile]; got != want.EnvFileContent() {
+		t.Errorf("%s = %q, want %q", machine.EnvironmentFile, got, want.EnvFileContent())
+	}
+	nodeOut, errOut, code := e.cli("node", "get", "node-1")
+	if code != 0 {
+		t.Fatalf("node get: exit %d: %s", code, errOut)
+	}
+	if !strings.Contains(nodeOut, `"outdated":false`) {
+		t.Errorf("node settings after configure = %s", nodeOut)
+	}
+	settingsOut, errOut, code := e.cli("cluster", "node-settings", "lab")
+	if code != 0 {
+		t.Fatalf("node settings: exit %d: %s", code, errOut)
+	}
+	for _, want := range []string{`"docker_timeout":"1h"`, `"max_sandbox_cpu":4`, `"firecracker_vm_slots":512`} {
+		if !strings.Contains(settingsOut, want) {
+			t.Errorf("cluster node settings %s is missing %q", settingsOut, want)
+		}
+	}
+
+	// Raising the pool updates the env file; lowering it is refused.
+	if _, errOut, code := e.cli("cluster", "set", "lab", "--firecracker-vm-slots", "256"); code != 1 ||
+		!strings.Contains(errOut, "cannot be lowered") {
+		t.Errorf("lowering the pool: exit %d: %s", code, errOut)
+	}
+}
+
 func TestNodeConfigureRemovesStorage(t *testing.T) {
 	e := newEnv(t)
 	fake := aerolvmtest.New(t)
@@ -1409,7 +1657,7 @@ func TestNodeConfigureRemovesStorage(t *testing.T) {
 	if got.Storage != "removed" || !got.RegistryChanged || !got.EnvChanged || !got.CleanupTimer {
 		t.Errorf("configure = %+v", got)
 	}
-	if h.files[machine.EnvironmentFile] != machine.EnvFileContent {
+	if h.files[machine.EnvironmentFile] != (machine.NodeFiles{Runtime: "docker"}).EnvFileContent() {
 		t.Errorf("%s = %q", machine.EnvironmentFile, h.files[machine.EnvironmentFile])
 	}
 	for _, path := range []string{machine.RegistryUnitFile, machine.RegistryConfigFile, machine.CleanupService, machine.CleanupTimer, machine.CleanupBinary} {
@@ -1419,6 +1667,30 @@ func TestNodeConfigureRemovesStorage(t *testing.T) {
 	}
 	if !h.runner.Ran("systemctl", "disable", "--now", machine.CleanupTimerName) {
 		t.Error("the cleanup timer was not disabled")
+	}
+}
+
+// update --aerolvm must re-apply the cluster's settings, including snapshot
+// push, not just Lewbox's base env file: otherwise a cluster with storage
+// stops pushing snapshots until the next node configure.
+func TestUpdateAerolVMKeepsSnapshotPush(t *testing.T) {
+	e := newEnv(t)
+	fake := aerolvmtest.New(t)
+	clusterID := storageEnv(t, e, fake)
+	fake.SetVersion("v0.7.1")
+	from := writeMirror(t, "v0.7.1", testScript)
+	h := newHarness(t, fake.URL())
+	h.pat = fake.AdminToken
+	saveState(t, machine.State{
+		Name: "node-1", Mode: machine.ModePublicHost, PublicHost: "10.0.0.7",
+		Runtime: "docker", AerolVMVersion: "v0.7.0", Cluster: "lab", From: from,
+	})
+	if _, errOut, code := e.cliWith(h, "", "update", "--aerolvm-only", "--aerolvm-version", "v0.7.1", "--yes"); code != 0 {
+		t.Fatalf("update: exit %d: %s", code, errOut)
+	}
+	want := (machine.NodeFiles{Runtime: "docker", PushEnv: machine.PushEnv(clusterID)}).EnvFileContent()
+	if got := h.files[machine.EnvironmentFile]; got != want {
+		t.Errorf("%s = %q, want %q", machine.EnvironmentFile, got, want)
 	}
 }
 

@@ -53,6 +53,23 @@ FROM sandboxes
 JOIN clusters ON clusters.id = sandboxes.cluster_id
 WHERE sandboxes.org_id = ? AND sandboxes.gone_at IS NULL AND sandboxes.status = 'started';
 
+-- A blank runtime is AerolVM's default, docker.
+-- name: CountSandboxesByRuntimeMismatch :one
+SELECT COUNT(*) FROM sandboxes
+WHERE cluster_id = sqlc.arg(cluster_id)
+  AND gone_at IS NULL
+  AND status != 'destroyed'
+  AND COALESCE(NULLIF(runtime, ''), 'docker') != sqlc.arg(runtime);
+
+-- name: ListSandboxesByRuntimeMismatch :many
+SELECT id, node, runtime FROM sandboxes
+WHERE cluster_id = sqlc.arg(cluster_id)
+  AND gone_at IS NULL
+  AND status != 'destroyed'
+  AND COALESCE(NULLIF(runtime, ''), 'docker') != sqlc.arg(runtime)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(limit);
+
 -- name: UpdateSandboxStatus :exec
 UPDATE sandboxes SET status = ?, status_reason = ?
 WHERE cluster_id = ? AND id = ?;

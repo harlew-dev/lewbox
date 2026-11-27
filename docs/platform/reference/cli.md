@@ -184,6 +184,14 @@ lewbox node add eu-1 --url https://eu-1:8443   # only record a node by URL; chan
 | `--stop-policy keep\|archive` | `keep` | New cluster only: what happens to a stopped sandbox. `archive` needs `--storage-profile` |
 | `--archive-local-retention instant\|1h\|1d\|7d\|never` | `instant` | New cluster only: how long nodes keep local copies of archived sandboxes |
 | `--archive-snapshot-name id\|name` | `id` | New cluster only: name archive snapshots `archive-<id>` or `archive-<name>-<id>` |
+| `--docker-timeout D` | `15m` | New cluster only: sandboxd's HTTP client timeout, 1m–2h |
+| `--max-sandbox-cpu N` | no cap | New cluster only: the most CPUs one sandbox may have, at least 1 |
+| `--max-sandbox-memory-mb N` | no cap | New cluster only: the most memory one sandbox may have, at least 1024 |
+| `--max-sandbox-disk-gb N` | no cap | New cluster only: the most disk one sandbox may have, at least 10 |
+| `--idle-stop-minutes N` | off | New cluster only: stop a sandbox idle this long |
+| `--destroy-if-idle-for D` | off | New cluster only: delete a sandbox idle this long, at most 720h |
+| `--max-age D` | off | New cluster only: delete a sandbox this old, at most 720h |
+| `--firecracker-vm-slots N` | 256 | New cluster only: Firecracker TAP pool size, 256–1024 |
 | `--url URL` | | Record a node by URL only |
 
 `NAME` defaults to the name given to `install`. Both forms register things with the orchestrator, so when signed in they need an instance admin. Running it again is safe. After it registers the node, `node add` applies the cluster's node settings, the same steps as `lewbox node configure`. See [Start a cluster](../clusters/start-a-cluster.md) and [Add nodes](../clusters/add-nodes.md).
@@ -243,6 +251,14 @@ Registers a cluster that already exists, after checking it. See [Register an exi
 | `--endpoint-url URL` | What customers use. Default: `--admin-url` |
 | `--runtime docker\|firecracker` | Default `docker` |
 | `--name NAME` | Display name. Default: the slug |
+| `--docker-timeout 15m` | sandboxd's HTTP client timeout, 1m–2h. Default `15m` |
+| `--max-sandbox-cpu 4` | The most CPUs one sandbox may have. At least 1. Default: no cap |
+| `--max-sandbox-memory-mb 8192` | The most memory one sandbox may have. At least 1024. Default: no cap |
+| `--max-sandbox-disk-gb 50` | The most disk one sandbox may have. At least 10. Default: no cap |
+| `--idle-stop-minutes 30` | Stop a sandbox idle this long. Default: off |
+| `--destroy-if-idle-for 24h` | Delete a sandbox idle this long, at most 720h. Default: off |
+| `--max-age 168h` | Delete a sandbox this old, at most 720h. Default: off |
+| `--firecracker-vm-slots 512` | Firecracker TAP pool size, 256–1024. Firecracker only, raise only. Default 256 |
 
 ### `lewbox cluster list`
 
@@ -256,13 +272,13 @@ One cluster: its fields, the last check results, and its nodes. Doesn't contact 
 
 Runs every check now and syncs the node list. See [Health and checks](../clusters/health-and-checks.md).
 
-### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off] [--storage-profile NAME|none] [--stop-policy keep|archive] [--archive-local-retention instant|1h|1d|7d|never] [--archive-snapshot-name id|name]`
+### `lewbox cluster set ID|SLUG [--domain D] [--dns-profile NAME|none] [--dns-records auto|off] [--storage-profile NAME|none] [--stop-policy keep|archive] [--archive-local-retention instant|1h|1d|7d|never] [--archive-snapshot-name id|name] [--docker-timeout D|none] [--max-sandbox-cpu N|none] [--max-sandbox-memory-mb N|none] [--max-sandbox-disk-gb N|none] [--idle-stop-minutes N|none] [--destroy-if-idle-for D|none] [--max-age D|none] [--firecracker-vm-slots N]`
 
-Changes the cluster's DNS and storage settings. `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile and refuses to be set while the profile is being cleared. `--archive-local-retention` sets how long nodes keep their local copies of archived sandboxes (`instant` by default; `never` installs no cleanup timer), and `--archive-snapshot-name name` names new archive snapshots `archive-<name>-<id>` instead of `archive-<id>`. The next check reconciles the DNS records, and `lewbox node configure` applies the profiles on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+Changes the cluster's DNS and storage settings, and its [advanced AerolVM settings](../clusters/advanced-settings.md). `--domain ""` clears the domain; `--dns-profile none` and `--storage-profile none` clear those profiles. A profile needs a domain in its zone. `--dns-records off` stops Lewbox keeping records, for a domain pointed at a load balancer. `--stop-policy archive` archives stopped sandboxes to the storage profile's bucket; it needs a profile and refuses to be set while the profile is being cleared. `--archive-local-retention` sets how long nodes keep their local copies of archived sandboxes (`instant` by default; `never` installs no cleanup timer), and `--archive-snapshot-name name` names new archive snapshots `archive-<name>-<id>` instead of `archive-<id>`. `none` clears an advanced setting; `--docker-timeout none` restores 15m. `--firecracker-vm-slots` only raises a Firecracker pool, because AerolVM keeps the pool it first seeded. The next check reconciles the DNS records, and `lewbox node configure` applies the settings on each node. See [DNS profiles](../clusters/dns-profiles.md#the-records-lewbox-keeps) and [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
 
 ### `lewbox cluster node-settings ID|SLUG`
 
-Prints what every node of the cluster must apply: the cluster ID, stop policy, archive retention, the storage profile's bucket and registry root, and the DNS profile's zone, domain and token. It is mostly for debugging. The text form masks the bucket secret and the DNS token with `******`; `--json` shows them. Instance admins only, because it returns secrets.
+Prints what every node of the cluster must apply: the cluster ID, stop policy, archive retention, the advanced AerolVM settings, the storage profile's bucket and registry root, and the DNS profile's zone, domain and token. It is mostly for debugging. The text form masks the bucket secret and the DNS token with `******`; `--json` shows them. Instance admins only, because it returns secrets.
 
 ### `lewbox cluster health ID|SLUG [--days 30]`
 
@@ -307,7 +323,7 @@ Drains the node, removes it from its cluster in AerolVM, and forgets it. Asks to
 
 ### `lewbox node configure [--dry-run]`
 
-Run on a node. Fetches the cluster's node settings and applies them here: installs or removes the snapshot registry and its archive cleanup timer (set to the cluster's `archive_local_retention`; no timer for `never`), writes `/etc/sandboxd/lewbox.env` (with the snapshot push lines when the cluster has storage), and re-runs the verified installer with a changed DNS profile's token. Then it reports the versions and retention it applied, so an out-of-date node stops being flagged. Run it on every node whose cluster changed a profile. It refuses to run as root. `--dry-run` prints what would change, changing nothing. See [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
+Run on a node. Fetches the cluster's node settings and applies them here: writes `/etc/sandboxd/lewbox-create-policy.yaml` (allowing only the cluster's runtime), writes `/etc/sandboxd/lewbox.env` (with `SB_CREATE_POLICY_FILE`, the longer `SB_HTTP_CLIENT_TIMEOUT`, and, when the cluster has storage, the snapshot push lines), installs or removes the snapshot registry and its archive cleanup timer (set to the cluster's `archive_local_retention`; no timer for `never`), and re-runs the verified installer with a changed DNS profile's token. Then it reports the policy runtime, profile versions and retention it applied, so an out-of-date node stops being flagged. Run it on every node whose cluster changed a profile, and on a node that was configured before the create policy existed. It refuses to run as root. `--dry-run` prints what would change, changing nothing. See [Storage profiles](../clusters/storage-profiles.md#using-a-profile-on-a-cluster).
 
 ### `lewbox node cleanup [--older-than DURATION]`
 

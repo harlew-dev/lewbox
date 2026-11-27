@@ -102,6 +102,28 @@ describe('newClusterCommand', () => {
       'lewbox node add <node-name> --new-cluster <slug> --storage-profile <storage-profile>',
     )
   })
+
+  it('passes only the advanced settings that were filled in', () => {
+    const advanced = {
+      docker_timeout: '1h', max_sandbox_cpu: '4', max_sandbox_memory_mb: '4096', max_sandbox_disk_gb: '',
+      idle_stop_minutes: '30', destroy_if_idle_for: '24h', max_age: '', firecracker_vm_slots: '512',
+    }
+    expect(
+      newClusterCommand({ ...defaults, node: 'node-1', slug: 'lab', storageProfile: '', stopPolicy: 'keep', runtime: 'firecracker', advanced }),
+    ).toBe(
+      'lewbox node add node-1 --new-cluster lab --docker-timeout 1h --max-sandbox-cpu 4 --max-sandbox-memory-mb 4096 --idle-stop-minutes 30 --destroy-if-idle-for 24h --firecracker-vm-slots 512',
+    )
+    // The pool is Firecracker-only; below 256 or above 1024 is a placeholder.
+    expect(
+      newClusterCommand({ ...defaults, node: 'node-1', slug: 'lab', storageProfile: '', stopPolicy: 'keep', runtime: 'docker', advanced }),
+    ).not.toContain('--firecracker-vm-slots')
+    expect(
+      newClusterCommand({
+        ...defaults, node: 'node-1', slug: 'lab', storageProfile: '', stopPolicy: 'keep', runtime: 'firecracker',
+        advanced: { ...advanced, max_sandbox_cpu: '0.5', firecracker_vm_slots: '128' },
+      }),
+    ).toContain('--max-sandbox-cpu <max-sandbox-cpu>')
+  })
 })
 
 describe('joinClusterCommand and dnsRecordsOffCommand', () => {

@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -543,6 +544,20 @@ func newNodeCmd(a *app) *cobra.Command {
 	return node
 }
 
+// optionalFlag parses a `cluster set` flag into a PATCH field. An empty value,
+// none or off clears the setting.
+func optionalFlag[T any](name, raw string, parse func(string) (T, error)) (service.Optional[T], error) {
+	value := strings.TrimSpace(raw)
+	if value == "" || strings.EqualFold(value, "none") || strings.EqualFold(value, "off") {
+		return service.OptionalNull[T](), nil
+	}
+	parsed, err := parse(value)
+	if err != nil {
+		return service.Optional[T]{}, usagef("--%s: %v", name, err)
+	}
+	return service.OptionalOf(parsed), nil
+}
+
 // newClusterCmd mirrors /v0/clusters.
 func newClusterCmd(a *app) *cobra.Command {
 	cluster := &cobra.Command{
@@ -554,6 +569,10 @@ func newClusterCmd(a *app) *cobra.Command {
 	var (
 		adminURL, endpointURL, runtime, clusterName string
 		tokenStdin                                  bool
+		dockerTimeout, destroyIfIdleFor, maxAge     string
+		maxSandboxCPU                               float64
+		maxSandboxMemoryMB, maxSandboxDiskGB        int64
+		idleStopMinutes, firecrackerVMSlots         int64
 	)
 	add := &cobra.Command{
 		Use:     "add <slug>",
@@ -567,14 +586,38 @@ func newClusterCmd(a *app) *cobra.Command {
 				return err
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
-				return b.AddCluster(ctx, service.AddClusterRequest{
-					Slug:        args[0],
-					Name:        clusterName,
-					AdminURL:    adminURL,
-					EndpointURL: endpointURL,
-					Runtime:     runtime,
-					AdminToken:  token,
-				})
+				req := service.AddClusterRequest{
+					Slug:             args[0],
+					Name:             clusterName,
+					AdminURL:         adminURL,
+					EndpointURL:      endpointURL,
+					Runtime:          runtime,
+					AdminToken:       token,
+					DockerTimeout:    dockerTimeout,
+					DestroyIfIdleFor: destroyIfIdleFor,
+					MaxAge:           maxAge,
+				}
+				if cmd.Flags().Changed("max-sandbox-cpu") {
+					value := maxSandboxCPU
+					req.MaxSandboxCPU = &value
+				}
+				if cmd.Flags().Changed("max-sandbox-memory-mb") {
+					value := maxSandboxMemoryMB
+					req.MaxSandboxMemoryMB = &value
+				}
+				if cmd.Flags().Changed("max-sandbox-disk-gb") {
+					value := maxSandboxDiskGB
+					req.MaxSandboxDiskGB = &value
+				}
+				if cmd.Flags().Changed("idle-stop-minutes") {
+					value := idleStopMinutes
+					req.IdleStopMinutes = &value
+				}
+				if cmd.Flags().Changed("firecracker-vm-slots") {
+					value := firecrackerVMSlots
+					req.FirecrackerVMSlots = &value
+				}
+				return b.AddCluster(ctx, req)
 			})(cmd, args)
 		},
 	}
@@ -583,6 +626,14 @@ func newClusterCmd(a *app) *cobra.Command {
 	add.Flags().StringVar(&runtime, "runtime", "docker", "runtime: docker or firecracker")
 	add.Flags().StringVar(&clusterName, "name", "", "a display name (default: the slug)")
 	add.Flags().BoolVar(&tokenStdin, "admin-token-stdin", false, "read the admin token from stdin (required)")
+	add.Flags().StringVar(&dockerTimeout, "docker-timeout", "", "sandboxd's HTTP client timeout, from 1m to 2h (default 15m)")
+	add.Flags().Float64Var(&maxSandboxCPU, "max-sandbox-cpu", 0, "the most CPUs one sandbox may have (default: no cap)")
+	add.Flags().Int64Var(&maxSandboxMemoryMB, "max-sandbox-memory-mb", 0, "the most memory one sandbox may have in MB (default: no cap)")
+	add.Flags().Int64Var(&maxSandboxDiskGB, "max-sandbox-disk-gb", 0, "the most disk one sandbox may have in GB (default: no cap)")
+	add.Flags().Int64Var(&idleStopMinutes, "idle-stop-minutes", 0, "stop a sandbox idle this many minutes (default: off)")
+	add.Flags().StringVar(&destroyIfIdleFor, "destroy-if-idle-for", "", "delete a sandbox idle this long, at most 720h (default: off)")
+	add.Flags().StringVar(&maxAge, "max-age", "", "delete a sandbox this old, at most 720h (default: off)")
+	add.Flags().Int64Var(&firecrackerVMSlots, "firecracker-vm-slots", 0, "Firecracker TAP pool size, 256-1024 (default: AerolVM's 256)")
 	_ = add.MarkFlagRequired("admin-url")
 	_ = add.MarkFlagRequired("admin-token-stdin")
 
@@ -648,6 +699,8 @@ func newClusterCmd(a *app) *cobra.Command {
 
 	var setDomain, setDNSProfile, setDNSRecords, setStorageProfile, setStopPolicy string
 	var setRetention, setSnapshotName string
+	var setDockerTimeout, setMaxSandboxCPU, setMaxSandboxMemoryMB, setMaxSandboxDiskGB string
+	var setIdleStopMinutes, setDestroyIfIdleFor, setMaxAge, setFirecrackerVMSlots string
 	set := &cobra.Command{
 		Use:   "set <id|slug>",
 		Short: "Change a cluster's DNS and storage settings (PATCH /v0/clusters/{cluster})",
@@ -682,10 +735,79 @@ func newClusterCmd(a *app) *cobra.Command {
 			if cmd.Flags().Changed("archive-snapshot-name") {
 				req.ArchiveSnapshotName = &setSnapshotName
 			}
+			if cmd.Flags().Changed("docker-timeout") {
+				value, err := optionalFlag("docker-timeout", setDockerTimeout, func(s string) (string, error) { return s, nil })
+				if err != nil {
+					return err
+				}
+				req.DockerTimeout = value
+			}
+			if cmd.Flags().Changed("max-sandbox-cpu") {
+				value, err := optionalFlag("max-sandbox-cpu", setMaxSandboxCPU, func(s string) (float64, error) {
+					return strconv.ParseFloat(s, 64)
+				})
+				if err != nil {
+					return err
+				}
+				req.MaxSandboxCPU = value
+			}
+			if cmd.Flags().Changed("max-sandbox-memory-mb") {
+				value, err := optionalFlag("max-sandbox-memory-mb", setMaxSandboxMemoryMB, func(s string) (int64, error) {
+					return strconv.ParseInt(s, 10, 64)
+				})
+				if err != nil {
+					return err
+				}
+				req.MaxSandboxMemoryMB = value
+			}
+			if cmd.Flags().Changed("max-sandbox-disk-gb") {
+				value, err := optionalFlag("max-sandbox-disk-gb", setMaxSandboxDiskGB, func(s string) (int64, error) {
+					return strconv.ParseInt(s, 10, 64)
+				})
+				if err != nil {
+					return err
+				}
+				req.MaxSandboxDiskGB = value
+			}
+			if cmd.Flags().Changed("idle-stop-minutes") {
+				value, err := optionalFlag("idle-stop-minutes", setIdleStopMinutes, func(s string) (int64, error) {
+					return strconv.ParseInt(s, 10, 64)
+				})
+				if err != nil {
+					return err
+				}
+				req.IdleStopMinutes = value
+			}
+			if cmd.Flags().Changed("destroy-if-idle-for") {
+				value, err := optionalFlag("destroy-if-idle-for", setDestroyIfIdleFor, func(s string) (string, error) { return s, nil })
+				if err != nil {
+					return err
+				}
+				req.DestroyIfIdleFor = value
+			}
+			if cmd.Flags().Changed("max-age") {
+				value, err := optionalFlag("max-age", setMaxAge, func(s string) (string, error) { return s, nil })
+				if err != nil {
+					return err
+				}
+				req.MaxAge = value
+			}
+			if cmd.Flags().Changed("firecracker-vm-slots") {
+				value, err := optionalFlag("firecracker-vm-slots", setFirecrackerVMSlots, func(s string) (int64, error) {
+					return strconv.ParseInt(s, 10, 64)
+				})
+				if err != nil {
+					return err
+				}
+				req.FirecrackerVMSlots = value
+			}
 			if req.Domain == nil && req.DNSProfile == nil && req.DNSRecords == nil &&
 				req.StorageProfile == nil && req.StopPolicy == nil &&
-				req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil {
-				return usagef("nothing to change: pass --domain, --dns-profile, --dns-records, --storage-profile, --stop-policy, --archive-local-retention or --archive-snapshot-name")
+				req.ArchiveLocalRetention == nil && req.ArchiveSnapshotName == nil &&
+				!req.DockerTimeout.Set && !req.MaxSandboxCPU.Set && !req.MaxSandboxMemoryMB.Set &&
+				!req.MaxSandboxDiskGB.Set && !req.IdleStopMinutes.Set && !req.DestroyIfIdleFor.Set &&
+				!req.MaxAge.Set && !req.FirecrackerVMSlots.Set {
+				return usagef("nothing to change: pass --domain, --dns-profile, --dns-records, --storage-profile, --stop-policy, --archive-local-retention, --archive-snapshot-name or an advanced setting")
 			}
 			return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 				return b.UpdateCluster(ctx, args[0], req)
@@ -699,6 +821,14 @@ func newClusterCmd(a *app) *cobra.Command {
 	set.Flags().StringVar(&setStopPolicy, "stop-policy", "", "what happens to a stopped sandbox: keep or archive")
 	set.Flags().StringVar(&setRetention, "archive-local-retention", "", "how long nodes keep local copies of archived sandboxes: instant, 1h, 1d, 7d or never")
 	set.Flags().StringVar(&setSnapshotName, "archive-snapshot-name", "", "how archive snapshots are named: id (archive-<id>) or name (archive-<name>-<id>)")
+	set.Flags().StringVar(&setDockerTimeout, "docker-timeout", "", "sandboxd's HTTP client timeout, from 1m to 2h (none restores 15m)")
+	set.Flags().StringVar(&setMaxSandboxCPU, "max-sandbox-cpu", "", "the most CPUs one sandbox may have (none clears it)")
+	set.Flags().StringVar(&setMaxSandboxMemoryMB, "max-sandbox-memory-mb", "", "the most memory one sandbox may have in MB (none clears it)")
+	set.Flags().StringVar(&setMaxSandboxDiskGB, "max-sandbox-disk-gb", "", "the most disk one sandbox may have in GB (none clears it)")
+	set.Flags().StringVar(&setIdleStopMinutes, "idle-stop-minutes", "", "stop a sandbox idle this many minutes (none or 0 turns it off)")
+	set.Flags().StringVar(&setDestroyIfIdleFor, "destroy-if-idle-for", "", "delete a sandbox idle this long, at most 720h (none turns it off)")
+	set.Flags().StringVar(&setMaxAge, "max-age", "", "delete a sandbox this old, at most 720h (none turns it off)")
+	set.Flags().StringVar(&setFirecrackerVMSlots, "firecracker-vm-slots", "", "Firecracker TAP pool size, 256-1024 (raise only)")
 
 	nodeSettings := &cobra.Command{
 		Use:   "node-settings <id|slug>",

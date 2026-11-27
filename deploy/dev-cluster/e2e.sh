@@ -88,6 +88,8 @@ expect "the admin token is never returned" '[.. | strings | select(startswith("a
 step "Lewbox's settings are on every node, in Lewbox's own files"
 for n in node-1 node-2; do
 	compose exec -T "$n" grep -qx 'SB_IDENTITY_ENABLED=true' /etc/sandboxd/lewbox.env && pass "$n identity on" || fail "$n identity"
+	compose exec -T "$n" grep -qx 'SB_CREATE_POLICY_FILE=/etc/sandboxd/lewbox-create-policy.yaml' /etc/sandboxd/lewbox.env && pass "$n policy pointed at" || fail "$n policy env"
+	compose exec -T "$n" grep -qx "runtimes: \[$RUNTIME\]" /etc/sandboxd/lewbox-create-policy.yaml && pass "$n policy allows only $RUNTIME" || fail "$n policy file"
 	compose exec -T "$n" test -f /etc/systemd/system/sandboxd.service.d/lewbox.conf && pass "$n drop-in" || fail "$n drop-in"
 	compose exec -T "$n" sh -c '! grep -q SB_IDENTITY_ENABLED /etc/sandboxd/sandboxd.env' && pass "$n installer env untouched" || fail "$n sandboxd.env edited"
 done
@@ -121,6 +123,22 @@ echo "placement: node-1 runs $on1, node-2 runs $on2"
 (( on1 + on2 == 3 )) && pass "3 sandboxes ($RUNTIME) across the cluster" || fail "expected 3 sandboxes, got $on1 + $on2"
 for id in "${ids[@]}"; do curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true; done
 
+step "the create policy allows only $RUNTIME"
+if [[ $RUNTIME == firecracker ]]; then
+	denied="$HERE/.cache/policy-denied.json"
+	code=$(curl -sS -o "$denied" -w '%{http_code}' -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' \
+		http://127.0.0.1:21202/v1/sandboxes -d '{"name":"e2e-policy-docker","image":"alpine:3.20","runtime":"docker"}')
+	[[ $code == 403 ]] && grep -q create_policy_denied "$denied" && pass "a docker create is refused with 403 create_policy_denied" \
+		|| { cat "$denied" >&2; echo; fail "docker create: HTTP $code"; }
+	# A create that names the allowed runtime still works under the policy.
+	s=$(curl -fsS -X POST -H "Authorization: Bearer $runner" -H 'Content-Type: application/json' \
+		http://127.0.0.1:21202/v1/sandboxes -d '{"name":"e2e-policy-fc","image":"alpine:3.20","runtime":"firecracker"}')
+	expect "a firecracker create is allowed" '.status == "started"' "$s"
+	id=$(jq -r .id <<<"$s"); curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $runner" "http://127.0.0.1:21201/v1/sandboxes/$id" || true
+else
+	pass "a docker cluster: the policy allows docker, as the creates above show"
+fi
+
 step "firewall enable: ufw with Lewbox's ports, the cluster ports from the private network only"
 compose exec -T node-1 ufw allow 5555/tcp >/dev/null # a rule Lewbox doesn't set
 if lb node-1 firewall enable >/dev/null 2>&1; then fail "other rules were handled without asking"; else pass "other rules need --reset outside a terminal"; fi
@@ -133,6 +151,10 @@ expect "node-1 reset to Lewbox's rules" '.reset and .kept == []' "$out"
 compose exec -T node-1 sh -c '! ufw status | grep -q 5555' && pass "5555/tcp removed by the reset" || fail "5555/tcp still open"
 lb node-2 firewall enable --yes --json >/dev/null || fail "firewall enable on node-2"
 for n in node-1 node-2; do compose exec -T "$n" ufw status | grep -q '^Status: active' && pass "$n: ufw active" || fail "$n: ufw not active"; done
+# Enabling ufw briefly drops cluster traffic. A member AerolVM drops and
+# re-adds comes back as a new node row with no reported settings, so apply
+# them again before judging the cluster.
+for n in node-1 node-2; do lb "$n" node configure --json >/dev/null || fail "$n: node configure after firewall"; done
 c=$(lb node-1 cluster check "$CLUSTER" --json)
 expect "cluster still ready behind the firewall" '.status == "ready"' "$c"
 ids=()

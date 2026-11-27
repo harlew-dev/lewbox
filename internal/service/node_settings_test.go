@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -19,6 +20,16 @@ func nodeSettingsFixture(t *testing.T) (*Service, *objstoretest.Fake) {
 }
 
 func ptrString(s string) *string { return &s }
+
+// reportPolicy marks every node of a cluster as having applied its create
+// policy, so tests about other checks do not trip over it.
+func reportPolicy(t *testing.T, s *Service, clusterID, runtime string) {
+	t.Helper()
+	if _, err := s.database.ExecContext(context.Background(),
+		`UPDATE nodes SET settings_policy_runtime = ? WHERE cluster_id = ?`, runtime, clusterID); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestClusterNodeSettings(t *testing.T) {
 	s, storage := nodeSettingsFixture(t)
@@ -52,7 +63,7 @@ func TestClusterNodeSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if settings.ClusterID != detail.ID || settings.Cluster != "lab" || settings.StopPolicy != "archive" {
+	if settings.ClusterID != detail.ID || settings.Cluster != "lab" || settings.Runtime != "docker" || settings.StopPolicy != "archive" {
 		t.Errorf("settings = %+v", settings)
 	}
 	if settings.Storage == nil || settings.DNS == nil {
@@ -170,9 +181,11 @@ func TestReportNodeSettingsAndOutdated(t *testing.T) {
 	setMembers(fake, "node-a")
 	req := clusterRequest(fake, "lab")
 	req.StorageProfile = "s3-main"
-	if _, err := s.AddCluster(localCtx(), req); err != nil {
+	detail, err := s.AddCluster(localCtx(), req)
+	if err != nil {
 		t.Fatal(err)
 	}
+	reportPolicy(t, s, detail.ID, detail.Runtime)
 
 	// Nothing reported yet: the node has no storage settings.
 	node, err := s.GetNode(localCtx(), "node-a")
@@ -187,7 +200,7 @@ func TestReportNodeSettingsAndOutdated(t *testing.T) {
 	}
 
 	reported, err := s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		StorageProfile: ptrString("s3-main"), StorageVersion: 1,
+		StorageProfile: ptrString("s3-main"), StorageVersion: 1, PolicyRuntime: ptrString("docker"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +228,7 @@ func TestReportNodeSettingsAndOutdated(t *testing.T) {
 	// Another profile is outdated too.
 	createStorageProfile(t, s, newStorageProfileRequest(storage, "s3-old"))
 	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		StorageProfile: ptrString("s3-old"), StorageVersion: 1,
+		StorageProfile: ptrString("s3-old"), StorageVersion: 1, PolicyRuntime: ptrString("docker"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -262,9 +275,11 @@ func TestNodeSettingsDNSErrors(t *testing.T) {
 	req := clusterRequest(fake, "lab")
 	req.Domain = "eu.example.com"
 	req.DNSProfile = dns.Name
-	if _, err := s.AddCluster(localCtx(), req); err != nil {
+	detail, err := s.AddCluster(localCtx(), req)
+	if err != nil {
 		t.Fatal(err)
 	}
+	reportPolicy(t, s, detail.ID, detail.Runtime)
 
 	// A node that never reported DNS is not judged on it.
 	node, err := s.GetNode(localCtx(), "node-a")
@@ -276,7 +291,7 @@ func TestNodeSettingsDNSErrors(t *testing.T) {
 	}
 
 	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
-		DNSProfile: ptrString("cf-prod"), DNSVersion: 1,
+		DNSProfile: ptrString("cf-prod"), DNSVersion: 1, PolicyRuntime: ptrString("docker"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -340,7 +355,7 @@ func TestNodeSettingsCheck(t *testing.T) {
 
 	for _, name := range []string{"node-a", "node-b"} {
 		if _, err := s.ReportNodeSettings(localCtx(), name, ReportNodeSettingsRequest{
-			StorageProfile: ptrString("s3-main"), StorageVersion: 1,
+			StorageProfile: ptrString("s3-main"), StorageVersion: 1, PolicyRuntime: ptrString("docker"),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -353,6 +368,148 @@ func TestNodeSettingsCheck(t *testing.T) {
 	if !ok || !check.OK {
 		t.Errorf("up-to-date check = %+v, found %v", check, ok)
 	}
+}
+
+func TestNodeCreatePolicyOutdated(t *testing.T) {
+	s, _ := nodeSettingsFixture(t)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a")
+	if _, err := s.AddCluster(localCtx(), clusterRequest(fake, "lab")); err != nil {
+		t.Fatal(err)
+	}
+
+	node, err := s.GetNode(localCtx(), "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "create policy runtime is docker; this node applied none"
+	if !node.Settings.Outdated || !containsString(node.Settings.Reasons, want) {
+		t.Errorf("reasons = %v, want %q", node.Settings.Reasons, want)
+	}
+
+	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
+		PolicyRuntime: ptrString("firecracker"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "create policy runtime is docker; this node applied firecracker"
+	if !node.Settings.Outdated || !containsString(node.Settings.Reasons, want) {
+		t.Errorf("reasons = %v, want %q", node.Settings.Reasons, want)
+	}
+
+	if _, err := s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
+		PolicyRuntime: ptrString("gvisor"),
+	}); err == nil {
+		t.Error("an unknown policy runtime was accepted")
+	}
+
+	node, err = s.ReportNodeSettings(localCtx(), "node-a", ReportNodeSettingsRequest{
+		PolicyRuntime: ptrString("docker"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Settings.Outdated {
+		t.Errorf("a matching policy is outdated: %v", node.Settings.Reasons)
+	}
+
+	// The list query reads its own columns; it must carry the policy too.
+	list, err := s.ListNodes(localCtx(), ListNodesRequest{Cluster: "lab"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data) != 1 || list.Data[0].Settings.Outdated {
+		t.Errorf("listed node = %+v", list.Data)
+	}
+}
+
+func TestCreatePolicyCheck(t *testing.T) {
+	s, _ := nodeSettingsFixture(t)
+	fake := newClusterFake(t)
+	setMembers(fake, "node-a", "node-b")
+	detail, err := s.AddCluster(localCtx(), clusterRequest(fake, "lab"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	check := func() Check {
+		t.Helper()
+		checked, err := s.CheckCluster(localCtx(), "lab")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, ok := findCheck(checked.Checks, "create policy")
+		if !ok {
+			t.Fatalf("checks = %+v", checked.Checks)
+		}
+		return c
+	}
+
+	// No node has applied the policy yet.
+	c := check()
+	if c.OK {
+		t.Fatalf("check = %+v", c)
+	}
+	for _, want := range []string{
+		"node-a: create policy runtime is docker; this node applied none",
+		"node-b: create policy runtime is docker; this node applied none",
+		"run `lewbox node configure` on each",
+	} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("detail %q is missing %q", c.Detail, want)
+		}
+	}
+
+	for _, name := range []string{"node-a", "node-b"} {
+		if _, err := s.ReportNodeSettings(localCtx(), name, ReportNodeSettingsRequest{
+			PolicyRuntime: ptrString("docker"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c = check(); !c.OK || c.Detail != "2 node(s) enforce docker" {
+		t.Errorf("up-to-date check = %+v", c)
+	}
+
+	// A sandbox of another runtime in the mirror is the live drift signal.
+	// A destroyed one does not count, and a blank runtime is docker.
+	for _, row := range []struct{ id, status, runtime string }{
+		{"sb-drift", "started", "firecracker"},
+		{"sb-destroyed", "destroyed", "firecracker"},
+		{"sb-default", "started", ""},
+	} {
+		if _, err := s.database.ExecContext(context.Background(),
+			`INSERT INTO sandboxes (cluster_id, id, node, name, image, status, status_reason, runtime, cpu, memory_mb, disk_gb, created_at, last_seen_at)
+			 VALUES (?, ?, 'node-b', ?, 'alpine', ?, '', ?, 1, 1024, 10, ?, ?)`,
+			detail.ID, row.id, row.id, row.status, row.runtime, s.now(), s.now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c = check()
+	if c.OK {
+		t.Fatalf("drift check = %+v", c)
+	}
+	for _, want := range []string{
+		"1 sandbox(es) on this docker cluster run another runtime",
+		"sb-drift (firecracker) on node-b",
+	} {
+		if !strings.Contains(c.Detail, want) {
+			t.Errorf("detail %q is missing %q", c.Detail, want)
+		}
+	}
+	if strings.Contains(c.Detail, "sb-destroyed") || strings.Contains(c.Detail, "sb-default") {
+		t.Errorf("detail names a destroyed or default-runtime sandbox: %q", c.Detail)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNodeSettingsCheckOmittedWithoutStorage(t *testing.T) {

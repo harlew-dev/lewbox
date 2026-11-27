@@ -63,6 +63,131 @@ export type ArchiveRetention = 'instant' | '1h' | '1d' | '7d' | 'never'
 export type ArchiveSnapshotName = 'id' | 'name'
 const RETENTIONS: readonly string[] = ['instant', '1h', '1d', '7d', 'never']
 
+// The advanced AerolVM settings, kept as strings while the form is edited.
+export interface AdvancedForm {
+  docker_timeout: string
+  max_sandbox_cpu: string
+  max_sandbox_memory_mb: string
+  max_sandbox_disk_gb: string
+  idle_stop_minutes: string
+  destroy_if_idle_for: string
+  max_age: string
+  firecracker_vm_slots: string
+}
+
+export const emptyAdvancedForm: AdvancedForm = {
+  docker_timeout: '',
+  max_sandbox_cpu: '',
+  max_sandbox_memory_mb: '',
+  max_sandbox_disk_gb: '',
+  idle_stop_minutes: '',
+  destroy_if_idle_for: '',
+  max_age: '',
+  firecracker_vm_slots: '',
+}
+
+export const ADVANCED_FIELDS: readonly (keyof AdvancedForm)[] = [
+  'docker_timeout',
+  'max_sandbox_cpu',
+  'max_sandbox_memory_mb',
+  'max_sandbox_disk_gb',
+  'idle_stop_minutes',
+  'destroy_if_idle_for',
+  'max_age',
+  'firecracker_vm_slots',
+]
+
+// A Go duration in hours, minutes and seconds: 15m, 1h30m, 90s.
+function durationMinutes(value: string): number | null {
+  const match = value.trim().match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/)
+  if (!match) return null
+  const hours = Number(match[1] ?? 0)
+  const minutes = Number(match[2] ?? 0)
+  const seconds = Number(match[3] ?? 0)
+  if (hours === 0 && minutes === 0 && seconds === 0) return null
+  return hours * 60 + minutes + seconds / 60
+}
+
+function validDuration(value: string, minMinutes: number, maxMinutes: number): boolean {
+  const minutes = durationMinutes(value)
+  return minutes !== null && minutes >= minMinutes && minutes <= maxMinutes
+}
+
+function validNumber(value: string, min: number, max = Number.POSITIVE_INFINITY, integer = false): boolean {
+  if (value.trim() === '') return false
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max && (!integer || Number.isInteger(parsed))
+}
+
+// What is wrong with each filled-in advanced setting. Empty fields are valid:
+// they keep the default or turn the setting off.
+export function advancedProblems(
+  values: AdvancedForm,
+  runtime: Runtime,
+): Partial<Record<keyof AdvancedForm, string>> {
+  const problems: Partial<Record<keyof AdvancedForm, string>> = {}
+  const text = (field: keyof AdvancedForm) => values[field].trim()
+  if (text('docker_timeout') !== '' && !validDuration(text('docker_timeout'), 1, 120)) {
+    problems.docker_timeout = 'A duration from 1m to 2h, such as 15m.'
+  }
+  if (text('max_sandbox_cpu') !== '' && !validNumber(text('max_sandbox_cpu'), 1)) {
+    problems.max_sandbox_cpu = 'At least 1, AerolVM’s default size.'
+  }
+  if (text('max_sandbox_memory_mb') !== '' && !validNumber(text('max_sandbox_memory_mb'), 1024, undefined, true)) {
+    problems.max_sandbox_memory_mb = 'At least 1024, AerolVM’s default size.'
+  }
+  if (text('max_sandbox_disk_gb') !== '' && !validNumber(text('max_sandbox_disk_gb'), 10, undefined, true)) {
+    problems.max_sandbox_disk_gb = 'At least 10, AerolVM’s default size.'
+  }
+  if (text('idle_stop_minutes') !== '' && !validNumber(text('idle_stop_minutes'), 1, undefined, true)) {
+    problems.idle_stop_minutes = 'A whole number of minutes.'
+  }
+  if (text('destroy_if_idle_for') !== '' && !validDuration(text('destroy_if_idle_for'), 0, 720 * 60)) {
+    problems.destroy_if_idle_for = 'A duration of at most 720h, such as 24h.'
+  }
+  if (text('max_age') !== '' && !validDuration(text('max_age'), 0, 720 * 60)) {
+    problems.max_age = 'A duration of at most 720h, such as 24h.'
+  }
+  if (
+    runtime === 'firecracker' &&
+    text('firecracker_vm_slots') !== '' &&
+    !validNumber(text('firecracker_vm_slots'), 256, 1024, true)
+  ) {
+    problems.firecracker_vm_slots = '256–1024, and only above the current value.'
+  }
+  return problems
+}
+
+// The advanced flags for a command, only for fields that were filled in.
+function advancedFlags(values: AdvancedForm, runtime: Runtime): string[] {
+  const parts: string[] = []
+  const add = (value: string, valid: boolean, flag: string) => {
+    const trimmed = value.trim()
+    if (trimmed === '') return
+    parts.push(`--${flag} ${valid ? trimmed : `<${flag}>`}`)
+  }
+  add(values.docker_timeout, validDuration(values.docker_timeout, 1, 120), 'docker-timeout')
+  add(values.max_sandbox_cpu, validNumber(values.max_sandbox_cpu, 1), 'max-sandbox-cpu')
+  add(
+    values.max_sandbox_memory_mb,
+    validNumber(values.max_sandbox_memory_mb, 1024, undefined, true),
+    'max-sandbox-memory-mb',
+  )
+  add(values.max_sandbox_disk_gb, validNumber(values.max_sandbox_disk_gb, 10, undefined, true), 'max-sandbox-disk-gb')
+  add(values.idle_stop_minutes, validNumber(values.idle_stop_minutes, 1, undefined, true), 'idle-stop-minutes')
+  add(values.destroy_if_idle_for, validDuration(values.destroy_if_idle_for, 0, 720 * 60), 'destroy-if-idle-for')
+  add(values.max_age, validDuration(values.max_age, 0, 720 * 60), 'max-age')
+  if (runtime === 'firecracker') {
+    add(
+      values.firecracker_vm_slots,
+      validNumber(values.firecracker_vm_slots, 256, 1024, true),
+      'firecracker-vm-slots',
+    )
+  }
+  return parts
+}
+
+
 export interface InstallOptions {
   access: AccessMode
   // Public IP mode.
@@ -109,6 +234,9 @@ export interface NewClusterOptions {
   // Only sent when archiving and not the default (instant, id).
   retention: ArchiveRetention
   snapshotName: ArchiveSnapshotName
+  // Advanced settings, only the filled-in ones are passed.
+  runtime?: Runtime
+  advanced?: AdvancedForm
 }
 
 // `lewbox node add … --new-cluster …`, with the storage options when chosen.
@@ -127,6 +255,7 @@ export function newClusterCommand(options: NewClusterOptions): string {
     }
     if (options.snapshotName === 'name') parts.push('--archive-snapshot-name name')
   }
+  parts.push(...advancedFlags(options.advanced ?? emptyAdvancedForm, options.runtime ?? 'docker'))
   return parts.join(' ')
 }
 

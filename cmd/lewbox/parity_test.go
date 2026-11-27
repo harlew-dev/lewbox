@@ -397,6 +397,29 @@ func TestClusterSet(t *testing.T) {
 	if status, body := e.http("PATCH", "/v0/clusters/eu-west", `{}`); status != 422 || !strings.Contains(body, "nothing to change") {
 		t.Errorf("empty update: status %d body %s", status, body)
 	}
+
+	// The advanced settings work through both entry points, including a
+	// null that clears one.
+	out = e.same([]string{"cluster", "set", "eu-west", "--docker-timeout", "1h",
+		"--max-sandbox-cpu", "4", "--max-sandbox-memory-mb", "4096", "--idle-stop-minutes", "30",
+		"--max-age", "168h"},
+		"PATCH", "/v0/clusters/eu-west",
+		`{"docker_timeout":"1h","max_sandbox_cpu":4,"max_sandbox_memory_mb":4096,"idle_stop_minutes":30,"max_age":"168h"}`, 200)
+	if err := json.Unmarshal([]byte(out), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.DockerTimeout != "1h" || detail.MaxSandboxCPU == nil || *detail.MaxSandboxCPU != 4 ||
+		detail.MaxSandboxMemoryMB == nil || *detail.MaxSandboxMemoryMB != 4096 ||
+		detail.IdleStopMinutes == nil || *detail.IdleStopMinutes != 30 || detail.MaxAge != "168h" {
+		t.Errorf("advanced cluster = %+v", detail.AdvancedSettings)
+	}
+	out = e.same([]string{"cluster", "set", "eu-west", "--max-sandbox-cpu", "none", "--max-age", "none"},
+		"PATCH", "/v0/clusters/eu-west", `{"max_sandbox_cpu":null,"max_age":null}`, 200)
+	if !strings.Contains(out, `"max_sandbox_cpu":null`) || !strings.Contains(out, `"max_age":""`) {
+		t.Errorf("cleared advanced settings = %s", out)
+	}
+	e.sameError([]string{"cluster", "set", "eu-west", "--max-sandbox-cpu", "0.5"},
+		"PATCH", "/v0/clusters/eu-west", `{"max_sandbox_cpu":0.5}`, 422)
 }
 
 func TestClusters(t *testing.T) {

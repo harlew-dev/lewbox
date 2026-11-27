@@ -29,6 +29,14 @@ export function addCluster(input: {
   endpoint_url: string
   runtime: string
   admin_token: string
+  docker_timeout?: string
+  max_sandbox_cpu?: number
+  max_sandbox_memory_mb?: number
+  max_sandbox_disk_gb?: number
+  idle_stop_minutes?: number
+  destroy_if_idle_for?: string
+  max_age?: string
+  firecracker_vm_slots?: number
 }): Promise<ClusterDetail> {
   return request<ClusterDetail>('/v0/clusters', { method: 'POST', body: input })
 }

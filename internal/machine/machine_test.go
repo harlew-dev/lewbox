@@ -13,6 +13,66 @@ import (
 	"github.com/harlew-dev/lewbox/internal/service"
 )
 
+func TestNodeFiles(t *testing.T) {
+	for _, runtime := range []string{"docker", "firecracker"} {
+		files := NodeFiles{Runtime: runtime}
+		want := "version: 1\nruntimes: [" + runtime + "]\n"
+		if got := files.CreatePolicyContent(); got != want {
+			t.Errorf("CreatePolicyContent(%q) = %q, want %q", runtime, got, want)
+		}
+	}
+	env := NodeFiles{Runtime: "docker"}.EnvFileContent()
+	if !strings.Contains(env, "SB_CREATE_POLICY_FILE="+CreatePolicyFile+"\n") {
+		t.Errorf("EnvFileContent does not point at the create policy: %q", env)
+	}
+	if !strings.Contains(env, "SB_HTTP_CLIENT_TIMEOUT=15m\n") {
+		t.Errorf("EnvFileContent does not extend sandboxd's HTTP client timeout: %q", env)
+	}
+	if strings.Contains(env, "SB_IDLE_TIMEOUT_MIN=") || strings.Contains(env, "SB_MAX_AGE=") {
+		t.Errorf("default files carry an unset lifecycle setting: %q", env)
+	}
+
+	cpu, memory, disk := 4.5, int64(8192), int64(50)
+	idle, slots := int64(30), int64(512)
+	files := NodeFiles{
+		Runtime: "firecracker",
+		PushEnv: PushEnv("01ABC-DEF"),
+		Advanced: AdvancedSettings{
+			DockerTimeout:      "1h30m",
+			MaxSandboxCPU:      &cpu,
+			MaxSandboxMemoryMB: &memory,
+			MaxSandboxDiskGB:   &disk,
+			IdleStopMinutes:    &idle,
+			DestroyIfIdleFor:   "24h",
+			MaxAge:             "168h",
+			FirecrackerVMSlots: &slots,
+		},
+	}
+	wantPolicy := "version: 1\nruntimes: [firecracker]\n" +
+		"limits:\n  max_cpu: 4.5\n  max_memory_mb: 8192\n  max_disk_gb: 50\n"
+	if got := files.CreatePolicyContent(); got != wantPolicy {
+		t.Errorf("CreatePolicyContent = %q, want %q", got, wantPolicy)
+	}
+	wantEnv := "SB_IDENTITY_ENABLED=true\n" +
+		"SB_TOKEN_MAX_TTL=876000h\n" +
+		"SB_CREATE_POLICY_FILE=" + CreatePolicyFile + "\n" +
+		"SB_HTTP_CLIENT_TIMEOUT=1h30m\n" +
+		"SB_IDLE_TIMEOUT_MIN=30\n" +
+		"SB_DEFAULT_DESTROY_IF_IDLE_FOR=24h\n" +
+		"SB_MAX_AGE=168h\n" +
+		"SB_FIRECRACKER_TAP_POOL_SIZE=512\n" +
+		PushEnv("01ABC-DEF")
+	if got := files.EnvFileContent(); got != wantEnv {
+		t.Errorf("EnvFileContent = %q, want %q", got, wantEnv)
+	}
+
+	// The pool is Firecracker-only, even if a caller sets it elsewhere.
+	docker := NodeFiles{Runtime: "docker", Advanced: AdvancedSettings{FirecrackerVMSlots: &slots}}
+	if strings.Contains(docker.EnvFileContent(), "SB_FIRECRACKER_TAP_POOL_SIZE") {
+		t.Errorf("docker env carries the Firecracker pool: %q", docker.EnvFileContent())
+	}
+}
+
 func TestMaskLine(t *testing.T) {
 	cases := []struct {
 		name    string

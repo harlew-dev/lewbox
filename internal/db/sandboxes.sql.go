@@ -11,6 +11,27 @@ import (
 	"time"
 )
 
+const countSandboxesByRuntimeMismatch = `-- name: CountSandboxesByRuntimeMismatch :one
+SELECT COUNT(*) FROM sandboxes
+WHERE cluster_id = ?1
+  AND gone_at IS NULL
+  AND status != 'destroyed'
+  AND COALESCE(NULLIF(runtime, ''), 'docker') != ?2
+`
+
+type CountSandboxesByRuntimeMismatchParams struct {
+	ClusterID string
+	Runtime   string
+}
+
+// A blank runtime is AerolVM's default, docker.
+func (q *Queries) CountSandboxesByRuntimeMismatch(ctx context.Context, arg CountSandboxesByRuntimeMismatchParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSandboxesByRuntimeMismatch, arg.ClusterID, arg.Runtime)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSandboxesByStatus = `-- name: CountSandboxesByStatus :many
 SELECT status, COUNT(*) AS n FROM sandboxes
 WHERE gone_at IS NULL
@@ -232,6 +253,51 @@ func (q *Queries) ListSandboxesByID(ctx context.Context, id string) ([]ListSandb
 			&i.OrgSlug,
 			&i.OrgName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSandboxesByRuntimeMismatch = `-- name: ListSandboxesByRuntimeMismatch :many
+SELECT id, node, runtime FROM sandboxes
+WHERE cluster_id = ?1
+  AND gone_at IS NULL
+  AND status != 'destroyed'
+  AND COALESCE(NULLIF(runtime, ''), 'docker') != ?2
+ORDER BY created_at DESC, id DESC
+LIMIT ?3
+`
+
+type ListSandboxesByRuntimeMismatchParams struct {
+	ClusterID string
+	Runtime   string
+	Limit     int64
+}
+
+type ListSandboxesByRuntimeMismatchRow struct {
+	ID      string
+	Node    string
+	Runtime string
+}
+
+func (q *Queries) ListSandboxesByRuntimeMismatch(ctx context.Context, arg ListSandboxesByRuntimeMismatchParams) ([]ListSandboxesByRuntimeMismatchRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSandboxesByRuntimeMismatch, arg.ClusterID, arg.Runtime, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSandboxesByRuntimeMismatchRow
+	for rows.Next() {
+		var i ListSandboxesByRuntimeMismatchRow
+		if err := rows.Scan(&i.ID, &i.Node, &i.Runtime); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

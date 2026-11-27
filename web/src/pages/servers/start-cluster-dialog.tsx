@@ -27,7 +27,9 @@ import { useState } from 'react'
 import * as api from '../../lib/api'
 import { routes } from '../../lib/routes'
 import {
+  advancedProblems,
   dnsRecordsOffCommand,
+  emptyAdvancedForm,
   installCommand,
   newClusterCommand,
   validDomain,
@@ -37,11 +39,12 @@ import {
   validLabel,
   validVersion,
   type AccessMode,
+  type AdvancedForm,
   type Runtime,
   type StopPolicy,
 } from '../../lib/commands'
 import { useLoad } from '../../lib/use-load'
-import { ArchiveOptions } from './cluster-settings'
+import { AdvancedFields, ArchiveOptions } from './cluster-settings'
 import { SignInStep } from './sign-in-step'
 import { WaitForClusterStep } from './wait-step'
 import { StepIndicator } from './step-indicator'
@@ -85,6 +88,7 @@ function StartCluster({ onClose }: { onClose: () => void }) {
   const [stopPolicy, setStopPolicy] = useState<StopPolicy>('keep')
   const [retention, setRetention] = useState<api.ArchiveRetention>('instant')
   const [snapshotName, setSnapshotName] = useState<api.ArchiveSnapshotName>('id')
+  const [advanced, setAdvanced] = useState<AdvancedForm>(emptyAdvancedForm)
   const [version, setVersion] = useState('')
   const [extraFlags, setExtraFlags] = useState('')
 
@@ -106,6 +110,8 @@ function StartCluster({ onClose }: { onClose: () => void }) {
   const emailProblem = acmeEmail !== '' && !validEmail(acmeEmail)
   const versionProblem = version !== '' && !validVersion(version)
   const flagsProblem = !validInstallerFlags(extraFlags)
+  const settingProblems = advancedProblems(advanced, effectiveRuntime)
+  const settingsProblem = Object.keys(settingProblems).length > 0
 
   const ready =
     validLabel(slug) &&
@@ -113,6 +119,7 @@ function StartCluster({ onClose }: { onClose: () => void }) {
     !emailProblem &&
     !versionProblem &&
     !flagsProblem &&
+    !settingsProblem &&
     (access === 'local' ||
       (access === 'public-host' ? validHost(host) : validDomain(domain) && dnsProfile !== ''))
 
@@ -127,7 +134,16 @@ function StartCluster({ onClose }: { onClose: () => void }) {
     version,
     extraFlags,
   })
-  const addNode = newClusterCommand({ node, slug, storageProfile, stopPolicy: effectivePolicy, retention, snapshotName })
+  const addNode = newClusterCommand({
+    node,
+    slug,
+    storageProfile,
+    stopPolicy: effectivePolicy,
+    retention,
+    snapshotName,
+    runtime: effectiveRuntime,
+    advanced,
+  })
 
   if (step === 'commands') {
     return (
@@ -395,6 +411,14 @@ function StartCluster({ onClose }: { onClose: () => void }) {
                 <Description>Passed to AerolVM’s installer after <code>--</code>.</Description>
               )}
             </Field>
+          </div>
+          <div className="mt-6">
+            <AdvancedFields
+              form={advanced}
+              onChange={(field, value) => setAdvanced((current) => ({ ...current, [field]: value }))}
+              runtime={effectiveRuntime}
+              errors={settingProblems}
+            />
           </div>
         </Disclosure>
         {access === 'public-host' && (

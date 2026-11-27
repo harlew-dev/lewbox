@@ -87,6 +87,14 @@ type Cluster struct {
 	StopPolicy            string
 	ArchiveLocalRetention string
 	ArchiveSnapshotName   string
+	DockerTimeout         string
+	MaxSandboxCpu         sql.NullFloat64
+	MaxSandboxMemoryMb    sql.NullInt64
+	MaxSandboxDiskGb      sql.NullInt64
+	IdleStopMinutes       sql.NullInt64
+	DestroyIfIdleFor      sql.NullString
+	MaxAge                sql.NullString
+	FirecrackerVmSlots    sql.NullInt64
 }
 
 type ClusterSample struct {
@@ -165,6 +173,8 @@ type Node struct {
 	SettingsDnsProfileID     sql.NullString
 	SettingsDnsVersion       sql.NullInt64
 	SettingsArchiveRetention sql.NullString
+	SettingsPolicyRuntime    sql.NullString
+	SettingsAdvanced         sql.NullString
 }
 
 type NodeSample struct {

@@ -268,20 +268,59 @@ func installerCommand(env machine.Env, path string, args []string, secrets ...st
 	}
 }
 
+// machineNodeFiles is the one place a cluster's node settings become the
+// files Lewbox writes: the policy's runtime, snapshot push when there is
+// storage, and the advanced settings.
+func machineNodeFiles(settings service.NodeSettings, mode string) machine.NodeFiles {
+	files := machine.NodeFiles{
+		Runtime:  settings.Runtime,
+		Advanced: machineAdvanced(settings.AdvancedSettings),
+	}
+	if settings.Storage != nil && mode != machine.ModeLocal {
+		files.PushEnv = machine.PushEnv(settings.ClusterID)
+	}
+	return files
+}
+
+// defaultNodeFiles is what a node applies before its cluster is registered, or
+// when this install is in no cluster: Lewbox's defaults and this install's
+// runtime.
+func defaultNodeFiles(runtime string) machine.NodeFiles {
+	return machine.NodeFiles{
+		Runtime:  runtime,
+		Advanced: machineAdvanced(service.DefaultAdvancedSettings()),
+	}
+}
+
+// machineAdvanced copies a cluster's advanced settings into the machine
+// package, which must not import service.
+func machineAdvanced(a service.AdvancedSettings) machine.AdvancedSettings {
+	return machine.AdvancedSettings{
+		DockerTimeout:      a.DockerTimeout,
+		MaxSandboxCPU:      a.MaxSandboxCPU,
+		MaxSandboxMemoryMB: a.MaxSandboxMemoryMB,
+		MaxSandboxDiskGB:   a.MaxSandboxDiskGB,
+		IdleStopMinutes:    a.IdleStopMinutes,
+		DestroyIfIdleFor:   a.DestroyIfIdleFor,
+		MaxAge:             a.MaxAge,
+		FirecrackerVMSlots: a.FirecrackerVMSlots,
+	}
+}
+
 // applySettings writes Lewbox's files on this node and waits for health. It
-// reports whether the env file or the drop-in changed.
-func (a *app) applySettings(ctx context.Context, runner machine.Runner, envContent string) (bool, error) {
+// reports whether the create policy, env file or drop-in changed.
+func (a *app) applySettings(ctx context.Context, runner machine.Runner, files machine.NodeFiles) (bool, error) {
 	a.say("Lewbox settings")
 	changed, err := machine.ApplySettings(ctx, runner, a.host().localAPIURL, a.host().sleep, func(cmd machine.Cmd) {
 		a.say("  → %s", cmd.Display())
-	}, envContent)
+	}, files)
 	if err != nil {
 		return changed, err
 	}
 	if changed {
-		a.say("  ✓ wrote %s and %s, restarted sandboxd", machine.EnvironmentFile, machine.DropInFile)
+		a.say("  ✓ wrote %s, %s and %s, restarted sandboxd", machine.CreatePolicyFile, machine.EnvironmentFile, machine.DropInFile)
 	} else {
-		a.say("  ✓ %s and %s already in place", machine.EnvironmentFile, machine.DropInFile)
+		a.say("  ✓ %s, %s and %s already in place", machine.CreatePolicyFile, machine.EnvironmentFile, machine.DropInFile)
 	}
 	a.say("  ✓ sandboxd healthy at %s/health", a.host().localAPIURL)
 	return changed, nil

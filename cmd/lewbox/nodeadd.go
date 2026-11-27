@@ -26,12 +26,56 @@ type nodeAddOptions struct {
 	stopPolicy     string
 	retention      string
 	snapshotName   string
+	// Advanced settings for a new cluster.
+	dockerTimeout      string
+	destroyIfIdleFor   string
+	maxAge             string
+	maxSandboxCPU      float64
+	maxSandboxMemoryMB int64
+	maxSandboxDiskGB   int64
+	idleStopMinutes    int64
+	firecrackerVMSlots int64
+	// advancedChanged names the advanced flags the caller actually set, so
+	// an explicit zero is still refused with --cluster or --url.
+	advancedChanged map[string]bool
 }
 
 // newClusterOnly reports whether any option that only applies to a new
 // cluster was set.
 func (o *nodeAddOptions) newClusterOnly() bool {
-	return o.storageProfile != "" || o.stopPolicy != "" || o.retention != "" || o.snapshotName != ""
+	return o.storageProfile != "" || o.stopPolicy != "" || o.retention != "" || o.snapshotName != "" ||
+		len(o.advancedChanged) > 0
+}
+
+// advancedSettings is the requested advanced tuning, with only the flags that
+// were set. The service normalizes and validates it before files are written.
+func (o *nodeAddOptions) advancedSettings() service.AdvancedSettings {
+	settings := service.AdvancedSettings{
+		DockerTimeout:    o.dockerTimeout,
+		DestroyIfIdleFor: o.destroyIfIdleFor,
+		MaxAge:           o.maxAge,
+	}
+	if o.advancedChanged["max-sandbox-cpu"] {
+		value := o.maxSandboxCPU
+		settings.MaxSandboxCPU = &value
+	}
+	if o.advancedChanged["max-sandbox-memory-mb"] {
+		value := o.maxSandboxMemoryMB
+		settings.MaxSandboxMemoryMB = &value
+	}
+	if o.advancedChanged["max-sandbox-disk-gb"] {
+		value := o.maxSandboxDiskGB
+		settings.MaxSandboxDiskGB = &value
+	}
+	if o.advancedChanged["idle-stop-minutes"] {
+		value := o.idleStopMinutes
+		settings.IdleStopMinutes = &value
+	}
+	if o.advancedChanged["firecracker-vm-slots"] {
+		value := o.firecrackerVMSlots
+		settings.FirecrackerVMSlots = &value
+	}
+	return settings
 }
 
 // newAddNodeCmd registers a node by URL, or starts or joins a cluster on this
@@ -50,13 +94,31 @@ func newAddNodeCmd(a *app) *cobra.Command {
 			"  lewbox node add eu-west-1 --url https://eu-west-1.internal:8443",
 		Args: usageArgs(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.advancedChanged = map[string]bool{}
+			for _, name := range []string{
+				"max-sandbox-cpu", "max-sandbox-memory-mb", "max-sandbox-disk-gb",
+				"idle-stop-minutes", "firecracker-vm-slots",
+			} {
+				if cmd.Flags().Changed(name) {
+					o.advancedChanged[name] = true
+				}
+			}
+			if o.dockerTimeout != "" {
+				o.advancedChanged["docker-timeout"] = true
+			}
+			if o.destroyIfIdleFor != "" {
+				o.advancedChanged["destroy-if-idle-for"] = true
+			}
+			if o.maxAge != "" {
+				o.advancedChanged["max-age"] = true
+			}
 			if o.url != "" {
 				if len(args) != 1 {
 					return usagef("node add <name> --url <url>")
 				}
 				if o.cluster != "" || o.newCluster != "" || o.advertise != "" || o.adminURL != "" || o.endpointURL != "" ||
 					o.newClusterOnly() {
-					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url, --endpoint-url, --storage-profile, --stop-policy, --archive-local-retention or --archive-snapshot-name")
+					return usagef("--url cannot be combined with --cluster, --new-cluster, --advertise, --admin-url, --endpoint-url, --storage-profile, --stop-policy, --archive-local-retention, --archive-snapshot-name or an advanced setting")
 				}
 				return a.call(func(ctx context.Context, b backend.Backend, args []string) (any, error) {
 					return b.AddNode(ctx, service.AddNodeRequest{Name: args[0], URL: o.url})
@@ -76,6 +138,14 @@ func newAddNodeCmd(a *app) *cobra.Command {
 	cmd.Flags().StringVar(&o.stopPolicy, "stop-policy", "", "what happens to a stopped sandbox in a new cluster: keep or archive")
 	cmd.Flags().StringVar(&o.retention, "archive-local-retention", "", "how long a new cluster's nodes keep local copies of archived sandboxes: instant, 1h, 1d, 7d or never")
 	cmd.Flags().StringVar(&o.snapshotName, "archive-snapshot-name", "", "how a new cluster names archive snapshots: id or name")
+	cmd.Flags().StringVar(&o.dockerTimeout, "docker-timeout", "", "a new cluster's sandboxd HTTP client timeout, from 1m to 2h (default 15m)")
+	cmd.Flags().Float64Var(&o.maxSandboxCPU, "max-sandbox-cpu", 0, "the most CPUs one sandbox may have in a new cluster (default: no cap)")
+	cmd.Flags().Int64Var(&o.maxSandboxMemoryMB, "max-sandbox-memory-mb", 0, "the most memory one sandbox may have in a new cluster, in MB (default: no cap)")
+	cmd.Flags().Int64Var(&o.maxSandboxDiskGB, "max-sandbox-disk-gb", 0, "the most disk one sandbox may have in a new cluster, in GB (default: no cap)")
+	cmd.Flags().Int64Var(&o.idleStopMinutes, "idle-stop-minutes", 0, "stop a sandbox idle this many minutes in a new cluster (default: off)")
+	cmd.Flags().StringVar(&o.destroyIfIdleFor, "destroy-if-idle-for", "", "delete a sandbox idle this long in a new cluster, at most 720h (default: off)")
+	cmd.Flags().StringVar(&o.maxAge, "max-age", "", "delete a sandbox this old in a new cluster, at most 720h (default: off)")
+	cmd.Flags().Int64Var(&o.firecrackerVMSlots, "firecracker-vm-slots", 0, "a new Firecracker cluster's TAP pool size, 256-1024 (default 256)")
 	return cmd
 }
 
@@ -87,7 +157,7 @@ func (a *app) runNodeAdd(ctx context.Context, args []string, o *nodeAddOptions) 
 		return usagef("--cluster and --new-cluster cannot be used together")
 	}
 	if o.cluster != "" && o.newClusterOnly() {
-		return usagef("--storage-profile, --stop-policy, --archive-local-retention and --archive-snapshot-name only apply to a new cluster: change them with lewbox cluster set")
+		return usagef("--storage-profile, --stop-policy, --archive-local-retention, --archive-snapshot-name and the advanced settings only apply to a new cluster: change them with lewbox cluster set")
 	}
 	state, err := a.loadState()
 	if err != nil {
@@ -145,7 +215,28 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		a.say("Local mode: registering this machine as a one-node cluster")
 	}
 
-	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
+	// Validate the requested advanced settings before writing files: AddCluster
+	// runs its checks only after this node is configured, so an invalid value
+	// must not reach the policy or env file.
+	requested, err := service.NormalizeAdvanced(o.advancedSettings(), state.Runtime)
+	if err != nil {
+		return err
+	}
+	files := machine.NodeFiles{Runtime: state.Runtime, Advanced: machineAdvanced(requested)}
+	// The cluster record, when it exists, names the runtime its create policy
+	// allows and its advanced settings; before the first registration only
+	// this install knows them. Never write defaults over a registered
+	// cluster's settings, and fail closed when the orchestrator can't answer.
+	if _, err := b.GetCluster(ctx, slug); err == nil {
+		settings, err := b.ClusterNodeSettings(ctx, slug)
+		if err != nil {
+			return err
+		}
+		files = machineNodeFiles(settings, state.Mode)
+	} else if !isNotFound(err) {
+		return err
+	}
+	if _, err := a.applySettings(ctx, a.host().runner, files); err != nil {
 		return err
 	}
 	if _, err := b.GetCluster(ctx, slug); err == nil {
@@ -204,6 +295,14 @@ func (a *app) startCluster(ctx context.Context, b backend.Backend, state machine
 		StopPolicy:            o.stopPolicy,
 		ArchiveLocalRetention: o.retention,
 		ArchiveSnapshotName:   o.snapshotName,
+		DockerTimeout:         requested.DockerTimeout,
+		MaxSandboxCPU:         requested.MaxSandboxCPU,
+		MaxSandboxMemoryMB:    requested.MaxSandboxMemoryMB,
+		MaxSandboxDiskGB:      requested.MaxSandboxDiskGB,
+		IdleStopMinutes:       requested.IdleStopMinutes,
+		DestroyIfIdleFor:      requested.DestroyIfIdleFor,
+		MaxAge:                requested.MaxAge,
+		FirecrackerVMSlots:    requested.FirecrackerVMSlots,
 		AdminToken:            token,
 		AdminIP:               adminIP,
 	})
@@ -301,7 +400,13 @@ func (a *app) joinNode(ctx context.Context, b backend.Backend, state machine.Sta
 	if err := a.runInstaller(ctx, a.host().runner, run, false); err != nil {
 		return err
 	}
-	if _, err := a.applySettings(ctx, a.host().runner, machine.EnvFileContent); err != nil {
+	// The cluster's settings decide the runtime, size caps, timers and push
+	// lines, so a join does not drop snapshot push.
+	settings, err := b.ClusterNodeSettings(ctx, resolved.Slug)
+	if err != nil {
+		return err
+	}
+	if _, err := a.applySettings(ctx, a.host().runner, machineNodeFiles(settings, state.Mode)); err != nil {
 		return err
 	}
 
@@ -341,6 +446,13 @@ func (a *app) waitForMember(ctx context.Context, b backend.Backend, slug, name s
 		}
 		a.host().sleep(ctx, 3*time.Second)
 	}
+}
+
+// isNotFound reports a service 404, such as a cluster that is not registered
+// yet.
+func isNotFound(err error) bool {
+	se, ok := errors.AsType[*service.Error](err)
+	return ok && se.Code == service.CodeNotFound
 }
 
 // findNode looks up nodes by name in order.

@@ -87,6 +87,7 @@ func addTestCluster(t *testing.T, s *Service, fake *aerolvmtest.Server, slug str
 	if err != nil {
 		t.Fatalf("AddCluster(%s): %v", slug, err)
 	}
+	reportPolicy(t, s, detail.ID, detail.Runtime)
 	return detail
 }
 

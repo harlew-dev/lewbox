@@ -40,6 +40,7 @@ New here? Start with the **[Quickstart](getting-started/quickstart.md)**: one ma
 | [Start a cluster](clusters/start-a-cluster.md) | Turn a machine into a cluster's first node |
 | [Add nodes](clusters/add-nodes.md) | Join more machines, one command each |
 | [Register an existing cluster](clusters/register-an-existing-cluster.md) | Manage a cluster you set up without Lewbox |
+| [Advanced AerolVM settings](clusters/advanced-settings.md) | Timeouts, sandbox size caps, lifecycle timers and the Firecracker pool |
 | [Health and checks](clusters/health-and-checks.md) | What Lewbox checks, statuses, and fixes |
 | [DNS profiles](clusters/dns-profiles.md) | Save and test a Cloudflare token for a cluster in domain mode |
 | [Storage profiles](clusters/storage-profiles.md) | Save and test an S3-compatible bucket for archiving stopped sandboxes |
